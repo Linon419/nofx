@@ -19,6 +19,7 @@ This document describes the complete data flow of the NOFX strategy module, incl
    ├─ Static (Static list)
    ├─ AI500 Pool (AI rating pool)
    ├─ OI Top (Position growth ranking)
+   ├─ OTC Top (OTC index ranking)
    └─ Mixed (Mixed mode)
         ↓
 2. Data Assembly (buildTradingContext)
@@ -136,7 +137,27 @@ func (e *StrategyEngine) getOITopCoins() []CandidateCoin {
 - **Usage:** Get coins with fastest OI growth
 - **Tag:** `["oi_top"]`
 
-### 1.4 Mixed Mode
+### 1.4 OTC Top Coins (OTC Index Ranking)
+
+```go
+// decision/engine.go:501-520
+func (e *StrategyEngine) getOTCTopCoins() ([]CandidateCoin, error) {
+    symbols, err := e.provider.GetOTCTopSymbols()
+    // ...
+    for _, symbol := range symbols {
+        result = append(result, CandidateCoin{
+            Symbol:  symbol,
+            Sources: []string{"otc_top"},
+        })
+    }
+}
+```
+
+- **API:** `config.CoinSource.OTCTopAPIURL`
+- **Usage:** Get coins with highest OTC index
+- **Tag:** `["otc_top"]`
+
+### 1.5 Mixed Mode
 
 ```go
 // decision/engine.go:411-449
@@ -147,6 +168,9 @@ if config.CoinSource.SourceType == "mixed" {
     if config.CoinSource.UseOITop {
         // Add OI Top coins
     }
+    if config.CoinSource.UseOTCTop {
+        // Add OTC Top coins
+    }
     if len(config.CoinSource.StaticCoins) > 0 {
         // Add static coins
     }
@@ -155,7 +179,7 @@ if config.CoinSource.SourceType == "mixed" {
 ```
 
 - **Feature:** Use multiple data sources simultaneously
-- **Tag Example:** `["ai500", "oi_top"]` (dual signal coin)
+- **Tag Example:** `["ai500", "oi_top", "otc_top"]` (multi-signal coin)
 
 ---
 
@@ -664,7 +688,7 @@ at.store.Decision().LogDecision(record)
 | **Decision Valid** | `decision/engine.go:1480-1602` | `validateDecisions()` |
 | **Risk Enforce** | `trader/auto_trader.go:1769-1851` | `enforceMaxPositions()`, `enforcePositionValueRatio()` |
 | **Strategy Config** | `store/strategy.go` | `StrategyConfig`, `RiskControlConfig` |
-| **Data Provider** | `provider/data_provider.go` | `GetAI500Data()`, `GetOITopPositions()` |
+| **Data Provider** | `provider/data_provider.go` | `GetAI500Data()`, `GetOITopPositions()`, `GetOTCTopSymbols()` |
 
 ---
 
@@ -677,13 +701,15 @@ at.store.Decision().LogDecision(record)
 type StrategyConfig struct {
     // Coin Source
     CoinSource struct {
-        SourceType     string   // "static", "coinpool", "oi_top", "mixed"
+        SourceType     string   // "static", "coinpool", "oi_top", "otc_top", "mixed"
         StaticCoins    []string // Static coin list
         UseCoinPool    bool     // Use AI500
         UseOITop       bool     // Use OI ranking
+        UseOTCTop      bool     // Use OTC Top
         CoinPoolLimit  int      // AI500 fetch limit
         CoinPoolAPIURL string   // AI500 API URL
         OITopAPIURL    string   // OI ranking API URL
+        OTCTopAPIURL   string   // OTC Top API URL
     }
 
     // Technical Indicators

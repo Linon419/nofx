@@ -53,7 +53,7 @@ type PromptSectionsConfig struct {
 
 // CoinSourceConfig coin source configuration
 type CoinSourceConfig struct {
-	// source type: "static" | "coinpool" | "oi_top" | "mixed"
+	// source type: "static" | "coinpool" | "oi_top" | "otc_top" | "mixed"
 	SourceType string `json:"source_type"`
 	// static coin list (used when source_type = "static")
 	StaticCoins []string `json:"static_coins,omitempty"`
@@ -69,6 +69,10 @@ type CoinSourceConfig struct {
 	OITopLimit int `json:"oi_top_limit,omitempty"`
 	// OI Top API URL (strategy-level configuration)
 	OITopAPIURL string `json:"oi_top_api_url,omitempty"`
+	// whether to use OTC Top
+	UseOTCTop bool `json:"use_otc_top"`
+	// OTC Top API URL (strategy-level configuration)
+	OTCTopAPIURL string `json:"otc_top_api_url,omitempty"`
 }
 
 // IndicatorConfig indicator configuration
@@ -233,6 +237,8 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			UseOITop:       false,
 			OITopLimit:     20,
 			OITopAPIURL:    "http://nofxaios.com:30006/api/oi/top-ranking?limit=20&duration=1h&auth=cm_568c67eae410d912c54c",
+			UseOTCTop:      false,
+			OTCTopAPIURL:   "",
 		},
 		Indicators: IndicatorConfig{
 			Klines: KlineConfig{

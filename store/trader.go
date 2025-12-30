@@ -35,6 +35,7 @@ type Trader struct {
 	TradingSymbols       string `json:"trading_symbols,omitempty"`
 	UseCoinPool          bool   `json:"use_coin_pool,omitempty"`
 	UseOITop             bool   `json:"use_oi_top,omitempty"`
+	UseOTCTop            bool   `json:"use_otc_top,omitempty"`
 	CustomPrompt         string `json:"custom_prompt,omitempty"`
 	OverrideBasePrompt   bool   `json:"override_base_prompt,omitempty"`
 	SystemPromptTemplate string `json:"system_prompt_template,omitempty"`
@@ -64,6 +65,7 @@ func (s *TraderStore) initTables() error {
 			trading_symbols TEXT DEFAULT '',
 			use_coin_pool BOOLEAN DEFAULT 0,
 			use_oi_top BOOLEAN DEFAULT 0,
+			use_otc_top BOOLEAN DEFAULT 0,
 			custom_prompt TEXT DEFAULT '',
 			override_base_prompt BOOLEAN DEFAULT 0,
 			system_prompt_template TEXT DEFAULT 'default',
@@ -98,6 +100,7 @@ func (s *TraderStore) initTables() error {
 		`ALTER TABLE traders ADD COLUMN trading_symbols TEXT DEFAULT ''`,
 		`ALTER TABLE traders ADD COLUMN use_coin_pool BOOLEAN DEFAULT 0`,
 		`ALTER TABLE traders ADD COLUMN use_oi_top BOOLEAN DEFAULT 0`,
+		`ALTER TABLE traders ADD COLUMN use_otc_top BOOLEAN DEFAULT 0`,
 		`ALTER TABLE traders ADD COLUMN system_prompt_template TEXT DEFAULT 'default'`,
 		`ALTER TABLE traders ADD COLUMN strategy_id TEXT DEFAULT ''`,
 		`ALTER TABLE traders ADD COLUMN show_in_competition BOOLEAN DEFAULT 1`,
@@ -147,6 +150,7 @@ func (s *TraderStore) migrateTradersRemoveFK() error {
 			trading_symbols TEXT DEFAULT '',
 			use_coin_pool BOOLEAN DEFAULT 0,
 			use_oi_top BOOLEAN DEFAULT 0,
+			use_otc_top BOOLEAN DEFAULT 0,
 			custom_prompt TEXT DEFAULT '',
 			override_base_prompt BOOLEAN DEFAULT 0,
 			system_prompt_template TEXT DEFAULT 'default',
@@ -160,7 +164,7 @@ func (s *TraderStore) migrateTradersRemoveFK() error {
 		INSERT OR IGNORE INTO traders_new
 		SELECT id, user_id, name, ai_model_id, exchange_id, initial_balance,
 		       scan_interval_minutes, is_running, btc_eth_leverage, altcoin_leverage,
-		       trading_symbols, use_coin_pool, use_oi_top, custom_prompt,
+		       trading_symbols, use_coin_pool, use_oi_top, use_otc_top, custom_prompt,
 		       override_base_prompt, system_prompt_template, is_cross_margin,
 		       COALESCE(strategy_id, ''), created_at, updated_at
 		FROM traders;
@@ -201,12 +205,12 @@ func (s *TraderStore) Create(trader *Trader) error {
 		INSERT INTO traders (id, user_id, name, ai_model_id, exchange_id, strategy_id, initial_balance,
 		                     scan_interval_minutes, is_running, is_cross_margin, show_in_competition,
 		                     btc_eth_leverage, altcoin_leverage, trading_symbols, use_coin_pool,
-		                     use_oi_top, custom_prompt, override_base_prompt, system_prompt_template)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		                     use_oi_top, use_otc_top, custom_prompt, override_base_prompt, system_prompt_template)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, trader.ID, trader.UserID, trader.Name, trader.AIModelID, trader.ExchangeID, trader.StrategyID,
 		trader.InitialBalance, trader.ScanIntervalMinutes, trader.IsRunning, trader.IsCrossMargin, trader.ShowInCompetition,
 		trader.BTCETHLeverage, trader.AltcoinLeverage, trader.TradingSymbols, trader.UseCoinPool,
-		trader.UseOITop, trader.CustomPrompt, trader.OverrideBasePrompt, trader.SystemPromptTemplate)
+		trader.UseOITop, trader.UseOTCTop, trader.CustomPrompt, trader.OverrideBasePrompt, trader.SystemPromptTemplate)
 	return err
 }
 
@@ -217,7 +221,7 @@ func (s *TraderStore) List(userID string) ([]*Trader, error) {
 		       initial_balance, scan_interval_minutes, is_running, COALESCE(is_cross_margin, 1),
 		       COALESCE(show_in_competition, 1),
 		       COALESCE(btc_eth_leverage, 5), COALESCE(altcoin_leverage, 5), COALESCE(trading_symbols, ''),
-		       COALESCE(use_coin_pool, 0), COALESCE(use_oi_top, 0), COALESCE(custom_prompt, ''),
+		       COALESCE(use_coin_pool, 0), COALESCE(use_oi_top, 0), COALESCE(use_otc_top, 0), COALESCE(custom_prompt, ''),
 		       COALESCE(override_base_prompt, 0), COALESCE(system_prompt_template, 'default'),
 		       created_at, updated_at
 		FROM traders WHERE user_id = ? ORDER BY created_at DESC
@@ -236,7 +240,7 @@ func (s *TraderStore) List(userID string) ([]*Trader, error) {
 			&t.InitialBalance, &t.ScanIntervalMinutes, &t.IsRunning, &t.IsCrossMargin,
 			&t.ShowInCompetition,
 			&t.BTCETHLeverage, &t.AltcoinLeverage, &t.TradingSymbols,
-			&t.UseCoinPool, &t.UseOITop, &t.CustomPrompt, &t.OverrideBasePrompt,
+			&t.UseCoinPool, &t.UseOITop, &t.UseOTCTop, &t.CustomPrompt, &t.OverrideBasePrompt,
 			&t.SystemPromptTemplate, &createdAt, &updatedAt,
 		)
 		if err != nil {
@@ -322,7 +326,7 @@ func (s *TraderStore) GetFullConfig(userID, traderID string) (*TraderFullConfig,
 			t.id, t.user_id, t.name, t.ai_model_id, t.exchange_id, COALESCE(t.strategy_id, ''),
 			t.initial_balance, t.scan_interval_minutes, t.is_running, COALESCE(t.is_cross_margin, 1),
 			COALESCE(t.btc_eth_leverage, 5), COALESCE(t.altcoin_leverage, 5), COALESCE(t.trading_symbols, ''),
-			COALESCE(t.use_coin_pool, 0), COALESCE(t.use_oi_top, 0), COALESCE(t.custom_prompt, ''),
+			COALESCE(t.use_coin_pool, 0), COALESCE(t.use_oi_top, 0), COALESCE(t.use_otc_top, 0), COALESCE(t.custom_prompt, ''),
 			COALESCE(t.override_base_prompt, 0), COALESCE(t.system_prompt_template, 'default'),
 			t.created_at, t.updated_at,
 			a.id, a.user_id, a.name, a.provider, a.enabled, a.api_key,
@@ -340,7 +344,7 @@ func (s *TraderStore) GetFullConfig(userID, traderID string) (*TraderFullConfig,
 		&trader.ID, &trader.UserID, &trader.Name, &trader.AIModelID, &trader.ExchangeID, &trader.StrategyID,
 		&trader.InitialBalance, &trader.ScanIntervalMinutes, &trader.IsRunning, &trader.IsCrossMargin,
 		&trader.BTCETHLeverage, &trader.AltcoinLeverage, &trader.TradingSymbols,
-		&trader.UseCoinPool, &trader.UseOITop, &trader.CustomPrompt, &trader.OverrideBasePrompt,
+		&trader.UseCoinPool, &trader.UseOITop, &trader.UseOTCTop, &trader.CustomPrompt, &trader.OverrideBasePrompt,
 		&trader.SystemPromptTemplate, &traderCreatedAt, &traderUpdatedAt,
 		&aiModel.ID, &aiModel.UserID, &aiModel.Name, &aiModel.Provider, &aiModel.Enabled, &aiModel.APIKey,
 		&aiModel.CustomAPIURL, &aiModel.CustomModelName, &aiModelCreatedAt, &aiModelUpdatedAt,
@@ -452,7 +456,7 @@ func (s *TraderStore) GetByID(traderID string) (*Trader, error) {
 		SELECT id, user_id, name, ai_model_id, exchange_id, COALESCE(strategy_id, ''),
 		       initial_balance, scan_interval_minutes, is_running, COALESCE(is_cross_margin, 1),
 		       COALESCE(btc_eth_leverage, 5), COALESCE(altcoin_leverage, 5), COALESCE(trading_symbols, ''),
-		       COALESCE(use_coin_pool, 0), COALESCE(use_oi_top, 0), COALESCE(custom_prompt, ''),
+		       COALESCE(use_coin_pool, 0), COALESCE(use_oi_top, 0), COALESCE(use_otc_top, 0), COALESCE(custom_prompt, ''),
 		       COALESCE(override_base_prompt, 0), COALESCE(system_prompt_template, 'default'),
 		       created_at, updated_at
 		FROM traders WHERE id = ?
@@ -460,7 +464,7 @@ func (s *TraderStore) GetByID(traderID string) (*Trader, error) {
 		&t.ID, &t.UserID, &t.Name, &t.AIModelID, &t.ExchangeID, &t.StrategyID,
 		&t.InitialBalance, &t.ScanIntervalMinutes, &t.IsRunning, &t.IsCrossMargin,
 		&t.BTCETHLeverage, &t.AltcoinLeverage, &t.TradingSymbols,
-		&t.UseCoinPool, &t.UseOITop, &t.CustomPrompt, &t.OverrideBasePrompt,
+		&t.UseCoinPool, &t.UseOITop, &t.UseOTCTop, &t.CustomPrompt, &t.OverrideBasePrompt,
 		&t.SystemPromptTemplate, &createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -477,7 +481,7 @@ func (s *TraderStore) ListAll() ([]*Trader, error) {
 		       initial_balance, scan_interval_minutes, is_running, COALESCE(is_cross_margin, 1),
 		       COALESCE(show_in_competition, 1),
 		       COALESCE(btc_eth_leverage, 5), COALESCE(altcoin_leverage, 5), COALESCE(trading_symbols, ''),
-		       COALESCE(use_coin_pool, 0), COALESCE(use_oi_top, 0), COALESCE(custom_prompt, ''),
+		       COALESCE(use_coin_pool, 0), COALESCE(use_oi_top, 0), COALESCE(use_otc_top, 0), COALESCE(custom_prompt, ''),
 		       COALESCE(override_base_prompt, 0), COALESCE(system_prompt_template, 'default'),
 		       created_at, updated_at
 		FROM traders ORDER BY created_at DESC
@@ -496,7 +500,7 @@ func (s *TraderStore) ListAll() ([]*Trader, error) {
 			&t.InitialBalance, &t.ScanIntervalMinutes, &t.IsRunning, &t.IsCrossMargin,
 			&t.ShowInCompetition,
 			&t.BTCETHLeverage, &t.AltcoinLeverage, &t.TradingSymbols,
-			&t.UseCoinPool, &t.UseOITop, &t.CustomPrompt, &t.OverrideBasePrompt,
+			&t.UseCoinPool, &t.UseOITop, &t.UseOTCTop, &t.CustomPrompt, &t.OverrideBasePrompt,
 			&t.SystemPromptTemplate, &createdAt, &updatedAt,
 		)
 		if err != nil {

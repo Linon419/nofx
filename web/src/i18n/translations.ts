@@ -793,10 +793,10 @@ export const translations = {
     setCustomCoinsInConfig: 'Set custom coin list in trader configuration',
     orConfigureCorrectApiUrl: 'Or configure correct data provider API address',
     orDisableCoinPoolOptions:
-      'Or disable "Use AI500 Data Provider" and "Use OI Top" options',
+      'Or disable "Use AI500 Data Provider", "Use OI Top", and "Use OTC Top" options',
     signalSourceNotConfigured: 'Signal Source Not Configured',
     signalSourceWarningMessage:
-      'You have traders that enabled "Use AI500 Data Provider" or "Use OI Top", but signal source API address is not configured yet. This will cause candidate coins count to be 0, and traders cannot work properly.',
+      'You have traders that enabled "Use AI500 Data Provider", "Use OI Top", or "Use OTC Top", but signal source API address is not configured yet. This will cause candidate coins count to be 0, and traders cannot work properly.',
     configureSignalSourceNow: 'Configure Signal Source Now',
 
     // FAQ Page
@@ -885,7 +885,7 @@ export const translations = {
 
     faqCreateStrategy: 'How do I create a trading strategy?',
     faqCreateStrategyAnswer:
-      'Go to Strategy Studio: 1) Coin Source - select which coins to trade (static list, AI500 pool, or OI Top ranking); 2) Indicators - enable technical indicators (EMA, MACD, RSI, ATR, Volume, OI, Funding Rate); 3) Risk Controls - set leverage limits, max positions, margin usage cap, position size limits; 4) Custom Prompt (optional) - add specific instructions for the AI. Save and assign to a trader.',
+      'Go to Strategy Studio: 1) Coin Source - select which coins to trade (static list, AI500 pool, OI Top ranking, or OTC Top); 2) Indicators - enable technical indicators (EMA, MACD, RSI, ATR, Volume, OI, Funding Rate); 3) Risk Controls - set leverage limits, max positions, margin usage cap, position size limits; 4) Custom Prompt (optional) - add specific instructions for the AI. Save and assign to a trader.',
 
     faqCreateTrader: 'How do I create and start a trader?',
     faqCreateTraderAnswer:
@@ -977,7 +977,7 @@ export const translations = {
     // ===== FEATURES =====
     faqStrategyStudio: 'What is Strategy Studio?',
     faqStrategyStudioAnswer:
-      'Strategy Studio is a visual strategy builder where you configure: 1) Coin Sources - which cryptocurrencies to trade (static list, AI500 top coins, OI ranking); 2) Technical Indicators - EMA, MACD, RSI, ATR, Volume, Open Interest, Funding Rate; 3) Risk Controls - leverage limits, position sizing, margin caps; 4) Custom Prompts - specific instructions for AI. No coding required.',
+      'Strategy Studio is a visual strategy builder where you configure: 1) Coin Sources - which cryptocurrencies to trade (static list, AI500 top coins, OI ranking, OTC Top); 2) Technical Indicators - EMA, MACD, RSI, ATR, Volume, Open Interest, Funding Rate; 3) Risk Controls - leverage limits, position sizing, margin caps; 4) Custom Prompts - specific instructions for AI. No coding required.',
 
     faqBacktestLab: 'What is Backtest Lab?',
     faqBacktestLabAnswer:
@@ -1946,10 +1946,10 @@ export const translations = {
     solutions: '解决方案：',
     setCustomCoinsInConfig: '在交易员配置中设置自定义币种列表',
     orConfigureCorrectApiUrl: '或者配置正确的数据源 API 地址',
-    orDisableCoinPoolOptions: '或者禁用"使用 AI500 数据源"和"使用 OI Top"选项',
+    orDisableCoinPoolOptions: '或者禁用"使用 AI500 数据源"、"使用 OI Top"和"使用 OTC Top"选项',
     signalSourceNotConfigured: '信号源未配置',
     signalSourceWarningMessage:
-      '您有交易员启用了"使用 AI500 数据源"或"使用 OI Top"，但尚未配置信号源 API 地址。这将导致候选币种数量为 0，交易员无法正常工作。',
+      '您有交易员启用了"使用 AI500 数据源"、"使用 OI Top"或"使用 OTC Top"，但尚未配置信号源 API 地址。这将导致候选币种数量为 0，交易员无法正常工作。',
     configureSignalSourceNow: '立即配置信号源',
 
     // FAQ Page
@@ -2038,7 +2038,7 @@ export const translations = {
 
     faqCreateStrategy: '如何创建交易策略？',
     faqCreateStrategyAnswer:
-      '进入策略工作室：1）币种来源 - 选择交易哪些币（静态列表、AI500 池或 OI 排行）；2）指标 - 启用技术指标（EMA、MACD、RSI、ATR、成交量、OI、资金费率）；3）风控 - 设置杠杆限制、最大持仓数、保证金使用上限、仓位大小限制；4）自定义提示词（可选）- 为 AI 添加特定指令。保存后分配给交易员。',
+      '进入策略工作室：1）币种来源 - 选择交易哪些币（静态列表、AI500 池、OI 排行或 OTC Top）；2）指标 - 启用技术指标（EMA、MACD、RSI、ATR、成交量、OI、资金费率）；3）风控 - 设置杠杆限制、最大持仓数、保证金使用上限、仓位大小限制；4）自定义提示词（可选）- 为 AI 添加特定指令。保存后分配给交易员。',
 
     faqCreateTrader: '如何创建并启动交易员？',
     faqCreateTraderAnswer:
@@ -2130,7 +2130,7 @@ export const translations = {
     // ===== 功能介绍 =====
     faqStrategyStudio: '什么是策略工作室？',
     faqStrategyStudioAnswer:
-      '策略工作室是可视化策略构建器，您可以配置：1）币种来源 - 交易哪些加密货币（静态列表、AI500 热门币、OI 排行）；2）技术指标 - EMA、MACD、RSI、ATR、成交量、持仓量、资金费率；3）风控 - 杠杆限制、仓位大小、保证金上限；4）自定义提示词 - AI 的特定指令。无需编程。',
+      '策略工作室是可视化策略构建器，您可以配置：1）币种来源 - 交易哪些加密货币（静态列表、AI500 热门币、OI 排行、OTC Top）；2）技术指标 - EMA、MACD、RSI、ATR、成交量、持仓量、资金费率；3）风控 - 杠杆限制、仓位大小、保证金上限；4）自定义提示词 - AI 的特定指令。无需编程。',
 
     faqBacktestLab: '什么是回测实验室？',
     faqBacktestLabAnswer:

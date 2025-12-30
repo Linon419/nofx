@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"nofx/security"
+	"sort"
 	"strings"
 	"time"
 )
@@ -52,6 +53,111 @@ func SetAI500API(apiURL string) {
 // SetOITopAPI sets OI Top API
 func SetOITopAPI(apiURL string) {
 	oiTopConfig.APIURL = apiURL
+}
+
+// OTCTopConfig OTC Top data provider configuration
+type OTCTopConfig struct {
+	APIURL  string
+	Timeout time.Duration
+}
+
+var otcTopConfig = OTCTopConfig{
+	APIURL:  "",
+	Timeout: 30 * time.Second,
+}
+
+// OTCTopItem OTC Top data item
+type OTCTopItem struct {
+	Symbol   string  `json:"symbol"`
+	OTCIndex float64 `json:"otc_index"`
+}
+
+// OTCTopAPIResponse data structure returned by OTC Top API
+type OTCTopAPIResponse struct {
+	Success bool        `json:"success"`
+	Items   []OTCTopItem `json:"items"`
+}
+
+// SetOTCTopAPI sets OTC Top API
+func SetOTCTopAPI(apiURL string) {
+	otcTopConfig.APIURL = apiURL
+}
+
+// GetOTCTopCoins retrieves OTC Top data (sorted by OTCIndex descending)
+func GetOTCTopCoins() ([]OTCTopItem, error) {
+	if strings.TrimSpace(otcTopConfig.APIURL) == "" {
+		return nil, fmt.Errorf("OTC Top API URL not configured")
+	}
+
+	resp, err := security.SafeGet(otcTopConfig.APIURL, otcTopConfig.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("failed to request OTC Top API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read OTC Top response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("OTC Top API returned error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	items, err := parseOTCTopResponse(body)
+	if err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func parseOTCTopResponse(body []byte) ([]OTCTopItem, error) {
+	var response OTCTopAPIResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("OTC Top JSON parsing failed: %w", err)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("OTC Top API returned failure status")
+	}
+
+	items := make([]OTCTopItem, 0, len(response.Items))
+	for _, item := range response.Items {
+		if strings.TrimSpace(item.Symbol) == "" {
+			continue
+		}
+		items = append(items, item)
+	}
+	if len(items) == 0 {
+		return nil, fmt.Errorf("OTC Top item list is empty")
+	}
+
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].OTCIndex == items[j].OTCIndex {
+			return strings.ToUpper(items[i].Symbol) < strings.ToUpper(items[j].Symbol)
+		}
+		return items[i].OTCIndex > items[j].OTCIndex
+	})
+
+	return items, nil
+}
+
+// GetOTCTopSymbols retrieves OTC Top coin symbol list
+func GetOTCTopSymbols() ([]string, error) {
+	items, err := GetOTCTopCoins()
+	if err != nil {
+		return nil, err
+	}
+
+	symbols := make([]string, 0, len(items))
+	for _, item := range items {
+		symbols = append(symbols, normalizeSymbol(item.Symbol))
+	}
+	if len(symbols) == 0 {
+		return nil, fmt.Errorf("no OTC Top symbols")
+	}
+	return symbols, nil
 }
 
 

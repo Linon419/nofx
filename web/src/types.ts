@@ -101,6 +101,7 @@ export interface TraderInfo {
   custom_prompt?: string
   use_coin_pool?: boolean
   use_oi_top?: boolean
+  use_otc_top?: boolean
   system_prompt_template?: string
 }
 
@@ -174,6 +175,7 @@ export interface CreateTraderRequest {
   system_prompt_template?: string
   use_coin_pool?: boolean
   use_oi_top?: boolean
+  use_otc_top?: boolean
 }
 
 export interface UpdateModelConfigRequest {
@@ -251,6 +253,7 @@ export interface TraderConfigData {
   system_prompt_template?: string
   use_coin_pool?: boolean
   use_oi_top?: boolean
+  use_otc_top?: boolean
 }
 
 // Backtest types
@@ -449,7 +452,7 @@ export interface StrategyConfig {
 }
 
 export interface CoinSourceConfig {
-  source_type: 'static' | 'coinpool' | 'oi_top' | 'mixed';
+  source_type: 'static' | 'coinpool' | 'oi_top' | 'otc_top' | 'mixed';
   static_coins?: string[];
   use_coin_pool: boolean;
   coin_pool_limit?: number;
@@ -457,6 +460,8 @@ export interface CoinSourceConfig {
   use_oi_top: boolean;
   oi_top_limit?: number;
   oi_top_api_url?: string;     // OI Top API URL
+  use_otc_top: boolean;
+  otc_top_api_url?: string;    // OTC Top API URL
 }
 
 export interface IndicatorConfig {

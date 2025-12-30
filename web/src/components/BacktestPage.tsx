@@ -832,17 +832,24 @@ export function BacktestPage() {
     if (!coinSource) return false
 
     // Check explicit source_type
-    if (coinSource.source_type === 'coinpool' || coinSource.source_type === 'oi_top') {
+    if (
+      coinSource.source_type === 'coinpool' ||
+      coinSource.source_type === 'oi_top' ||
+      coinSource.source_type === 'otc_top'
+    ) {
       return true
     }
-    if (coinSource.source_type === 'mixed' && (coinSource.use_coin_pool || coinSource.use_oi_top)) {
+    if (
+      coinSource.source_type === 'mixed' &&
+      (coinSource.use_coin_pool || coinSource.use_oi_top || coinSource.use_otc_top)
+    ) {
       return true
     }
 
     // Also check flags for backward compatibility (when source_type is empty or not set)
     const srcType = coinSource.source_type as string
     if (!srcType) {
-      if (coinSource.use_coin_pool || coinSource.use_oi_top) {
+      if (coinSource.use_coin_pool || coinSource.use_oi_top || coinSource.use_otc_top) {
         return true
       }
     }
@@ -858,12 +865,18 @@ export function BacktestPage() {
     // Infer source_type from flags if empty (backward compatibility)
     let sourceType = cs.source_type as string
     if (!sourceType) {
-      if (cs.use_coin_pool && cs.use_oi_top) {
+      const mixed =
+        (cs.use_coin_pool && cs.use_oi_top) ||
+        (cs.use_coin_pool && cs.use_otc_top) ||
+        (cs.use_oi_top && cs.use_otc_top)
+      if (mixed) {
         sourceType = 'mixed'
       } else if (cs.use_coin_pool) {
         sourceType = 'coinpool'
       } else if (cs.use_oi_top) {
         sourceType = 'oi_top'
+      } else if (cs.use_otc_top) {
+        sourceType = 'otc_top'
       } else if (cs.static_coins?.length) {
         sourceType = 'static'
       }
@@ -874,10 +887,13 @@ export function BacktestPage() {
         return { type: 'AI500', limit: cs.coin_pool_limit || 30 }
       case 'oi_top':
         return { type: 'OI Top', limit: cs.oi_top_limit || 30 }
+      case 'otc_top':
+        return { type: 'OTC Top' }
       case 'mixed':
         const sources = []
         if (cs.use_coin_pool) sources.push(`AI500(${cs.coin_pool_limit || 30})`)
         if (cs.use_oi_top) sources.push(`OI Top(${cs.oi_top_limit || 30})`)
+        if (cs.use_otc_top) sources.push('OTC Top')
         if (cs.static_coins?.length) sources.push(`Static(${cs.static_coins.length})`)
         return { type: 'Mixed', desc: sources.join(' + ') }
       case 'static':

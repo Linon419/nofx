@@ -69,7 +69,7 @@ type AccountInfo struct {
 // CandidateCoin candidate coin (from coin pool)
 type CandidateCoin struct {
 	Symbol  string   `json:"symbol"`
-	Sources []string `json:"sources"` // Sources: "ai500" and/or "oi_top"
+	Sources []string `json:"sources"` // Sources: "ai500", "oi_top", "otc_top", "static"
 }
 
 // OITopData open interest growth top data (for AI decision reference)
@@ -392,6 +392,9 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 	if coinSource.OITopAPIURL != "" {
 		provider.SetOITopAPI(coinSource.OITopAPIURL)
 	}
+	if coinSource.OTCTopAPIURL != "" {
+		provider.SetOTCTopAPI(coinSource.OTCTopAPIURL)
+	}
 
 	switch coinSource.SourceType {
 	case "static":
@@ -434,6 +437,21 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 		}
 		return e.getOITopCoins(coinSource.OITopLimit)
 
+	case "otc_top":
+		// Fallback to static coins when use_otc_top is false.
+		if !coinSource.UseOTCTop {
+			logger.Infof("âš ï¸  source_type is 'otc_top' but use_otc_top is false, falling back to static coins")
+			for _, symbol := range coinSource.StaticCoins {
+				symbol = market.Normalize(symbol)
+				candidates = append(candidates, CandidateCoin{
+					Symbol:  symbol,
+					Sources: []string{"static"},
+				})
+			}
+			return candidates, nil
+		}
+		return e.getOTCTopCoins()
+
 	case "mixed":
 		if coinSource.UseCoinPool {
 			poolCoins, err := e.getCoinPoolCoins(coinSource.CoinPoolLimit)
@@ -453,6 +471,17 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 			} else {
 				for _, coin := range oiCoins {
 					symbolSources[coin.Symbol] = append(symbolSources[coin.Symbol], "oi_top")
+				}
+			}
+		}
+
+		if coinSource.UseOTCTop {
+			otcCoins, err := e.getOTCTopCoins()
+			if err != nil {
+				logger.Infof("Failed to get OTC Top: %v", err)
+			} else {
+				for _, coin := range otcCoins {
+					symbolSources[coin.Symbol] = append(symbolSources[coin.Symbol], "otc_top")
 				}
 			}
 		}
@@ -518,6 +547,23 @@ func (e *StrategyEngine) getOITopCoins(limit int) ([]CandidateCoin, error) {
 		candidates = append(candidates, CandidateCoin{
 			Symbol:  symbol,
 			Sources: []string{"oi_top"},
+		})
+	}
+	return candidates, nil
+}
+
+func (e *StrategyEngine) getOTCTopCoins() ([]CandidateCoin, error) {
+	symbols, err := provider.GetOTCTopSymbols()
+	if err != nil {
+		return nil, err
+	}
+
+	var candidates []CandidateCoin
+	for _, symbol := range symbols {
+		symbol = market.Normalize(symbol)
+		candidates = append(candidates, CandidateCoin{
+			Symbol:  symbol,
+			Sources: []string{"otc_top"},
 		})
 	}
 	return candidates, nil
