@@ -381,7 +381,7 @@ minConfidence := config.RiskControl.MinConfidence            // 榛樿: 75
 1. 绯荤粺鐘舵€?         [鏃堕棿, 鍛ㄦ湡鍙? 杩愯鏃堕暱]
 2. BTC甯傚満姒傝      [浠锋牸, 娑ㄨ穼骞? MACD, RSI]
 3. 璐︽埛淇℃伅          [鏉冪泭, 浣欓%, 鐩堜簭%, 淇濊瘉閲?, 鎸佷粨鏁癩
-4. 鏈€杩戞垚浜?         [鏈€杩?0绗斿凡骞充粨浜ゆ槗]
+4. 鏈€杩戞垚浜?         [鏈€杩?3绗斿凡骞充粨浜ゆ槗]
 5. 褰撳墠鎸佷粨          [璇︾粏鎸佷粨鏁版嵁 + 鎶€鏈寚鏍嘳
 6. 鍊欓€夊竵绉?         [瀹屾暣甯傚満鏁版嵁]
 7. 閲忓寲鏁版嵁          [璧勯噾娴佸悜, OI鏁版嵁] (鍙€?
@@ -752,6 +752,7 @@ type StrategyConfig struct {
         TradingFrequency string
         EntryStandards   string
         DecisionProcess  string
+        RecentTradesLimit int // Recent closed trades in User Prompt
     }
 
     // 鑷畾涔夋彁绀鸿瘝

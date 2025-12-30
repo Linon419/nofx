@@ -39,6 +39,7 @@ const defaultSections: PromptSectionsConfig = {
 2. 扫描候选币 + 多时间框 → 是否存在强信号
 3. 评估风险回报比 → 是否满足最小要求
 4. 先写思维链，再输出结构化JSON`,
+  recent_trades_limit: 3,
 }
 
 export function PromptSectionsEditor({
@@ -66,6 +67,8 @@ export function PromptSectionsEditor({
       entryStandardsDesc: { zh: '定义开仓信号条件和避免事项', en: 'Define entry signal conditions and avoidances' },
       decisionProcess: { zh: '决策流程', en: 'Decision Process' },
       decisionProcessDesc: { zh: '设定决策步骤和思考流程', en: 'Set decision steps and thinking process' },
+      recentTradesLimit: { zh: '??????', en: 'Recent Trades Count' },
+      recentTradesLimitDesc: { zh: '?? User Prompt ?????????????3?', en: 'Number of recent closed trades appended to the User Prompt (default 3).' },
       resetToDefault: { zh: '重置为默认', en: 'Reset to Default' },
       chars: { zh: '字符', en: 'chars' },
     }
@@ -80,6 +83,33 @@ export function PromptSectionsEditor({
   ]
 
   const currentConfig = config || {}
+  const defaultRecentTradesLimit = defaultSections.recent_trades_limit ?? 3
+  const recentTradesLimit = currentConfig.recent_trades_limit ?? defaultRecentTradesLimit
+  const isRecentTradesLimitModified =
+    currentConfig.recent_trades_limit !== undefined &&
+    currentConfig.recent_trades_limit !== defaultRecentTradesLimit
+
+  const updateRecentTradesLimit = (value: string) => {
+    if (disabled) {
+      return
+    }
+    if (value.trim() === '') {
+      onChange({ ...currentConfig, recent_trades_limit: defaultRecentTradesLimit })
+      return
+    }
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed)) {
+      return
+    }
+    const normalized = Math.max(1, Math.floor(parsed))
+    onChange({ ...currentConfig, recent_trades_limit: normalized })
+  }
+
+  const resetRecentTradesLimit = () => {
+    if (!disabled) {
+      onChange({ ...currentConfig, recent_trades_limit: defaultRecentTradesLimit })
+    }
+  }
 
   const updateSection = (key: keyof PromptSectionsConfig, value: string) => {
     if (!disabled) {
@@ -98,7 +128,8 @@ export function PromptSectionsEditor({
   }
 
   const getValue = (key: keyof PromptSectionsConfig): string => {
-    return currentConfig[key] || defaultSections[key] || ''
+    const value = currentConfig[key] ?? defaultSections[key]
+    return typeof value === 'string' ? value : ''
   }
 
   return (
@@ -112,6 +143,43 @@ export function PromptSectionsEditor({
           <p className="text-xs mt-1" style={{ color: '#848E9C' }}>
             {t('promptSectionsDesc')}
           </p>
+        </div>
+      </div>
+
+      <div
+        className="rounded-lg px-3 py-3"
+        style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium" style={{ color: '#EAECEF' }}>
+              {t('recentTradesLimit')}
+            </p>
+            <p className="text-xs mt-1" style={{ color: '#848E9C' }}>
+              {t('recentTradesLimitDesc')}
+            </p>
+          </div>
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={recentTradesLimit}
+            onChange={(e) => updateRecentTradesLimit(e.target.value)}
+            disabled={disabled}
+            className="w-20 px-2 py-1 rounded text-sm text-right"
+            style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+          />
+        </div>
+        <div className="flex justify-end mt-2">
+          <button
+            onClick={resetRecentTradesLimit}
+            disabled={disabled || !isRecentTradesLimitModified}
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors hover:bg-white/5 disabled:opacity-30"
+            style={{ color: '#848E9C' }}
+          >
+            <RotateCcw className="w-3 h-3" />
+            {t('resetToDefault')}
+          </button>
         </div>
       </div>
 

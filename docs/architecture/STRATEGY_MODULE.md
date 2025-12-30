@@ -29,7 +29,7 @@ This document describes the complete data flow of the NOFX strategy module, incl
    ├─ Technical indicators → EMA, MACD, RSI, ATR, Volume
    ├─ On-chain data → OI, Funding Rate
    ├─ Quant data → Capital flow, OI changes (optional)
-   └─ Recent trades → Last 10 closed trades
+   └─ Recent trades → Last N closed trades (default 3)
         ↓
 3. System Prompt (BuildSystemPrompt)
    ├─ Role definition
@@ -381,7 +381,7 @@ minConfidence := config.RiskControl.MinConfidence            // Default: 75
 1. System Status           [Time, cycle number, runtime]
 2. BTC Market Overview     [Price, change%, MACD, RSI]
 3. Account Info            [Equity, balance%, PnL%, margin%, positions]
-4. Recent Trades           [Last 10 closed trades]
+4. Recent Trades           [Last N closed trades (default 3)]
 5. Current Positions       [Detailed position data + indicators]
 6. Candidate Coins         [Full market data]
 7. Quant Data              [Capital flow, OI data] (optional)
@@ -753,6 +753,7 @@ type StrategyConfig struct {
         TradingFrequency string
         EntryStandards   string
         DecisionProcess  string
+        RecentTradesLimit int // Recent closed trades in User Prompt
     }
 
     // Custom Prompt

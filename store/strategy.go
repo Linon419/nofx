@@ -49,6 +49,8 @@ type PromptSectionsConfig struct {
 	EntryStandards string `json:"entry_standards,omitempty"`
 	// decision process
 	DecisionProcess string `json:"decision_process,omitempty"`
+	// recent closed trades to include in User Prompt context
+	RecentTradesLimit int `json:"recent_trades_limit,omitempty"`
 }
 
 // CoinSourceConfig coin source configuration
@@ -329,6 +331,8 @@ Only enter positions when multiple signals resonate. Freely use any effective an
 3. Write chain of thought first, then output structured JSON`,
 		}
 	}
+
+	config.PromptSections.RecentTradesLimit = 3
 
 	return config
 }

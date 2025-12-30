@@ -441,6 +441,7 @@ export interface PromptSectionsConfig {
   trading_frequency?: string;
   entry_standards?: string;
   decision_process?: string;
+  recent_trades_limit?: number;
 }
 
 export interface StrategyConfig {
