@@ -497,6 +497,9 @@ export interface KlineConfig {
   enable_multi_timeframe: boolean;
   // 新增：支持选择多个时间周期
   selected_timeframes?: string[];
+  decision_interval_multiple?: number;
+  decision_offset_seconds?: number;
+  decision_run_immediately?: boolean;
 }
 
 export interface ExternalDataSource {

@@ -319,7 +319,7 @@ BTC as market indicator:
 
 Each coin includes complete technical data:
 - Price sequence (3-minute candles)
-- EMA20 sequence
+- EMA21/EMA55/EMA100/EMA200 sequences
 - MACD sequence
 - RSI7/RSI14 sequences
 - Volume sequence
@@ -331,7 +331,7 @@ Each coin includes complete technical data:
 **Prompt Reference Example**:
 ```
 Analyze price sequences to identify support/resistance levels
-Observe EMA20 trend to determine long/short direction
+Observe EMA21/EMA55/EMA100/EMA200 trends to determine long/short direction
 MACD sequence golden/death cross as signal confirmation
 OI rapid growth + price increase = bullish signal
 ```
@@ -731,7 +731,7 @@ Only enter on strong signals; observe when uncertain.
 
 Complete data available:
 - Raw sequences: 3-min price sequence (MidPrices array) + 4-hour candle sequence
-- Technical sequences: EMA20 sequence, MACD sequence, RSI7 sequence, RSI14 sequence
+- Technical sequences: EMA21/EMA55/EMA100/EMA200 sequences, MACD sequence, RSI7 sequence, RSI14 sequence
 - Capital sequences: Volume sequence, Open Interest (OI) sequence, funding rate
 - Filter markers: AI500 score / OI_Top ranking (if marked)
 

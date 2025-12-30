@@ -57,6 +57,11 @@ export function IndicatorEditor({
       intraday: { zh: '日内', en: 'Intraday' },
       swing: { zh: '波段', en: 'Swing' },
       position: { zh: '趋势', en: 'Position' },
+      decisionSchedule: { zh: '决策调度', en: 'Decision Schedule' },
+      decisionScheduleDesc: { zh: '按最小周期收线对齐', en: 'Aligned to shortest timeframe close' },
+      decisionMultiple: { zh: '决策倍数', en: 'Decision Multiple' },
+      decisionOffset: { zh: '收线偏移（秒）', en: 'Close Offset (sec)' },
+      decisionRunImmediately: { zh: '启动立即执行', en: 'Run Immediately' },
 
       // Data types
       rawKlines: { zh: 'OHLCV 原始 K 线', en: 'Raw OHLCV K-lines' },
@@ -101,6 +106,9 @@ export function IndicatorEditor({
 
   // 获取当前选中的时间周期
   const selectedTimeframes = config.klines.selected_timeframes || [config.klines.primary_timeframe]
+  const decisionMultiple = config.klines.decision_interval_multiple ?? 1
+  const decisionOffset = config.klines.decision_offset_seconds ?? 10
+  const decisionRunImmediately = config.klines.decision_run_immediately ?? false
 
   // 切换时间周期选择
   const toggleTimeframe = (tf: string) => {
@@ -271,6 +279,73 @@ export function IndicatorEditor({
                 )
               })}
             </div>
+            <div className="mt-3 rounded-lg p-3" style={{ background: '#0F1318', border: '1px solid #2B3139' }}>
+              <div className="flex items-center gap-2 mb-2">
+                <Clock className="w-3.5 h-3.5" style={{ color: '#848E9C' }} />
+                <span className="text-xs font-medium" style={{ color: '#EAECEF' }}>{t('decisionSchedule')}</span>
+                <span className="text-[10px]" style={{ color: '#5E6673' }}>- {t('decisionScheduleDesc')}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[10px] mb-1 block" style={{ color: '#848E9C' }}>{t('decisionMultiple')}</label>
+                  <input
+                    type="number"
+                    value={decisionMultiple}
+                    onChange={(e) => {
+                      if (disabled) return
+                      const parsed = Number(e.target.value)
+                      const safeValue = Number.isFinite(parsed) ? Math.max(1, parsed) : 1
+                      onChange({
+                        ...config,
+                        klines: { ...config.klines, decision_interval_multiple: safeValue },
+                      })
+                    }}
+                    disabled={disabled}
+                    min={1}
+                    max={20}
+                    className="w-full px-2 py-1 rounded text-[10px] text-center"
+                    style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] mb-1 block" style={{ color: '#848E9C' }}>{t('decisionOffset')}</label>
+                  <input
+                    type="number"
+                    value={decisionOffset}
+                    onChange={(e) => {
+                      if (disabled) return
+                      const parsed = Number(e.target.value)
+                      const safeValue = Number.isFinite(parsed) ? Math.max(0, parsed) : 0
+                      onChange({
+                        ...config,
+                        klines: { ...config.klines, decision_offset_seconds: safeValue },
+                      })
+                    }}
+                    disabled={disabled}
+                    min={0}
+                    max={300}
+                    className="w-full px-2 py-1 rounded text-[10px] text-center"
+                    style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+                  />
+                </div>
+                <div className="flex flex-col justify-end">
+                  <label className="text-[10px] mb-1 block" style={{ color: '#848E9C' }}>{t('decisionRunImmediately')}</label>
+                  <input
+                    type="checkbox"
+                    checked={decisionRunImmediately}
+                    onChange={(e) =>
+                      !disabled &&
+                      onChange({
+                        ...config,
+                        klines: { ...config.klines, decision_run_immediately: e.target.checked },
+                      })
+                    }
+                    disabled={disabled}
+                    className="w-4 h-4 rounded accent-yellow-500"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -293,7 +368,7 @@ export function IndicatorEditor({
           {/* Indicator Grid */}
           <div className="grid grid-cols-2 gap-2">
             {[
-              { key: 'enable_ema', label: 'ema', desc: 'emaDesc', color: '#F0B90B', periodKey: 'ema_periods', defaultPeriods: '20,50' },
+              { key: 'enable_ema', label: 'ema', desc: 'emaDesc', color: '#F0B90B', periodKey: 'ema_periods', defaultPeriods: '21,55,100,200' },
               { key: 'enable_macd', label: 'macd', desc: 'macdDesc', color: '#a855f7' },
               { key: 'enable_rsi', label: 'rsi', desc: 'rsiDesc', color: '#F6465D', periodKey: 'rsi_periods', defaultPeriods: '7,14' },
               { key: 'enable_atr', label: 'atr', desc: 'atrDesc', color: '#60a5fa', periodKey: 'atr_periods', defaultPeriods: '14' },

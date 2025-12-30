@@ -8,7 +8,10 @@ type Data struct {
 	CurrentPrice      float64
 	PriceChange1h     float64 // 1-hour price change percentage
 	PriceChange4h     float64 // 4-hour price change percentage
-	CurrentEMA20      float64
+	CurrentEMA21      float64
+	CurrentEMA55      float64
+	CurrentEMA100     float64
+	CurrentEMA200     float64
 	CurrentMACD       float64
 	CurrentRSI7       float64
 	OpenInterest      *OIData
@@ -31,16 +34,18 @@ type KlineBar struct {
 
 // TimeframeSeriesData series data for a single timeframe
 type TimeframeSeriesData struct {
-	Timeframe   string     `json:"timeframe"`    // Timeframe identifier, e.g. "5m", "15m", "1h"
-	Klines      []KlineBar `json:"klines"`       // Full OHLCV kline data
-	MidPrices   []float64  `json:"mid_prices"`   // Price series (deprecated, kept for compatibility)
-	EMA20Values []float64  `json:"ema20_values"` // EMA20 series
-	EMA50Values []float64  `json:"ema50_values"` // EMA50 series
-	MACDValues  []float64  `json:"macd_values"`  // MACD series
-	RSI7Values  []float64  `json:"rsi7_values"`  // RSI7 series
-	RSI14Values []float64  `json:"rsi14_values"` // RSI14 series
-	Volume      []float64  `json:"volume"`       // Volume series (deprecated, use Klines)
-	ATR14       float64    `json:"atr14"`        // ATR14
+	Timeframe    string     `json:"timeframe"`     // Timeframe identifier, e.g. "5m", "15m", "1h"
+	Klines       []KlineBar `json:"klines"`        // Full OHLCV kline data
+	MidPrices    []float64  `json:"mid_prices"`    // Price series (deprecated, kept for compatibility)
+	EMA21Values  []float64  `json:"ema21_values"`  // EMA21 series
+	EMA55Values  []float64  `json:"ema55_values"`  // EMA55 series
+	EMA100Values []float64  `json:"ema100_values"` // EMA100 series
+	EMA200Values []float64  `json:"ema200_values"` // EMA200 series
+	MACDValues   []float64  `json:"macd_values"`   // MACD series
+	RSI7Values   []float64  `json:"rsi7_values"`   // RSI7 series
+	RSI14Values  []float64  `json:"rsi14_values"`  // RSI14 series
+	Volume       []float64  `json:"volume"`        // Volume series (deprecated, use Klines)
+	ATR14        float64    `json:"atr14"`         // ATR14
 	// Bollinger Bands (period 20, std dev multiplier 2)
 	BOLLUpper  []float64 `json:"boll_upper"`  // Upper band
 	BOLLMiddle []float64 `json:"boll_middle"` // Middle band (SMA)
@@ -55,19 +60,24 @@ type OIData struct {
 
 // IntradayData intraday data (3-minute interval)
 type IntradayData struct {
-	MidPrices   []float64
-	EMA20Values []float64
-	MACDValues  []float64
-	RSI7Values  []float64
-	RSI14Values []float64
-	Volume      []float64
-	ATR14       float64
+	MidPrices    []float64
+	EMA21Values  []float64
+	EMA55Values  []float64
+	EMA100Values []float64
+	EMA200Values []float64
+	MACDValues   []float64
+	RSI7Values   []float64
+	RSI14Values  []float64
+	Volume       []float64
+	ATR14        float64
 }
 
 // LongerTermData longer-term data (4-hour timeframe)
 type LongerTermData struct {
-	EMA20         float64
-	EMA50         float64
+	EMA21         float64
+	EMA55         float64
+	EMA100        float64
+	EMA200        float64
 	ATR3          float64
 	ATR14         float64
 	CurrentVolume float64

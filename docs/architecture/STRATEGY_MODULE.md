@@ -380,7 +380,7 @@ Account: Equity 1000.00 | Balance 800.00 (80.0%) | PnL +5.5% | Margin 20.0% | Po
    Margin $139.00 | Liquidation Price 55000.0000
    Holding Duration 2 hours 30 minutes
 
-   Market: price=69500, ema20=68800, macd=150.5, rsi7=62.3
+   Market: price=69500, ema21=68800, ema55=68000, ema100=67000, ema200=66000, macd=150.5, rsi7=62.3
    OI: Latest=15000000, Avg=14500000
    Funding Rate: 0.0100%
 ```
@@ -390,7 +390,7 @@ Account: Equity 1000.00 | Balance 800.00 (80.0%) | PnL +5.5% | Margin 20.0% | Po
 ```
 ### 1. ETHUSDT (AI500+OI_Top dual signal)
 
-current_price = 3500.00, current_ema20 = 3450.00, current_macd = 25.5, current_rsi7 = 58.0
+current_price = 3500.00, current_ema21 = 3450.00, current_ema55 = 3400.00, current_ema100 = 3300.00, current_ema200 = 3200.00, current_macd = 25.5, current_rsi7 = 58.0
 
 Open Interest: Latest: 8500000.00 Average: 8200000.00
 Funding Rate: 0.0050
@@ -398,7 +398,10 @@ Funding Rate: 0.0050
 === 5M TIMEFRAME (oldest → latest) ===
 Prices: [3480, 3485, 3490, 3495, 3500]
 Volumes: [1000, 1200, 1100, 1300, 1150]
-EMA20: [3470, 3475, 3478, 3482, 3485]
+EMA21: [3470, 3475, 3478, 3482, 3485]
+EMA55: [3460, 3465, 3468, 3472, 3475]
+EMA100: [3430, 3435, 3438, 3440, 3442]
+EMA200: [3380, 3385, 3390, 3395, 3400]
 MACD: [20.1, 21.5, 22.8, 24.0, 25.5]
 RSI7: [55.0, 56.2, 57.1, 57.8, 58.0]
 
@@ -686,7 +689,7 @@ type StrategyConfig struct {
     // Technical Indicators
     Indicators struct {
         EnableEMA         bool
-        EMAPeriods        []int   // [20, 50]
+        EMAPeriods        []int   // [21, 55, 100, 200]
         EnableMACD        bool
         EnableRSI         bool
         RSIPeriods        []int   // [7, 14]

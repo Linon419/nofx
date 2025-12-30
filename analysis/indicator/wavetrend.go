@@ -9,6 +9,8 @@ package indicator
 import (
 	"math"
 
+	"github.com/markcheno/go-talib"
+
 	"nofx/market"
 )
 
@@ -255,21 +257,19 @@ func postProcess(series []float64, smoothLen int) []float64 {
 // ema calculates Exponential Moving Average.
 func ema(values []float64, period int) []float64 {
 	n := len(values)
-	result := make([]float64, n)
 	if n == 0 || period <= 0 {
-		return result
+		if n == 0 {
+			return nil
+		}
+		return make([]float64, n)
 	}
 
-	multiplier := 2.0 / float64(period+1)
-
-	// First value is just the first input
-	result[0] = values[0]
-
-	// Calculate EMA
-	for i := 1; i < n; i++ {
-		result[i] = (values[i]-result[i-1])*multiplier + result[i-1]
+	result := talib.Ema(values, period)
+	if len(result) != n {
+		padded := make([]float64, n)
+		copy(padded, result)
+		return padded
 	}
-
 	return result
 }
 
@@ -312,42 +312,18 @@ func alma(values []float64, length int, offset, sigma float64) []float64 {
 // calculateMFI computes Money Flow Index.
 func calculateMFI(highs, lows, closes, volumes []float64, period int) []float64 {
 	n := len(closes)
-	result := make([]float64, n)
-	if n < period+1 || period <= 0 {
-		return result
-	}
-
-	// Calculate typical price
-	tp := make([]float64, n)
-	for i := range closes {
-		tp[i] = (highs[i] + lows[i] + closes[i]) / 3.0
-	}
-
-	// Calculate raw money flow
-	mf := make([]float64, n)
-	for i := range closes {
-		mf[i] = tp[i] * volumes[i]
-	}
-
-	// Calculate MFI
-	for i := period; i < n; i++ {
-		posFlow := 0.0
-		negFlow := 0.0
-		for j := i - period + 1; j <= i; j++ {
-			if tp[j] > tp[j-1] {
-				posFlow += mf[j]
-			} else if tp[j] < tp[j-1] {
-				negFlow += mf[j]
-			}
+	if n == 0 || period <= 0 {
+		if n == 0 {
+			return nil
 		}
-		if negFlow == 0 {
-			result[i] = 100
-		} else {
-			mfRatio := posFlow / negFlow
-			result[i] = 100 - (100 / (1 + mfRatio))
-		}
+		return make([]float64, n)
 	}
-
+	result := talib.Mfi(highs, lows, closes, volumes, period)
+	if len(result) != n {
+		padded := make([]float64, n)
+		copy(padded, result)
+		return padded
+	}
 	return result
 }
 

@@ -145,19 +145,22 @@ func Get(symbol string) (*Data, error) {
 	isXyzAsset := IsXyzDexAsset(symbol)
 
 	// Get 3-minute K-line data (or 5-minute for xyz assets as 3m may not be available)
+	shortTF := "3m"
 	if isXyzAsset {
 		// Use Hyperliquid API for xyz dex assets (use 5m since 3m may not be available)
-		klines3m, err = getKlinesFromHyperliquid(symbol, "5m", 100)
+		klines3m, err = getKlinesFromHyperliquid(symbol, "5m", 201)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to get 5-minute K-line from Hyperliquid: %v", err)
 		}
+		shortTF = "5m"
 	} else {
 		// Use CoinAnk for regular crypto assets
-		klines3m, err = getKlinesFromCoinAnk(symbol, "3m", 100)
+		klines3m, err = getKlinesFromCoinAnk(symbol, "3m", 201)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to get 3-minute K-line from CoinAnk: %v", err)
 		}
 	}
+	klines3m = DropUnclosedKlines(klines3m, shortTF)
 
 	// Data staleness detection: Prevent DOGEUSDT-style price freeze issues
 	if isStaleData(klines3m, symbol) {
@@ -167,16 +170,17 @@ func Get(symbol string) (*Data, error) {
 
 	// Get 4-hour K-line data
 	if isXyzAsset {
-		klines4h, err = getKlinesFromHyperliquid(symbol, "4h", 100)
+		klines4h, err = getKlinesFromHyperliquid(symbol, "4h", 201)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to get 4-hour K-line from Hyperliquid: %v", err)
 		}
 	} else {
-		klines4h, err = getKlinesFromCoinAnk(symbol, "4h", 100)
+		klines4h, err = getKlinesFromCoinAnk(symbol, "4h", 201)
 		if err != nil {
 			return nil, fmt.Errorf("Failed to get 4-hour K-line from CoinAnk: %v", err)
 		}
 	}
+	klines4h = DropUnclosedKlines(klines4h, "4h")
 
 	// Check if data is empty
 	if len(klines3m) == 0 {
@@ -188,7 +192,10 @@ func Get(symbol string) (*Data, error) {
 
 	// Calculate current indicators (based on 3-minute latest data)
 	currentPrice := klines3m[len(klines3m)-1].Close
-	currentEMA20 := calculateEMA(klines3m, 20)
+	currentEMA21 := calculateEMA(klines3m, 21)
+	currentEMA55 := calculateEMA(klines3m, 55)
+	currentEMA100 := calculateEMA(klines3m, 100)
+	currentEMA200 := calculateEMA(klines3m, 200)
 	currentMACD := calculateMACD(klines3m)
 	currentRSI7 := calculateRSI(klines3m, 7)
 
@@ -232,7 +239,10 @@ func Get(symbol string) (*Data, error) {
 		CurrentPrice:      currentPrice,
 		PriceChange1h:     priceChange1h,
 		PriceChange4h:     priceChange4h,
-		CurrentEMA20:      currentEMA20,
+		CurrentEMA21:      currentEMA21,
+		CurrentEMA55:      currentEMA55,
+		CurrentEMA100:     currentEMA100,
+		CurrentEMA200:     currentEMA200,
 		CurrentMACD:       currentMACD,
 		CurrentRSI7:       currentRSI7,
 		OpenInterest:      oiData,
@@ -284,19 +294,21 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 
 		if isXyzAsset {
 			// Use Hyperliquid API for xyz dex assets
-			klines, err = getKlinesFromHyperliquid(symbol, tf, 200)
+			klines, err = getKlinesFromHyperliquid(symbol, tf, 201)
 			if err != nil {
 				logger.Infof("⚠️ Failed to get %s %s K-line from Hyperliquid: %v", symbol, tf, err)
 				continue
 			}
 		} else {
 			// Use CoinAnk for regular crypto assets
-			klines, err = getKlinesFromCoinAnk(symbol, tf, 200)
+			klines, err = getKlinesFromCoinAnk(symbol, tf, 201)
 			if err != nil {
 				logger.Infof("⚠️ Failed to get %s %s K-line from CoinAnk: %v", symbol, tf, err)
 				continue
 			}
 		}
+
+		klines = DropUnclosedKlines(klines, tf)
 
 		if len(klines) == 0 {
 			logger.Infof("⚠️ %s %s K-line data is empty", symbol, tf)
@@ -326,12 +338,15 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 
 	// Calculate current indicators (based on primary timeframe latest data)
 	currentPrice := primaryKlines[len(primaryKlines)-1].Close
-	currentEMA20 := calculateEMA(primaryKlines, 20)
+	currentEMA21 := calculateEMA(primaryKlines, 21)
+	currentEMA55 := calculateEMA(primaryKlines, 55)
+	currentEMA100 := calculateEMA(primaryKlines, 100)
+	currentEMA200 := calculateEMA(primaryKlines, 200)
 	currentMACD := calculateMACD(primaryKlines)
 	currentRSI7 := calculateRSI(primaryKlines, 7)
 
 	// Calculate price changes
-	priceChange1h := calculatePriceChangeByBars(primaryKlines, primaryTimeframe, 60) // 1 hour
+	priceChange1h := calculatePriceChangeByBars(primaryKlines, primaryTimeframe, 60)  // 1 hour
 	priceChange4h := calculatePriceChangeByBars(primaryKlines, primaryTimeframe, 240) // 4 hours
 
 	// Get OI data
@@ -348,7 +363,10 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 		CurrentPrice:  currentPrice,
 		PriceChange1h: priceChange1h,
 		PriceChange4h: priceChange4h,
-		CurrentEMA20:  currentEMA20,
+		CurrentEMA21:  currentEMA21,
+		CurrentEMA55:  currentEMA55,
+		CurrentEMA100: currentEMA100,
+		CurrentEMA200: currentEMA200,
 		CurrentMACD:   currentMACD,
 		CurrentRSI7:   currentRSI7,
 		OpenInterest:  oiData,
@@ -364,18 +382,20 @@ func calculateTimeframeSeries(klines []Kline, timeframe string, count int) *Time
 	}
 
 	data := &TimeframeSeriesData{
-		Timeframe:   timeframe,
-		Klines:      make([]KlineBar, 0, count),
-		MidPrices:   make([]float64, 0, count),
-		EMA20Values: make([]float64, 0, count),
-		EMA50Values: make([]float64, 0, count),
-		MACDValues:  make([]float64, 0, count),
-		RSI7Values:  make([]float64, 0, count),
-		RSI14Values: make([]float64, 0, count),
-		Volume:      make([]float64, 0, count),
-		BOLLUpper:   make([]float64, 0, count),
-		BOLLMiddle:  make([]float64, 0, count),
-		BOLLLower:   make([]float64, 0, count),
+		Timeframe:    timeframe,
+		Klines:       make([]KlineBar, 0, count),
+		MidPrices:    make([]float64, 0, count),
+		EMA21Values:  make([]float64, 0, count),
+		EMA55Values:  make([]float64, 0, count),
+		EMA100Values: make([]float64, 0, count),
+		EMA200Values: make([]float64, 0, count),
+		MACDValues:   make([]float64, 0, count),
+		RSI7Values:   make([]float64, 0, count),
+		RSI14Values:  make([]float64, 0, count),
+		Volume:       make([]float64, 0, count),
+		BOLLUpper:    make([]float64, 0, count),
+		BOLLMiddle:   make([]float64, 0, count),
+		BOLLLower:    make([]float64, 0, count),
 	}
 
 	// Get latest N data points based on count from config
@@ -399,16 +419,28 @@ func calculateTimeframeSeries(klines []Kline, timeframe string, count int) *Time
 		data.MidPrices = append(data.MidPrices, klines[i].Close)
 		data.Volume = append(data.Volume, klines[i].Volume)
 
-		// Calculate EMA20 for each point
-		if i >= 19 {
-			ema20 := calculateEMA(klines[:i+1], 20)
-			data.EMA20Values = append(data.EMA20Values, ema20)
+		// Calculate EMA21 for each point
+		if i >= 20 {
+			ema21 := calculateEMA(klines[:i+1], 21)
+			data.EMA21Values = append(data.EMA21Values, ema21)
 		}
 
-		// Calculate EMA50 for each point
-		if i >= 49 {
-			ema50 := calculateEMA(klines[:i+1], 50)
-			data.EMA50Values = append(data.EMA50Values, ema50)
+		// Calculate EMA55 for each point
+		if i >= 54 {
+			ema55 := calculateEMA(klines[:i+1], 55)
+			data.EMA55Values = append(data.EMA55Values, ema55)
+		}
+
+		// Calculate EMA100 for each point
+		if i >= 99 {
+			ema100 := calculateEMA(klines[:i+1], 100)
+			data.EMA100Values = append(data.EMA100Values, ema100)
+		}
+
+		// Calculate EMA200 for each point
+		if i >= 199 {
+			ema200 := calculateEMA(klines[:i+1], 200)
+			data.EMA200Values = append(data.EMA200Values, ema200)
 		}
 
 		// Calculate MACD for each point
@@ -656,12 +688,15 @@ func calculateBOLL(klines []Kline, period int, multiplier float64) (upper, middl
 // calculateIntradaySeries calculates intraday series data
 func calculateIntradaySeries(klines []Kline) *IntradayData {
 	data := &IntradayData{
-		MidPrices:   make([]float64, 0, 10),
-		EMA20Values: make([]float64, 0, 10),
-		MACDValues:  make([]float64, 0, 10),
-		RSI7Values:  make([]float64, 0, 10),
-		RSI14Values: make([]float64, 0, 10),
-		Volume:      make([]float64, 0, 10),
+		MidPrices:    make([]float64, 0, 10),
+		EMA21Values:  make([]float64, 0, 10),
+		EMA55Values:  make([]float64, 0, 10),
+		EMA100Values: make([]float64, 0, 10),
+		EMA200Values: make([]float64, 0, 10),
+		MACDValues:   make([]float64, 0, 10),
+		RSI7Values:   make([]float64, 0, 10),
+		RSI14Values:  make([]float64, 0, 10),
+		Volume:       make([]float64, 0, 10),
 	}
 
 	// Get latest 10 data points
@@ -674,10 +709,28 @@ func calculateIntradaySeries(klines []Kline) *IntradayData {
 		data.MidPrices = append(data.MidPrices, klines[i].Close)
 		data.Volume = append(data.Volume, klines[i].Volume)
 
-		// Calculate EMA20 for each point
-		if i >= 19 {
-			ema20 := calculateEMA(klines[:i+1], 20)
-			data.EMA20Values = append(data.EMA20Values, ema20)
+		// Calculate EMA21 for each point
+		if i >= 20 {
+			ema21 := calculateEMA(klines[:i+1], 21)
+			data.EMA21Values = append(data.EMA21Values, ema21)
+		}
+
+		// Calculate EMA55 for each point
+		if i >= 54 {
+			ema55 := calculateEMA(klines[:i+1], 55)
+			data.EMA55Values = append(data.EMA55Values, ema55)
+		}
+
+		// Calculate EMA100 for each point
+		if i >= 99 {
+			ema100 := calculateEMA(klines[:i+1], 100)
+			data.EMA100Values = append(data.EMA100Values, ema100)
+		}
+
+		// Calculate EMA200 for each point
+		if i >= 199 {
+			ema200 := calculateEMA(klines[:i+1], 200)
+			data.EMA200Values = append(data.EMA200Values, ema200)
 		}
 
 		// Calculate MACD for each point
@@ -711,8 +764,10 @@ func calculateLongerTermData(klines []Kline) *LongerTermData {
 	}
 
 	// Calculate EMA
-	data.EMA20 = calculateEMA(klines, 20)
-	data.EMA50 = calculateEMA(klines, 50)
+	data.EMA21 = calculateEMA(klines, 21)
+	data.EMA55 = calculateEMA(klines, 55)
+	data.EMA100 = calculateEMA(klines, 100)
+	data.EMA200 = calculateEMA(klines, 200)
 
 	// Calculate ATR
 	data.ATR3 = calculateATR(klines, 3)
@@ -841,8 +896,8 @@ func Format(data *Data) string {
 
 	// Format price with dynamic precision
 	priceStr := formatPriceWithDynamicPrecision(data.CurrentPrice)
-	sb.WriteString(fmt.Sprintf("current_price = %s, current_ema20 = %.3f, current_macd = %.3f, current_rsi (7 period) = %.3f\n\n",
-		priceStr, data.CurrentEMA20, data.CurrentMACD, data.CurrentRSI7))
+	sb.WriteString(fmt.Sprintf("current_price = %s, current_ema21 = %.3f, current_ema55 = %.3f, current_ema100 = %.3f, current_ema200 = %.3f, current_macd = %.3f, current_rsi (7 period) = %.3f\n\n",
+		priceStr, data.CurrentEMA21, data.CurrentEMA55, data.CurrentEMA100, data.CurrentEMA200, data.CurrentMACD, data.CurrentRSI7))
 
 	sb.WriteString(fmt.Sprintf("In addition, here is the latest %s open interest and funding rate for perps:\n\n",
 		data.Symbol))
@@ -864,8 +919,20 @@ func Format(data *Data) string {
 			sb.WriteString(fmt.Sprintf("Mid prices: %s\n\n", formatFloatSlice(data.IntradaySeries.MidPrices)))
 		}
 
-		if len(data.IntradaySeries.EMA20Values) > 0 {
-			sb.WriteString(fmt.Sprintf("EMA indicators (20‑period): %s\n\n", formatFloatSlice(data.IntradaySeries.EMA20Values)))
+		if len(data.IntradaySeries.EMA21Values) > 0 {
+			sb.WriteString(fmt.Sprintf("EMA indicators (21-period): %s\n\n", formatFloatSlice(data.IntradaySeries.EMA21Values)))
+		}
+
+		if len(data.IntradaySeries.EMA55Values) > 0 {
+			sb.WriteString(fmt.Sprintf("EMA indicators (55-period): %s\n\n", formatFloatSlice(data.IntradaySeries.EMA55Values)))
+		}
+
+		if len(data.IntradaySeries.EMA100Values) > 0 {
+			sb.WriteString(fmt.Sprintf("EMA indicators (100-period): %s\n\n", formatFloatSlice(data.IntradaySeries.EMA100Values)))
+		}
+
+		if len(data.IntradaySeries.EMA200Values) > 0 {
+			sb.WriteString(fmt.Sprintf("EMA indicators (200-period): %s\n\n", formatFloatSlice(data.IntradaySeries.EMA200Values)))
 		}
 
 		if len(data.IntradaySeries.MACDValues) > 0 {
@@ -890,8 +957,8 @@ func Format(data *Data) string {
 	if data.LongerTermContext != nil {
 		sb.WriteString("Longer‑term context (4‑hour timeframe):\n\n")
 
-		sb.WriteString(fmt.Sprintf("20‑Period EMA: %.3f vs. 50‑Period EMA: %.3f\n\n",
-			data.LongerTermContext.EMA20, data.LongerTermContext.EMA50))
+		sb.WriteString(fmt.Sprintf("EMA21: %.3f | EMA55: %.3f | EMA100: %.3f | EMA200: %.3f\n\n",
+			data.LongerTermContext.EMA21, data.LongerTermContext.EMA55, data.LongerTermContext.EMA100, data.LongerTermContext.EMA200))
 
 		sb.WriteString(fmt.Sprintf("3‑Period ATR: %.3f vs. 14‑Period ATR: %.3f\n\n",
 			data.LongerTermContext.ATR3, data.LongerTermContext.ATR14))
@@ -948,14 +1015,21 @@ func formatTimeframeData(sb *strings.Builder, data *TimeframeSeriesData) {
 	}
 
 	// Technical indicators
-	if len(data.EMA20Values) > 0 {
-		sb.WriteString(fmt.Sprintf("EMA20: %s\n", formatFloatSlice(data.EMA20Values)))
+	if len(data.EMA21Values) > 0 {
+		sb.WriteString(fmt.Sprintf("EMA21: %s\n", formatFloatSlice(data.EMA21Values)))
 	}
 
-	if len(data.EMA50Values) > 0 {
-		sb.WriteString(fmt.Sprintf("EMA50: %s\n", formatFloatSlice(data.EMA50Values)))
+	if len(data.EMA55Values) > 0 {
+		sb.WriteString(fmt.Sprintf("EMA55: %s\n", formatFloatSlice(data.EMA55Values)))
 	}
 
+	if len(data.EMA100Values) > 0 {
+		sb.WriteString(fmt.Sprintf("EMA100: %s\n", formatFloatSlice(data.EMA100Values)))
+	}
+
+	if len(data.EMA200Values) > 0 {
+		sb.WriteString(fmt.Sprintf("EMA200: %s\n", formatFloatSlice(data.EMA200Values)))
+	}
 	if len(data.MACDValues) > 0 {
 		sb.WriteString(fmt.Sprintf("MACD: %s\n", formatFloatSlice(data.MACDValues)))
 	}
@@ -1104,7 +1178,10 @@ func BuildDataFromKlines(symbol string, primary []Kline, longer []Kline) (*Data,
 	data := &Data{
 		Symbol:            symbol,
 		CurrentPrice:      currentPrice,
-		CurrentEMA20:      calculateEMA(primary, 20),
+		CurrentEMA21:      calculateEMA(primary, 21),
+		CurrentEMA55:      calculateEMA(primary, 55),
+		CurrentEMA100:     calculateEMA(primary, 100),
+		CurrentEMA200:     calculateEMA(primary, 200),
 		CurrentMACD:       calculateMACD(primary),
 		CurrentRSI7:       calculateRSI(primary, 7),
 		PriceChange1h:     priceChangeFromSeries(primary, time.Hour),

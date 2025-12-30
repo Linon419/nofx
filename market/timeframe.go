@@ -18,8 +18,11 @@ var supportedTimeframes = map[string]time.Duration{
 	"2h":  2 * time.Hour,
 	"4h":  4 * time.Hour,
 	"6h":  6 * time.Hour,
+	"8h":  8 * time.Hour,
 	"12h": 12 * time.Hour,
 	"1d":  24 * time.Hour,
+	"3d":  72 * time.Hour,
+	"1w":  7 * 24 * time.Hour,
 }
 
 // NormalizeTimeframe normalizes the incoming timeframe string (case-insensitive, no spaces), and validates if it's supported.

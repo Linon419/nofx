@@ -120,7 +120,7 @@ type Context struct {
 	MultiTFMarket   map[string]map[string]*market.Data `json:"-"`
 	OITopDataMap    map[string]*OITopData              `json:"-"`
 	QuantDataMap    map[string]*QuantData              `json:"-"`
-	OIRankingData   *provider.OIRankingData                `json:"-"` // Market-wide OI ranking data
+	OIRankingData   *provider.OIRankingData            `json:"-"` // Market-wide OI ranking data
 	BTCETHLeverage  int                                `json:"-"`
 	AltcoinLeverage int                                `json:"-"`
 	Timeframes      []string                           `json:"-"`
@@ -1162,7 +1162,8 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 	sb.WriteString(fmt.Sprintf("current_price = %.4f", data.CurrentPrice))
 
 	if indicators.EnableEMA {
-		sb.WriteString(fmt.Sprintf(", current_ema20 = %.3f", data.CurrentEMA20))
+		sb.WriteString(fmt.Sprintf(", current_ema21 = %.3f, current_ema55 = %.3f, current_ema100 = %.3f, current_ema200 = %.3f",
+			data.CurrentEMA21, data.CurrentEMA55, data.CurrentEMA100, data.CurrentEMA200))
 	}
 
 	if indicators.EnableMACD {
@@ -1206,8 +1207,20 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 				sb.WriteString(fmt.Sprintf("Mid prices: %s\n\n", formatFloatSlice(data.IntradaySeries.MidPrices)))
 			}
 
-			if indicators.EnableEMA && len(data.IntradaySeries.EMA20Values) > 0 {
-				sb.WriteString(fmt.Sprintf("EMA indicators (20-period): %s\n\n", formatFloatSlice(data.IntradaySeries.EMA20Values)))
+			if indicators.EnableEMA && len(data.IntradaySeries.EMA21Values) > 0 {
+				sb.WriteString(fmt.Sprintf("EMA indicators (21-period): %s\n\n", formatFloatSlice(data.IntradaySeries.EMA21Values)))
+			}
+
+			if indicators.EnableEMA && len(data.IntradaySeries.EMA55Values) > 0 {
+				sb.WriteString(fmt.Sprintf("EMA indicators (55-period): %s\n\n", formatFloatSlice(data.IntradaySeries.EMA55Values)))
+			}
+
+			if indicators.EnableEMA && len(data.IntradaySeries.EMA100Values) > 0 {
+				sb.WriteString(fmt.Sprintf("EMA indicators (100-period): %s\n\n", formatFloatSlice(data.IntradaySeries.EMA100Values)))
+			}
+
+			if indicators.EnableEMA && len(data.IntradaySeries.EMA200Values) > 0 {
+				sb.WriteString(fmt.Sprintf("EMA indicators (200-period): %s\n\n", formatFloatSlice(data.IntradaySeries.EMA200Values)))
 			}
 
 			if indicators.EnableMACD && len(data.IntradaySeries.MACDValues) > 0 {
@@ -1236,8 +1249,8 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 			sb.WriteString(fmt.Sprintf("Longer-term context (%s timeframe):\n\n", indicators.Klines.LongerTimeframe))
 
 			if indicators.EnableEMA {
-				sb.WriteString(fmt.Sprintf("20-Period EMA: %.3f vs. 50-Period EMA: %.3f\n\n",
-					data.LongerTermContext.EMA20, data.LongerTermContext.EMA50))
+				sb.WriteString(fmt.Sprintf("EMA21: %.3f | EMA55: %.3f | EMA100: %.3f | EMA200: %.3f\n\n",
+					data.LongerTermContext.EMA21, data.LongerTermContext.EMA55, data.LongerTermContext.EMA100, data.LongerTermContext.EMA200))
 			}
 
 			if indicators.EnableATR {
@@ -1315,11 +1328,17 @@ func (e *StrategyEngine) formatTimeframeSeriesData(sb *strings.Builder, data *ma
 	}
 
 	if indicators.EnableEMA {
-		if len(data.EMA20Values) > 0 {
-			sb.WriteString(fmt.Sprintf("EMA20: %s\n", formatFloatSlice(data.EMA20Values)))
+		if len(data.EMA21Values) > 0 {
+			sb.WriteString(fmt.Sprintf("EMA21: %s\n", formatFloatSlice(data.EMA21Values)))
 		}
-		if len(data.EMA50Values) > 0 {
-			sb.WriteString(fmt.Sprintf("EMA50: %s\n", formatFloatSlice(data.EMA50Values)))
+		if len(data.EMA55Values) > 0 {
+			sb.WriteString(fmt.Sprintf("EMA55: %s\n", formatFloatSlice(data.EMA55Values)))
+		}
+		if len(data.EMA100Values) > 0 {
+			sb.WriteString(fmt.Sprintf("EMA100: %s\n", formatFloatSlice(data.EMA100Values)))
+		}
+		if len(data.EMA200Values) > 0 {
+			sb.WriteString(fmt.Sprintf("EMA200: %s\n", formatFloatSlice(data.EMA200Values)))
 		}
 	}
 

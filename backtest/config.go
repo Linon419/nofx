@@ -265,7 +265,7 @@ func (cfg *BacktestConfig) ToStrategyConfig() *store.StrategyConfig {
 			EnableVolume:      true,
 			EnableOI:          true,
 			EnableFundingRate: true,
-			EMAPeriods:        []int{20, 50},
+			EMAPeriods:        []int{21, 55, 100, 200},
 			RSIPeriods:        []int{7, 14},
 			ATRPeriods:        []int{14},
 		},
