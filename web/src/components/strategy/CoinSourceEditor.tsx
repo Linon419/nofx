@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import { Plus, X, Database, TrendingUp, List, Link, AlertCircle } from 'lucide-react'
 import type { CoinSourceConfig } from '../../types'
 
@@ -24,50 +24,37 @@ export function CoinSourceEditor({
 
   const t = (key: string) => {
     const translations: Record<string, Record<string, string>> = {
-      sourceType: { zh: '鏁版嵁鏉ユ簮绫诲瀷', en: 'Source Type' },
-      static: { zh: '闈欐€佸垪琛?, en: 'Static List' },
-      coinpool: { zh: 'AI500 鏁版嵁婧?, en: 'AI500 Data Provider' },
-      oi_top: { zh: 'OI Top', en: 'OI Top' },
-
-      otc_top: { zh: 'OTC Top', en: 'OTC Top' },
-      mixed: { zh: '娣峰悎妯″紡', en: 'Mixed Mode' },
-      staticCoins: { zh: '鑷畾涔夊竵绉?, en: 'Custom Coins' },
-      addCoin: { zh: '娣诲姞甯佺', en: 'Add Coin' },
-      useCoinPool: { zh: '鍚敤 AI500 鏁版嵁婧?, en: 'Enable AI500 Data Provider' },
-      coinPoolLimit: { zh: '鏁版嵁婧愭暟閲忎笂闄?, en: 'Data Provider Limit' },
+      sourceType: { zh: '数据来源类型', en: 'Source Type' },
+      static: { zh: '静态列表', en: 'Static List' },
+      coinpool: { zh: 'AI500 数据源', en: 'AI500 Data Provider' },
+      oi_top: { zh: 'OI Top 持仓增长', en: 'OI Top' },
+      mixed: { zh: '混合模式', en: 'Mixed Mode' },
+      staticCoins: { zh: '自定义币种', en: 'Custom Coins' },
+      addCoin: { zh: '添加币种', en: 'Add Coin' },
+      useCoinPool: { zh: '启用 AI500 数据源', en: 'Enable AI500 Data Provider' },
+      coinPoolLimit: { zh: '数据源数量上限', en: 'Data Provider Limit' },
       coinPoolApiUrl: { zh: 'AI500 API URL', en: 'AI500 API URL' },
-      coinPoolApiUrlPlaceholder: { zh: '杈撳叆 AI500 鏁版嵁婧?API 鍦板潃...', en: 'Enter AI500 data provider API URL...' },
-      useOITop: { zh: '鍚敤 OI Top 鏁版嵁', en: 'Enable OI Top' },
-      oiTopLimit: { zh: 'OI Top 鏁伴噺涓婇檺', en: 'OI Top Limit' },
+      coinPoolApiUrlPlaceholder: { zh: '输入 AI500 数据源 API 地址...', en: 'Enter AI500 data provider API URL...' },
+      useOITop: { zh: '启用 OI Top 数据', en: 'Enable OI Top' },
+      oiTopLimit: { zh: 'OI Top 数量上限', en: 'OI Top Limit' },
       oiTopApiUrl: { zh: 'OI Top API URL', en: 'OI Top API URL' },
-      oiTopApiUrlPlaceholder: { zh: 'Enter OI Top API URL...', en: 'Enter OI Top API URL...' },
-
-      useOTCTop: { zh: 'Enable OTC Top', en: 'Enable OTC Top' },
-      otcTopApiUrl: { zh: 'OTC Top API URL', en: 'OTC Top API URL' },
-      otcTopApiUrlPlaceholder: { zh: 'Enter OTC Top API URL...', en: 'Enter OTC Top API URL...' },
-
-      staticDesc: { zh: 'Manually specify trading coins', en: 'Manually specify trading coins' },
+      oiTopApiUrlPlaceholder: { zh: '输入 OI Top 持仓数据 API 地址...', en: 'Enter OI Top API URL...' },
+      staticDesc: { zh: '手动指定交易币种列表', en: 'Manually specify trading coins' },
       coinpoolDesc: {
-        zh: 'Use AI500 smart-filtered popular coins',
+        zh: '使用 AI500 智能筛选的热门币种',
         en: 'Use AI500 smart-filtered popular coins',
       },
-
       oiTopDesc: {
-        zh: 'Use coins with fastest OI growth',
+        zh: '使用持仓量增长最快的币种',
         en: 'Use coins with fastest OI growth',
       },
-
-      otcTopDesc: {
-        zh: 'Use coins with highest OTC index',
-        en: 'Use coins with highest OTC index',
-      },
       mixedDesc: {
-        zh: '缁勫悎澶氱鏁版嵁婧愶紝AI500 + OI Top + OTC Top + 鑷畾涔?,
-        en: 'Combine multiple sources: AI500 + OI Top + OTC Top + Custom',
+        zh: '组合多种数据源，AI500 + OI Top + 自定义',
+        en: 'Combine multiple sources: AI500 + OI Top + Custom',
       },
-      apiUrlRequired: { zh: '闇€瑕佸～鍐?API URL 鎵嶈兘鑾峰彇鏁版嵁', en: 'API URL required to fetch data' },
-      dataSourceConfig: { zh: '鏁版嵁婧愰厤缃?, en: 'Data Source Configuration' },
-      fillDefault: { zh: '濉叆榛樿', en: 'Fill Default' },
+      apiUrlRequired: { zh: '需要填写 API URL 才能获取数据', en: 'API URL required to fetch data' },
+      dataSourceConfig: { zh: '数据源配置', en: 'Data Source Configuration' },
+      fillDefault: { zh: '填入默认', en: 'Fill Default' },
     }
     return translations[key]?.[language] || key
   }
@@ -415,7 +402,7 @@ export function CoinSourceEditor({
           )}
         </div>
       )}
-    
+
       {/* OTC Top Options */}
       {(config.source_type === 'otc_top' || config.source_type === 'mixed') && (
         <div className="space-y-4">
@@ -486,19 +473,8 @@ export function CoinSourceEditor({
             </div>
           )}
         </div>
-      )}</div>
+      )}
+
+    </div>
   )
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
