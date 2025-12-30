@@ -418,28 +418,15 @@ func (at *AutoTrader) Run() error {
 	}
 
 	schedule, ok := at.resolveDecisionSchedule()
+	offset := time.Duration(0)
+	runImmediately := false
 	if ok {
-		logger.Infof("[%s] Decision schedule: align=%s interval=%s offset=%s run_immediately=%v",
-			at.name, schedule.alignTimeframe, schedule.interval, schedule.offset, schedule.runImmediately)
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		go func() {
-			<-at.stopMonitorCh
-			cancel()
-		}()
-
-		sched := newAlignedOnceScheduler(ctx, schedule.alignInterval, schedule.interval, schedule.offset)
-		sched.Name = fmt.Sprintf("%s x%d", schedule.alignTimeframe, schedule.multiple)
-		sched.RunImmediately = schedule.runImmediately
-		sched.Start(func() {
-			if err := at.runCycle(); err != nil {
-				logger.Infof("Execution failed: %v", err)
-			}
-		})
-		return nil
+		offset = schedule.offset
+		runImmediately = schedule.runImmediately
 	}
 
-	logger.Infof("[%s] Decision schedule unavailable, aligning fallback scan interval %v", at.name, at.config.ScanInterval)
+	logger.Infof("[%s] Decision schedule: align=scan interval %v offset=%s run_immediately=%v (strategy=%v)",
+		at.name, at.config.ScanInterval, offset, runImmediately, ok)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
@@ -447,9 +434,9 @@ func (at *AutoTrader) Run() error {
 		cancel()
 	}()
 
-	sched := newAlignedOnceScheduler(ctx, at.config.ScanInterval, at.config.ScanInterval, 0)
+	sched := newAlignedOnceScheduler(ctx, at.config.ScanInterval, at.config.ScanInterval, offset)
 	sched.Name = fmt.Sprintf("scan-%s", at.config.ScanInterval)
-	sched.RunImmediately = false
+	sched.RunImmediately = runImmediately
 	sched.Start(func() {
 		if err := at.runCycle(); err != nil {
 			logger.Infof("Execution failed: %v", err)
