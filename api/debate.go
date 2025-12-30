@@ -176,6 +176,15 @@ func (h *DebateHandler) HandleCreateDebate(c *gin.Context) {
 					req.Symbol = coins[0]
 					logger.Infof("Fetched coin from OI Top API: %s", req.Symbol)
 				}
+			case "otc_top":
+				// Fetch from OTC top API
+				if coinSource.OTCTopAPIURL != "" {
+					provider.SetOTCTopAPI(coinSource.OTCTopAPIURL)
+				}
+				if coins, err := provider.GetOTCTopSymbols(); err == nil && len(coins) > 0 {
+					req.Symbol = coins[0]
+					logger.Infof("Fetched coin from OTC Top API: %s", req.Symbol)
+				}
 			case "mixed":
 				// Try coin pool first, then OI top
 				if coinSource.UseCoinPool && coinSource.CoinPoolAPIURL != "" {
@@ -189,6 +198,12 @@ func (h *DebateHandler) HandleCreateDebate(c *gin.Context) {
 					if coins, err := provider.GetOITopSymbols(); err == nil && len(coins) > 0 {
 						req.Symbol = coins[0]
 						logger.Infof("Fetched coin from OI Top API (mixed): %s", req.Symbol)
+					}
+				} else if coinSource.UseOTCTop && coinSource.OTCTopAPIURL != "" {
+					provider.SetOTCTopAPI(coinSource.OTCTopAPIURL)
+					if coins, err := provider.GetOTCTopSymbols(); err == nil && len(coins) > 0 {
+						req.Symbol = coins[0]
+						logger.Infof("Fetched coin from OTC Top API (mixed): %s", req.Symbol)
 					}
 				}
 			}

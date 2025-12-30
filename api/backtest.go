@@ -1,4 +1,4 @@
-package api
+﻿package api
 
 import (
 	"context"
@@ -71,7 +71,7 @@ func (s *Server) handleBacktestStart(c *gin.Context) {
 	cfg.CustomPrompt = strings.TrimSpace(cfg.CustomPrompt)
 	cfg.UserID = normalizeUserID(c.GetString("user_id"))
 
-	logger.Infof("📊 Backtest request - symbols from request: %v (count=%d), strategyID: %s",
+	logger.Infof("馃搳 Backtest request - symbols from request: %v (count=%d), strategyID: %s",
 		cfg.Symbols, len(cfg.Symbols), cfg.StrategyID)
 
 	// Load strategy config if strategy_id is provided
@@ -91,8 +91,8 @@ func (s *Server) handleBacktestStart(c *gin.Context) {
 			return
 		}
 		cfg.SetLoadedStrategy(&strategyConfig)
-		logger.Infof("📊 Backtest using saved strategy: %s (%s)", strategy.Name, strategy.ID)
-		logger.Infof("📊 Strategy coin source: type=%s, use_coin_pool=%v, use_oi_top=%v, static_coins=%v",
+		logger.Infof("馃搳 Backtest using saved strategy: %s (%s)", strategy.Name, strategy.ID)
+		logger.Infof("馃搳 Strategy coin source: type=%s, use_coin_pool=%v, use_oi_top=%v, use_otc_top=%v, static_coins=%v",
 			strategyConfig.CoinSource.SourceType,
 			strategyConfig.CoinSource.UseCoinPool,
 			strategyConfig.CoinSource.UseOITop,
@@ -106,7 +106,7 @@ func (s *Server) handleBacktestStart(c *gin.Context) {
 				return
 			}
 			cfg.Symbols = symbols
-			logger.Infof("📊 Resolved %d coins from strategy: %v", len(symbols), symbols)
+			logger.Infof("馃搳 Resolved %d coins from strategy: %v", len(symbols), symbols)
 		}
 	}
 
@@ -115,7 +115,7 @@ func (s *Server) handleBacktestStart(c *gin.Context) {
 		return
 	}
 
-	logger.Infof("📊 Starting backtest with final config: runID=%s, symbols=%v (count=%d), strategyID=%s",
+	logger.Infof("馃搳 Starting backtest with final config: runID=%s, symbols=%v (count=%d), strategyID=%s",
 		cfg.RunID, cfg.Symbols, len(cfg.Symbols), cfg.StrategyID)
 
 	runner, err := s.backtestManager.Start(context.Background(), cfg)
@@ -646,22 +646,30 @@ func (s *Server) resolveStrategyCoins(strategyConfig *store.StrategyConfig) ([]s
 	if coinSource.OITopAPIURL != "" {
 		provider.SetOITopAPI(coinSource.OITopAPIURL)
 	}
+	if coinSource.OTCTopAPIURL != "" {
+		provider.SetOTCTopAPI(coinSource.OTCTopAPIURL)
+	}
 
 	// Handle empty source_type - check flags for backward compatibility
 	sourceType := coinSource.SourceType
 	if sourceType == "" {
-		if coinSource.UseCoinPool && coinSource.UseOITop {
+		mixed := (coinSource.UseCoinPool && coinSource.UseOITop) ||
+			(coinSource.UseCoinPool && coinSource.UseOTCTop) ||
+			(coinSource.UseOITop && coinSource.UseOTCTop)
+		if mixed {
 			sourceType = "mixed"
 		} else if coinSource.UseCoinPool {
 			sourceType = "coinpool"
 		} else if coinSource.UseOITop {
 			sourceType = "oi_top"
+		} else if coinSource.UseOTCTop {
+			sourceType = "otc_top"
 		} else if len(coinSource.StaticCoins) > 0 {
 			sourceType = "static"
 		} else {
 			return nil, fmt.Errorf("strategy has no coin source configured")
 		}
-		logger.Infof("📊 Inferred source_type=%s from flags", sourceType)
+		logger.Infof("馃搳 Inferred source_type=%s from flags", sourceType)
 	}
 
 	switch sourceType {
@@ -679,12 +687,12 @@ func (s *Server) resolveStrategyCoins(strategyConfig *store.StrategyConfig) ([]s
 		if limit <= 0 {
 			limit = 30
 		}
-		logger.Infof("📊 Fetching AI500 coins with limit=%d", limit)
+		logger.Infof("馃搳 Fetching AI500 coins with limit=%d", limit)
 		coins, err := provider.GetTopRatedCoins(limit)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get AI500 coins: %w", err)
 		}
-		logger.Infof("📊 Got %d coins from AI500: %v", len(coins), coins)
+		logger.Infof("馃搳 Got %d coins from AI500: %v", len(coins), coins)
 		for _, sym := range coins {
 			sym = market.Normalize(sym)
 			if !symbolSet[sym] {
@@ -706,6 +714,19 @@ func (s *Server) resolveStrategyCoins(strategyConfig *store.StrategyConfig) ([]s
 			if i >= limit {
 				break
 			}
+			sym = market.Normalize(sym)
+			if !symbolSet[sym] {
+				symbols = append(symbols, sym)
+				symbolSet[sym] = true
+			}
+		}
+
+	case "otc_top":
+		coins, err := provider.GetOTCTopSymbols()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get OTC Top coins: %w", err)
+		}
+		for _, sym := range coins {
 			sym = market.Normalize(sym)
 			if !symbolSet[sym] {
 				symbols = append(symbols, sym)
@@ -757,6 +778,22 @@ func (s *Server) resolveStrategyCoins(strategyConfig *store.StrategyConfig) ([]s
 			}
 		}
 
+		// Get from OTC Top
+		if coinSource.UseOTCTop {
+			coins, err := provider.GetOTCTopSymbols()
+			if err != nil {
+				logger.Warnf("Failed to get OTC Top coins: %v", err)
+			} else {
+				for _, sym := range coins {
+					sym = market.Normalize(sym)
+					if !symbolSet[sym] {
+						symbols = append(symbols, sym)
+						symbolSet[sym] = true
+					}
+				}
+			}
+		}
+
 		// Add static coins
 		for _, sym := range coinSource.StaticCoins {
 			sym = market.Normalize(sym)
@@ -774,7 +811,7 @@ func (s *Server) resolveStrategyCoins(strategyConfig *store.StrategyConfig) ([]s
 		return nil, fmt.Errorf("no coins resolved from strategy")
 	}
 
-	logger.Infof("📊 Final resolved symbols: %d coins - %v", len(symbols), symbols)
+	logger.Infof("馃搳 Final resolved symbols: %d coins - %v", len(symbols), symbols)
 	return symbols, nil
 }
 
@@ -846,7 +883,7 @@ func (s *Server) hydrateBacktestAIConfig(cfg *backtest.BacktestConfig) error {
 		} else {
 			provider = "openai" // default fallback
 		}
-		logger.Infof("📊 Inferred AI provider '%s' from model name '%s'", provider, model.Name)
+		logger.Infof("馃搳 Inferred AI provider '%s' from model name '%s'", provider, model.Name)
 	}
 	cfg.AICfg.Provider = provider
 	cfg.AICfg.APIKey = apiKey
@@ -868,3 +905,4 @@ func (s *Server) hydrateBacktestAIConfig(cfg *backtest.BacktestConfig) error {
 
 	return nil
 }
+

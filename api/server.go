@@ -405,6 +405,7 @@ type CreateTraderRequest struct {
 	SystemPromptTemplate string `json:"system_prompt_template"` // System prompt template name
 	UseCoinPool          bool   `json:"use_coin_pool"`
 	UseOITop             bool   `json:"use_oi_top"`
+	UseOTCTop            bool   `json:"use_otc_top"`
 }
 
 type ModelConfig struct {
@@ -664,6 +665,7 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 		TradingSymbols:       req.TradingSymbols,
 		UseCoinPool:          req.UseCoinPool,
 		UseOITop:             req.UseOITop,
+		UseOTCTop:            req.UseOTCTop,
 		CustomPrompt:         req.CustomPrompt,
 		OverrideBasePrompt:   req.OverrideBasePrompt,
 		SystemPromptTemplate: systemPromptTemplate,
@@ -2046,6 +2048,7 @@ func (s *Server) handleGetTraderConfig(c *gin.Context) {
 		"is_cross_margin":       traderConfig.IsCrossMargin,
 		"use_coin_pool":         traderConfig.UseCoinPool,
 		"use_oi_top":            traderConfig.UseOITop,
+		"use_otc_top":           traderConfig.UseOTCTop,
 		"is_running":            isRunning,
 	}
 
