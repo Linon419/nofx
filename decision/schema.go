@@ -217,6 +217,44 @@ var DataDictionary = map[string]map[string]BilingualFieldDef{
 			DescEN: "OI change in 1 hour. Used to determine real capital flow direction",
 		},
 	},
+
+	"TechnicalAnalysis": {
+		"wavetrend.value": {
+			NameZH: "震荡指标值",
+			NameEN: "WaveTrend Value",
+			Unit:   "",
+			DescZH: "震荡指标值，范围约 -100 ~ 100",
+			DescEN: "Oscillator indicator value, range approximately -100 to 100",
+		},
+		"pattern.detected": {
+			NameZH: "检测到的形态",
+			NameEN: "Detected Pattern",
+			Unit:   "",
+			DescZH: "检测到的几何形态: double_bottom/double_top/triangle/compression/none",
+			DescEN: "Detected geometric pattern: double_bottom/double_top/triangle/compression/none",
+		},
+		"pattern.stage": {
+			NameZH: "形态阶段",
+			NameEN: "Pattern Stage",
+			Unit:   "",
+			DescZH: "形态阶段: forming/confirmed/failed",
+			DescEN: "Pattern stage: forming/confirmed/failed",
+		},
+		"trend.slope": {
+			NameZH: "价格斜率",
+			NameEN: "Price Slope",
+			Unit:   "",
+			DescZH: "价格斜率，正值向上，负值向下",
+			DescEN: "Price slope, positive values indicate upward, negative values indicate downward",
+		},
+		"trend.key_levels": {
+			NameZH: "关键价位",
+			NameEN: "Key Levels",
+			Unit:   "USDT",
+			DescZH: "关键支撑阻力价位",
+			DescEN: "Key support and resistance price levels",
+		},
+	},
 }
 
 // ========== 双语规则定义 ==========
@@ -481,6 +519,12 @@ func getSchemaPromptZH() string {
 		prompt += formatFieldDefZH(key, field)
 	}
 
+	// 技术分析
+	prompt += "\n### 技术分析\n"
+	for key, field := range DataDictionary["TechnicalAnalysis"] {
+		prompt += formatFieldDefZH(key, field)
+	}
+
 	// 交易规则
 	prompt += "\n## ⚖️ 交易规则\n\n"
 	prompt += "### 风险管理\n"
@@ -537,6 +581,12 @@ func getSchemaPromptEN() string {
 	// Market Data
 	prompt += "\n### Market Data\n"
 	for key, field := range DataDictionary["MarketData"] {
+		prompt += formatFieldDefEN(key, field)
+	}
+
+	// Technical Analysis
+	prompt += "\n### Technical Analysis\n"
+	for key, field := range DataDictionary["TechnicalAnalysis"] {
 		prompt += formatFieldDefEN(key, field)
 	}
 

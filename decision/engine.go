@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"nofx/analysis"
 	"nofx/logger"
 	"nofx/market"
 	"nofx/mcp"
@@ -1259,6 +1260,36 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 		}
 	}
 
+	// Technical Analysis (pattern detection, wavetrend, trend analysis)
+	// Perform analysis on the primary timeframe klines if available
+	if len(data.TimeframeData) > 0 {
+		// Try to find klines from preferred timeframes in order
+		preferredTimeframes := []string{"5m", "15m", "3m", "1h", "30m"}
+		var klines []market.Kline
+		var selectedTF string
+
+		for _, tf := range preferredTimeframes {
+			if tfData, ok := data.TimeframeData[tf]; ok && len(tfData.Klines) > 0 {
+				klines = convertKlineBarsToKlines(tfData.Klines)
+				selectedTF = tf
+				break
+			}
+		}
+
+		if len(klines) > 0 {
+			analysisResult := analysis.AnalyzeWithDefaults(klines)
+			if analysisResult != nil {
+				analysisJSON := formatAnalysisResult(analysisResult)
+				if analysisJSON != "" && analysisJSON != "{}" {
+					sb.WriteString(fmt.Sprintf("=== Technical Analysis (%s) ===\n\n", strings.ToUpper(selectedTF)))
+					sb.WriteString("```json\n")
+					sb.WriteString(analysisJSON)
+					sb.WriteString("\n```\n\n")
+				}
+			}
+		}
+	}
+
 	return sb.String()
 }
 
@@ -1428,6 +1459,39 @@ func formatFloatSlice(values []float64) string {
 		strValues[i] = fmt.Sprintf("%.4f", v)
 	}
 	return "[" + strings.Join(strValues, ", ") + "]"
+}
+
+// convertKlineBarsToKlines converts market.KlineBar slice to market.Kline slice
+// for use with the analysis module.
+func convertKlineBarsToKlines(bars []market.KlineBar) []market.Kline {
+	klines := make([]market.Kline, len(bars))
+	for i, bar := range bars {
+		klines[i] = market.Kline{
+			OpenTime:  bar.Time,
+			Open:      bar.Open,
+			High:      bar.High,
+			Low:       bar.Low,
+			Close:     bar.Close,
+			Volume:    bar.Volume,
+			CloseTime: bar.Time + 60000, // Approximate close time (1 minute later)
+		}
+	}
+	return klines
+}
+
+// formatAnalysisResult formats the analysis result as JSON for injection into the prompt.
+func formatAnalysisResult(result *analysis.AnalysisResult) string {
+	if result == nil {
+		return ""
+	}
+
+	jsonBytes, err := json.Marshal(result)
+	if err != nil {
+		logger.Warnf("Failed to marshal analysis result: %v", err)
+		return ""
+	}
+
+	return string(jsonBytes)
 }
 
 // ============================================================================
