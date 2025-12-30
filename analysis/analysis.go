@@ -23,6 +23,9 @@ type AnalysisResult struct {
 	// WaveTrend indicator results
 	WaveTrend *indicator.WaveTrendResult `json:"wavetrend,omitempty"`
 
+	// Volatility warning results (BB/KC squeeze)
+	VolatilityWarning *indicator.VolatilityWarningResult `json:"volatility_warning,omitempty"`
+
 	// Trend analysis results (structure points, key levels)
 	Trend *trend.TrendResult `json:"trend,omitempty"`
 }
@@ -35,20 +38,28 @@ type Config struct {
 	// EnableWaveTrend enables WaveTrend indicator calculation
 	EnableWaveTrend bool `json:"enable_wavetrend"`
 
+	// EnableVolatilityWarning enables volatility warning calculation
+	EnableVolatilityWarning bool `json:"enable_volatility_warning"`
+
 	// EnableTrend enables trend/structure analysis
 	EnableTrend bool `json:"enable_trend"`
 
 	// WaveTrend specific settings
 	WaveTrend indicator.WaveTrendConfig `json:"wavetrend_config,omitempty"`
+
+	// Volatility warning specific settings
+	VolatilityWarning indicator.VolatilityWarningConfig `json:"volatility_warning_config,omitempty"`
 }
 
 // DefaultConfig returns the default analysis configuration.
 func DefaultConfig() Config {
 	return Config{
-		EnablePattern:   true,
-		EnableWaveTrend: true,
-		EnableTrend:     true,
-		WaveTrend:       indicator.DefaultWaveTrendConfig(),
+		EnablePattern:           true,
+		EnableWaveTrend:         true,
+		EnableVolatilityWarning: true,
+		EnableTrend:             true,
+		WaveTrend:               indicator.DefaultWaveTrendConfig(),
+		VolatilityWarning:       indicator.DefaultVolatilityWarningConfig(),
 	}
 }
 
@@ -69,6 +80,11 @@ func Analyze(klines []market.Kline, cfg Config) *AnalysisResult {
 	// WaveTrend indicator
 	if cfg.EnableWaveTrend {
 		result.WaveTrend = indicator.CalculateWaveTrend(klines, cfg.WaveTrend)
+	}
+
+	// Volatility warning (BB/KC squeeze)
+	if cfg.EnableVolatilityWarning {
+		result.VolatilityWarning = indicator.CalculateVolatilityWarning(klines, cfg.VolatilityWarning)
 	}
 
 	// Trend/structure analysis
