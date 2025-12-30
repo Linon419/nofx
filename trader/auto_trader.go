@@ -439,35 +439,22 @@ func (at *AutoTrader) Run() error {
 		return nil
 	}
 
-	logger.Infof("[%s] Decision schedule unavailable, falling back to scan interval %v", at.name, at.config.ScanInterval)
-	ticker := time.NewTicker(at.config.ScanInterval)
-	defer ticker.Stop()
+	logger.Infof("[%s] Decision schedule unavailable, aligning fallback scan interval %v", at.name, at.config.ScanInterval)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		<-at.stopMonitorCh
+		cancel()
+	}()
 
-	// Execute immediately on first run
-	if err := at.runCycle(); err != nil {
-		logger.Infof("Execution failed: %v", err)
-	}
-
-	for {
-		at.isRunningMutex.RLock()
-		running := at.isRunning
-		at.isRunningMutex.RUnlock()
-
-		if !running {
-			break
+	sched := newAlignedOnceScheduler(ctx, at.config.ScanInterval, at.config.ScanInterval, 0)
+	sched.Name = fmt.Sprintf("scan-%s", at.config.ScanInterval)
+	sched.RunImmediately = false
+	sched.Start(func() {
+		if err := at.runCycle(); err != nil {
+			logger.Infof("Execution failed: %v", err)
 		}
-
-		select {
-		case <-ticker.C:
-			if err := at.runCycle(); err != nil {
-				logger.Infof("Execution failed: %v", err)
-			}
-		case <-at.stopMonitorCh:
-			logger.Infof("[%s] Stop signal received, exiting automatic trading main loop", at.name)
-			return nil
-		}
-	}
-
+	})
 	return nil
 }
 
