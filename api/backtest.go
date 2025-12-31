@@ -1,4 +1,4 @@
-﻿package api
+package api
 
 import (
 	"context"
@@ -96,6 +96,7 @@ func (s *Server) handleBacktestStart(c *gin.Context) {
 			strategyConfig.CoinSource.SourceType,
 			strategyConfig.CoinSource.UseCoinPool,
 			strategyConfig.CoinSource.UseOITop,
+			strategyConfig.CoinSource.UseOTCTop,
 			strategyConfig.CoinSource.StaticCoins)
 
 		// If no symbols provided, fetch from strategy's coin source
@@ -905,4 +906,3 @@ func (s *Server) hydrateBacktestAIConfig(cfg *backtest.BacktestConfig) error {
 
 	return nil
 }
-
