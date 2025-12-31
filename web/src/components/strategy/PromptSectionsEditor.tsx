@@ -67,8 +67,8 @@ export function PromptSectionsEditor({
       entryStandardsDesc: { zh: '定义开仓信号条件和避免事项', en: 'Define entry signal conditions and avoidances' },
       decisionProcess: { zh: '决策流程', en: 'Decision Process' },
       decisionProcessDesc: { zh: '设定决策步骤和思考流程', en: 'Set decision steps and thinking process' },
-      recentTradesLimit: { zh: '??????', en: 'Recent Trades Count' },
-      recentTradesLimitDesc: { zh: '?? User Prompt ?????????????3?', en: 'Number of recent closed trades appended to the User Prompt (default 3).' },
+      recentTradesLimit: { zh: '最近成交条数', en: 'Recent Trades Count' },
+      recentTradesLimitDesc: { zh: '附加到 User Prompt 的最近平仓订单数量（默认 3）', en: 'Number of recent closed trades appended to the User Prompt (default 3).' },
       resetToDefault: { zh: '重置为默认', en: 'Reset to Default' },
       chars: { zh: '字符', en: 'chars' },
     }
