@@ -16,7 +16,7 @@ go run main.go
 - `crypto/` - Core encryption modules
 - `api/crypto_handler.go` - Encryption API endpoints
 - `web/src/lib/crypto.ts` - Frontend encryption module
-- `scripts/migrate_encryption.go` - Data migration tool
+- `scripts/migrate_encryption` - Data migration tool
 - `deploy_encryption.sh` - One-click deployment script
 
 ### Modified Files

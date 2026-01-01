@@ -16,32 +16,40 @@ export function RiskControlEditor({
 }: RiskControlEditorProps) {
   const t = (key: string) => {
     const translations: Record<string, Record<string, string>> = {
-      positionLimits: { zh: '仓位限制', en: 'Position Limits' },
-      maxPositions: { zh: '最大持仓数量', en: 'Max Positions' },
+      positionLimits: { zh: '持仓限制', en: 'Position Limits' },
+      maxPositions: { zh: '最大持仓数', en: 'Max Positions' },
       maxPositionsDesc: { zh: '同时持有的最大币种数量', en: 'Maximum coins held simultaneously' },
       // Trading leverage (exchange leverage)
-      tradingLeverage: { zh: '交易杠杆（交易所杠杆）', en: 'Trading Leverage (Exchange)' },
+      tradingLeverage: { zh: '交易杠杆（交易所）', en: 'Trading Leverage (Exchange)' },
       btcEthLeverage: { zh: 'BTC/ETH 交易杠杆', en: 'BTC/ETH Trading Leverage' },
-      btcEthLeverageDesc: { zh: '交易所开仓使用的杠杆倍数', en: 'Exchange leverage for opening positions' },
+      btcEthLeverageDesc: { zh: '开仓使用的交易所杠杆', en: 'Exchange leverage for opening positions' },
       altcoinLeverage: { zh: '山寨币交易杠杆', en: 'Altcoin Trading Leverage' },
-      altcoinLeverageDesc: { zh: '交易所开仓使用的杠杆倍数', en: 'Exchange leverage for opening positions' },
+      altcoinLeverageDesc: { zh: '开仓使用的交易所杠杆', en: 'Exchange leverage for opening positions' },
+      atrLeverage: { zh: 'ATR 杠杆与止损定仓', en: 'ATR Leverage & Stop-Loss Sizing' },
+      atrLeverageDesc: { zh: '杠杆=round(close/max_atr_24h)，仓位按止损距离确定', en: 'Leverage=round(close/max_atr_24h), position size by stop-loss distance' },
+      atrEnabled: { zh: '启用 ATR 杠杆', en: 'Enable ATR leverage' },
+      atrEnabledDesc: { zh: '开启后系统会覆盖杠杆和仓位大小', en: 'When enabled, system overrides leverage and position size' },
+      atrPeriod: { zh: 'ATR 周期', en: 'ATR Period' },
+      atrTimeframe: { zh: 'ATR 时间周期', en: 'ATR Timeframe' },
+      stopLossRiskPct: { zh: '单笔风险(%)', en: 'Risk Per Trade (%)' },
+      stopLossRiskPctDesc: { zh: '单笔最大亏损占净值比例', en: 'Max loss as % of equity' },
       // Position value ratio (risk control) - CODE ENFORCED
       positionValueRatio: { zh: '仓位价值比例（代码强制）', en: 'Position Value Ratio (CODE ENFORCED)' },
-      positionValueRatioDesc: { zh: '单仓位名义价值 / 账户净值，由代码强制执行', en: 'Position notional value / equity, enforced by code' },
-      btcEthPositionValueRatio: { zh: 'BTC/ETH 仓位价值比例', en: 'BTC/ETH Position Value Ratio' },
-      btcEthPositionValueRatioDesc: { zh: '单仓最大名义价值 = 净值 × 此值（代码强制）', en: 'Max position value = equity × this ratio (CODE ENFORCED)' },
-      altcoinPositionValueRatio: { zh: '山寨币仓位价值比例', en: 'Altcoin Position Value Ratio' },
-      altcoinPositionValueRatioDesc: { zh: '单仓最大名义价值 = 净值 × 此值（代码强制）', en: 'Max position value = equity × this ratio (CODE ENFORCED)' },
+      positionValueRatioDesc: { zh: '仓位名义价值/净值，代码强制', en: 'Position notional value / equity, enforced by code' },
+      btcEthPositionValueRatio: { zh: 'BTC/ETH 仓位比例', en: 'BTC/ETH Position Value Ratio' },
+      btcEthPositionValueRatioDesc: { zh: '最大仓位 = 净值 × 该比例（代码强制）', en: 'Max position value = equity ? this ratio (CODE ENFORCED)' },
+      altcoinPositionValueRatio: { zh: '山寨币仓位比例', en: 'Altcoin Position Value Ratio' },
+      altcoinPositionValueRatioDesc: { zh: '最大仓位 = 净值 × 该比例（代码强制）', en: 'Max position value = equity ? this ratio (CODE ENFORCED)' },
       riskParameters: { zh: '风险参数', en: 'Risk Parameters' },
-      minRiskReward: { zh: '最小风险回报比', en: 'Min Risk/Reward Ratio' },
-      minRiskRewardDesc: { zh: '开仓要求的最低盈亏比', en: 'Minimum profit ratio for opening' },
+      minRiskReward: { zh: '最小盈亏比', en: 'Min Risk/Reward Ratio' },
+      minRiskRewardDesc: { zh: '开仓所需的最低盈亏比', en: 'Minimum profit ratio for opening' },
       maxMarginUsage: { zh: '最大保证金使用率（代码强制）', en: 'Max Margin Usage (CODE ENFORCED)' },
-      maxMarginUsageDesc: { zh: '保证金使用率上限，由代码强制执行', en: 'Maximum margin utilization, enforced by code' },
+      maxMarginUsageDesc: { zh: '最大保证金使用率，代码强制', en: 'Maximum margin utilization, enforced by code' },
       entryRequirements: { zh: '开仓要求', en: 'Entry Requirements' },
       minPositionSize: { zh: '最小开仓金额', en: 'Min Position Size' },
       minPositionSizeDesc: { zh: 'USDT 最小名义价值', en: 'Minimum notional value in USDT' },
-      minConfidence: { zh: '最小信心度', en: 'Min Confidence' },
-      minConfidenceDesc: { zh: 'AI 开仓信心度阈值', en: 'AI confidence threshold for entry' },
+      minConfidence: { zh: '最低信心', en: 'Min Confidence' },
+      minConfidenceDesc: { zh: 'AI 开仓的信心阈值', en: 'AI confidence threshold for entry' },
     }
     return translations[key]?.[language] || key
   }
@@ -54,6 +62,8 @@ export function RiskControlEditor({
       onChange({ ...config, [key]: value })
     }
   }
+
+  const atrEnabled = config.atr_enabled ?? false
 
   return (
     <div className="space-y-6">
@@ -122,7 +132,7 @@ export function RiskControlEditor({
                 }
                 disabled={disabled}
                 min={1}
-                max={20}
+                max={40}
                 className="flex-1 accent-yellow-500"
               />
               <span
@@ -153,7 +163,7 @@ export function RiskControlEditor({
                 }
                 disabled={disabled}
                 min={1}
-                max={20}
+                max={40}
                 className="flex-1 accent-yellow-500"
               />
               <span
@@ -166,6 +176,124 @@ export function RiskControlEditor({
           </div>
         </div>
 
+        {/* ATR Leverage & Stop-Loss Sizing */}
+        <div className="mb-2">
+          <p className="text-xs font-medium mb-2" style={{ color: '#F0B90B' }}>
+            {t('atrLeverage')}
+          </p>
+          <p className="text-xs" style={{ color: '#848E9C' }}>
+            {t('atrLeverageDesc')}
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div
+            className="p-4 rounded-lg"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+          >
+            <label className="block text-sm mb-1" style={{ color: '#EAECEF' }}>
+              {t('atrEnabled')}
+            </label>
+            <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+              {t('atrEnabledDesc')}
+            </p>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={atrEnabled}
+                onChange={(e) => updateField('atr_enabled', e.target.checked)}
+                disabled={disabled}
+                className="accent-yellow-500"
+              />
+              <span style={{ color: '#F0B90B' }}>
+                {atrEnabled ? 'ON' : 'OFF'}
+              </span>
+            </label>
+          </div>
+
+          <div
+            className="p-4 rounded-lg"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+          >
+            <label className="block text-sm mb-1" style={{ color: '#EAECEF' }}>
+              {t('stopLossRiskPct')}
+            </label>
+            <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+              {t('stopLossRiskPctDesc')}
+            </p>
+            <div className="flex items-center">
+              <input
+                type="number"
+                value={config.stop_loss_risk_pct ?? 5}
+                onChange={(e) =>
+                  updateField('stop_loss_risk_pct', parseFloat(e.target.value) || 5)
+                }
+                disabled={disabled || !atrEnabled}
+                min={0.1}
+                max={20}
+                step={0.1}
+                className="w-24 px-3 py-2 rounded"
+                style={{
+                  background: '#1E2329',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
+              <span className="ml-2" style={{ color: '#848E9C' }}>
+                %
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div
+            className="p-4 rounded-lg"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+          >
+            <label className="block text-sm mb-1" style={{ color: '#EAECEF' }}>
+              {t('atrPeriod')}
+            </label>
+            <input
+              type="number"
+              value={config.atr_period ?? 14}
+              onChange={(e) =>
+                updateField('atr_period', parseInt(e.target.value) || 14)
+              }
+              disabled={disabled || !atrEnabled}
+              min={5}
+              max={200}
+              className="w-24 px-3 py-2 rounded"
+              style={{
+                background: '#1E2329',
+                border: '1px solid #2B3139',
+                color: '#EAECEF',
+              }}
+            />
+          </div>
+
+          <div
+            className="p-4 rounded-lg"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+          >
+            <label className="block text-sm mb-1" style={{ color: '#EAECEF' }}>
+              {t('atrTimeframe')}
+            </label>
+            <select
+              value={config.atr_timeframe ?? '1d'}
+              onChange={(e) => updateField('atr_timeframe', e.target.value)}
+              disabled={disabled || !atrEnabled}
+              className="w-full px-3 py-2 rounded"
+              style={{
+                background: '#1E2329',
+                border: '1px solid #2B3139',
+                color: '#EAECEF',
+              }}
+            >
+              <option value="1h">1h</option>
+              <option value="4h">4h</option>
+              <option value="1d">1d</option>
+            </select>
+          </div>
+        </div>
         {/* Position Value Ratio (Risk Control - CODE ENFORCED) */}
         <div className="mb-2">
           <p className="text-xs font-medium" style={{ color: '#0ECB81' }}>
@@ -389,3 +517,6 @@ export function RiskControlEditor({
     </div>
   )
 }
+
+
+

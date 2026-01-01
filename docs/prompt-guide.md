@@ -127,7 +127,7 @@ Entry conditions: Confidence ≥ 85, multiple indicator convergence.
 
 - Risk-reward ratio ≥ 1:3
 - Maximum 3 positions simultaneously
-- Leverage limits (BTC/ETH 20x, altcoins 5x)
+- Leverage limits (BTC/ETH 40x, altcoins 40x)
 - Margin usage rate ≤ 90%
 
 ⚠️ **Methods 1 & 2**: These constraints are automatically added and cannot be overridden
@@ -411,8 +411,8 @@ The following constraints are enforced by the system. **Methods 1 & 2** automati
 
 #### 4. Leverage Limits
 **Requirement**:
-- Altcoins: Maximum 5x leverage
-- BTC/ETH: Maximum 20x leverage
+- Altcoins: Maximum 40x leverage
+- BTC/ETH: Maximum 40x leverage
 
 ⚠️ **Strictly Enforced**: Decisions exceeding limits will be rejected
 
@@ -870,8 +870,8 @@ Single position:
 Maximum positions: 3 coins
 
 Leverage usage:
-- Altcoins: 4~5x leverage (near limit)
-- BTC/ETH: 15~20x leverage (near limit)
+- Altcoins: 30~40x leverage (near limit)
+- BTC/ETH: 30~40x leverage (near limit)
 
 # Stop-Loss/Take-Profit (Flexible)
 
@@ -1355,7 +1355,7 @@ Your custom Prompt must include:
 1. Risk-reward ratio ≥ 1:3
 2. Maximum 3 positions
 3. Single position: Altcoin 0.8-1.5x equity, BTC/ETH 5-10x equity
-4. Leverage: Altcoin ≤5x, BTC/ETH ≤20x
+4. Leverage: Altcoin ≤40x, BTC/ETH ≤40x
 5. Margin usage ≤ 90%
 6. Minimum opening: General ≥12U, BTC/ETH ≥60U
 
@@ -1422,7 +1422,7 @@ Chain of thought analysis
 
 **Common Causes**:
 - Risk-reward ratio < 1:3
-- Leverage exceeds limits (Altcoin >5x, BTC/ETH >20x)
+- Leverage exceeds limits (Altcoin >40x, BTC/ETH >40x)
 - Position size out of range
 - Opening amount too small (<12 USDT or BTC/ETH <60 USDT)
 

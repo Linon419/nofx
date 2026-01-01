@@ -59,7 +59,7 @@ func main() {
 
 	if dryRun {
 		fmt.Println("\n⚠️  预览模式（--dry-run），不会删除数据")
-		fmt.Println("   运行 'go run scripts/cleanup_duplicates.go' 来执行实际清理")
+		fmt.Println("   运行 'go run ./scripts/cleanup_duplicates' 来执行实际清理")
 		return
 	}
 

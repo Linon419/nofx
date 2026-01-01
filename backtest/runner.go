@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"nofx/logger"
 	"os"
 	"path/filepath"
@@ -599,6 +600,16 @@ func (r *Runner) invokeAIWithRetry(ctx *decision.Context) (*decision.FullDecisio
 
 func (r *Runner) executeDecision(dec decision.Decision, priceMap map[string]float64, ts int64, cycle int) (store.DecisionAction, []TradeEvent, string, error) {
 	symbol := dec.Symbol
+
+	basePrice := priceMap[symbol]
+	if basePrice <= 0 {
+		return store.DecisionAction{}, nil, "", fmt.Errorf("price unavailable for %s", symbol)
+	}
+
+	if dec.Action == "open_long" || dec.Action == "open_short" {
+		r.applyATRLeverageAndSize(&dec, basePrice, ts)
+	}
+
 	usedLeverage := r.resolveLeverage(dec.Leverage, symbol)
 	actionRecord := store.DecisionAction{
 		Action:    dec.Action,
@@ -607,10 +618,6 @@ func (r *Runner) executeDecision(dec decision.Decision, priceMap map[string]floa
 		Timestamp: time.UnixMilli(ts).UTC(),
 	}
 
-	basePrice := priceMap[symbol]
-	if basePrice <= 0 {
-		return actionRecord, nil, "", fmt.Errorf("price unavailable for %s", symbol)
-	}
 	fillPrice := r.executionPrice(symbol, basePrice, ts)
 
 	switch dec.Action {
@@ -801,6 +808,77 @@ func (r *Runner) resolveLeverage(requested int, symbol string) int {
 		}
 	}
 	return 5
+}
+
+func (r *Runner) applyATRLeverageAndSize(dec *decision.Decision, entryPrice float64, ts int64) {
+	if r == nil || dec == nil || r.strategyEngine == nil || r.feed == nil {
+		return
+	}
+
+	riskControl := r.strategyEngine.GetConfig().RiskControl
+	if !riskControl.ATREnabled {
+		return
+	}
+
+	cfg := decision.NormalizeLeverageConfig(decision.LeverageConfig{
+		ATRPeriod:       riskControl.ATRPeriod,
+		ATRTimeframe:    riskControl.ATRTimeframe,
+		MaxLeverage:     r.maxLeverageForSymbol(dec.Symbol),
+		MinLeverage:     1,
+		StopLossRiskPct: riskControl.StopLossRiskPct,
+	})
+
+	var klines []market.Kline
+	ss, ok := r.feed.symbolSeries[dec.Symbol]
+	if !ok || ss == nil {
+		logger.Infof("📊 Backtest: missing symbol data for %s, fallback leverage=%dx", dec.Symbol, cfg.MinLeverage)
+	} else if _, ok := ss.byTF[cfg.ATRTimeframe]; !ok {
+		logger.Infof("📊 Backtest: missing timeframe %s for %s, fallback leverage=%dx", cfg.ATRTimeframe, dec.Symbol, cfg.MinLeverage)
+	} else {
+		klines = r.feed.sliceUpTo(dec.Symbol, cfg.ATRTimeframe, ts)
+		if len(klines) == 0 {
+			logger.Infof("📊 Backtest: missing ATR klines for %s %s, fallback leverage=%dx",
+				dec.Symbol, cfg.ATRTimeframe, cfg.MinLeverage)
+			klines = nil
+		}
+	}
+
+	stopDistPct := stopDistancePct(entryPrice, dec.StopLoss)
+	snapshot := r.snapshotState()
+	equity := snapshot.Equity
+	if equity <= 0 {
+		equity = r.account.InitialBalance()
+	}
+
+	result := decision.CalcLeverageWithPositionSize(klines, cfg.ATRTimeframe, cfg, equity, stopDistPct)
+	if result.Leverage > 0 {
+		dec.Leverage = result.Leverage
+	}
+	if result.PositionSizeUSD > 0 {
+		dec.PositionSizeUSD = result.PositionSizeUSD
+	}
+}
+
+func (r *Runner) maxLeverageForSymbol(symbol string) int {
+	if r == nil || r.strategyEngine == nil {
+		return 0
+	}
+	rc := r.strategyEngine.GetConfig().RiskControl
+	if strings.HasPrefix(strings.ToUpper(symbol), "BTC") || strings.HasPrefix(strings.ToUpper(symbol), "ETH") {
+		if rc.BTCETHMaxLeverage > 0 {
+			return rc.BTCETHMaxLeverage
+		}
+	} else if rc.AltcoinMaxLeverage > 0 {
+		return rc.AltcoinMaxLeverage
+	}
+	return 5
+}
+
+func stopDistancePct(entryPrice float64, stopLoss float64) float64 {
+	if entryPrice <= 0 || stopLoss <= 0 {
+		return 0
+	}
+	return math.Abs(entryPrice-stopLoss) / entryPrice * 100
 }
 
 func (r *Runner) remainingPosition(symbol, side string) float64 {

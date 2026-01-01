@@ -493,8 +493,8 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "BTC/ETH leverage must be between 1-50x"})
 		return
 	}
-	if req.AltcoinLeverage < 0 || req.AltcoinLeverage > 20 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Altcoin leverage must be between 1-20x"})
+	if req.AltcoinLeverage < 0 || req.AltcoinLeverage > 40 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Altcoin leverage must be between 1-40x"})
 		return
 	}
 

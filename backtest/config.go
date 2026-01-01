@@ -20,8 +20,12 @@ type AIConfig struct {
 }
 
 type LeverageConfig struct {
-	BTCETHLeverage  int `json:"btc_eth_leverage"`
-	AltcoinLeverage int `json:"altcoin_leverage"`
+	BTCETHLeverage  int     `json:"btc_eth_leverage"`
+	AltcoinLeverage int     `json:"altcoin_leverage"`
+	ATREnabled      bool    `json:"atr_enabled"`
+	ATRPeriod       int     `json:"atr_period"`
+	ATRTimeframe    string  `json:"atr_timeframe"`
+	StopLossRiskPct float64 `json:"stop_loss_risk_pct"`
 }
 
 // BacktestConfig describes the input configuration for a backtest run.
@@ -93,6 +97,51 @@ func (cfg *BacktestConfig) Validate() error {
 		normTF = append(normTF, normalized)
 	}
 	cfg.Timeframes = normTF
+
+	atrEnabled := cfg.Leverage.ATREnabled
+	atrPeriod := cfg.Leverage.ATRPeriod
+	atrTimeframe := cfg.Leverage.ATRTimeframe
+	stopLossRiskPct := cfg.Leverage.StopLossRiskPct
+
+	if !atrEnabled && cfg.loadedStrategy != nil &&
+		cfg.loadedStrategy.RiskControl.ATREnabled &&
+		atrPeriod == 0 && atrTimeframe == "" && stopLossRiskPct == 0 {
+		atrEnabled = true
+		atrPeriod = cfg.loadedStrategy.RiskControl.ATRPeriod
+		atrTimeframe = cfg.loadedStrategy.RiskControl.ATRTimeframe
+		stopLossRiskPct = cfg.loadedStrategy.RiskControl.StopLossRiskPct
+	}
+
+	if atrEnabled {
+		if atrPeriod <= 0 {
+			atrPeriod = 14
+		}
+		if atrTimeframe == "" {
+			atrTimeframe = "1d"
+		} else if norm, err := market.NormalizeTimeframe(atrTimeframe); err == nil {
+			atrTimeframe = norm
+		} else {
+			atrTimeframe = "1d"
+		}
+		if stopLossRiskPct <= 0 {
+			stopLossRiskPct = 5.0
+		}
+		cfg.Leverage.ATREnabled = atrEnabled
+		cfg.Leverage.ATRPeriod = atrPeriod
+		cfg.Leverage.ATRTimeframe = atrTimeframe
+		cfg.Leverage.StopLossRiskPct = stopLossRiskPct
+
+		hasATR := false
+		for _, tf := range cfg.Timeframes {
+			if tf == atrTimeframe {
+				hasATR = true
+				break
+			}
+		}
+		if !hasATR {
+			cfg.Timeframes = append(cfg.Timeframes, atrTimeframe)
+		}
+	}
 
 	if cfg.DecisionTimeframe == "" {
 		cfg.DecisionTimeframe = cfg.Timeframes[0]
@@ -220,6 +269,18 @@ func (cfg *BacktestConfig) ToStrategyConfig() *store.StrategyConfig {
 		if cfg.Leverage.AltcoinLeverage > 0 {
 			result.RiskControl.AltcoinMaxLeverage = cfg.Leverage.AltcoinLeverage
 		}
+		if cfg.Leverage.ATREnabled {
+			result.RiskControl.ATREnabled = true
+		}
+		if cfg.Leverage.ATRPeriod > 0 {
+			result.RiskControl.ATRPeriod = cfg.Leverage.ATRPeriod
+		}
+		if cfg.Leverage.ATRTimeframe != "" {
+			result.RiskControl.ATRTimeframe = cfg.Leverage.ATRTimeframe
+		}
+		if cfg.Leverage.StopLossRiskPct > 0 {
+			result.RiskControl.StopLossRiskPct = cfg.Leverage.StopLossRiskPct
+		}
 
 		// Override custom prompt if provided in backtest config
 		if cfg.CustomPrompt != "" {
@@ -274,6 +335,10 @@ func (cfg *BacktestConfig) ToStrategyConfig() *store.StrategyConfig {
 			MaxPositions:                 3,
 			BTCETHMaxLeverage:            cfg.Leverage.BTCETHLeverage,
 			AltcoinMaxLeverage:           cfg.Leverage.AltcoinLeverage,
+			ATREnabled:                   cfg.Leverage.ATREnabled,
+			ATRPeriod:                    cfg.Leverage.ATRPeriod,
+			ATRTimeframe:                 cfg.Leverage.ATRTimeframe,
+			StopLossRiskPct:              cfg.Leverage.StopLossRiskPct,
 			BTCETHMaxPositionValueRatio:  5.0,
 			AltcoinMaxPositionValueRatio: 1.0,
 			MaxMarginUsage:               0.9,

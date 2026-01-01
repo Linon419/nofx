@@ -441,6 +441,7 @@ export interface PromptSectionsConfig {
   trading_frequency?: string;
   entry_standards?: string;
   decision_process?: string;
+  exit_strategy_plan?: string;
   recent_trades_limit?: number;
 }
 
@@ -525,6 +526,12 @@ export interface RiskControlConfig {
   // Trading Leverage - exchange leverage for opening positions (AI guided)
   btc_eth_max_leverage: number;    // BTC/ETH max exchange leverage
   altcoin_max_leverage: number;    // Altcoin max exchange leverage
+
+  // ATR-based leverage & stop-loss sizing
+  atr_enabled?: boolean;
+  atr_period?: number;
+  atr_timeframe?: string;
+  stop_loss_risk_pct?: number;
 
   // Position Value Ratio - single position notional value / account equity (CODE ENFORCED)
   // Max position value = equity × this ratio

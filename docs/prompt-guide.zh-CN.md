@@ -127,7 +127,7 @@ graph LR
 
 - 风险回报比 ≥ 1:3
 - 最多持仓 3 个币种
-- 杠杆限制（BTC/ETH 20x，山寨币 5x）
+- 杠杆限制（BTC/ETH 40x，山寨币 40x）
 - 保证金使用率 ≤ 90%
 
 ⚠️ **方式1和2**: 这些约束自动添加，不可覆盖
@@ -411,8 +411,8 @@ unrealized_pnl, peak_pnl_pct, margin_used, leverage
 
 #### 4. 杠杆限制
 **要求**:
-- 山寨币: 最大 5x 杠杆
-- BTC/ETH: 最大 20x 杠杆
+- 山寨币: 最大 40x 杠杆
+- BTC/ETH: 最大 40x 杠杆
 
 ⚠️ **严格执行**: 超过此限制的决策会被系统拒绝
 
@@ -870,8 +870,8 @@ docker-compose restart
 最多持仓：3 个币种
 
 杠杆使用：
-- 山寨币: 4~5x 杠杆（接近上限）
-- BTC/ETH: 15~20x 杠杆（接近上限）
+- 山寨币: 30~40x 杠杆（接近上限）
+- BTC/ETH: 30~40x 杠杆（接近上限）
 
 # 止盈止损（灵活）
 
@@ -1356,7 +1356,7 @@ unrealized_pnl, peak_pnl_pct, margin_used, leverage, holding_duration
 1. 风险回报比 ≥ 1:3
 2. 最多持仓 3 个
 3. 单币仓位: 山寨 0.8-1.5x净值，BTC/ETH 5-10x净值
-4. 杠杆: 山寨≤5x，BTC/ETH≤20x
+4. 杠杆: 山寨≤40x，BTC/ETH≤40x
 5. 保证金使用率 ≤ 90%
 6. 最小开仓: 一般≥12U，BTC/ETH≥60U
 
@@ -1423,7 +1423,7 @@ unrealized_pnl, peak_pnl_pct, margin_used, leverage, holding_duration
 
 **常见原因**:
 - 风险回报比 < 1:3
-- 杠杆超过限制（山寨币>5x，BTC/ETH>20x）
+- 杠杆超过限制（山寨币>40x，BTC/ETH>40x）
 - 仓位大小超出范围
 - 开仓金额过小（<12 USDT 或 BTC/ETH<60 USDT）
 

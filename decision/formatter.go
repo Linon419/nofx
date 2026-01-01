@@ -240,6 +240,11 @@ func formatCurrentPositionsZH(ctx *Context) string {
 		sb.WriteString(fmt.Sprintf("杠杆 %dx | ", pos.Leverage))
 		sb.WriteString(fmt.Sprintf("保证金 %.0f USDT | ", pos.MarginUsed))
 		sb.WriteString(fmt.Sprintf("强平价 %.4f\n", pos.LiquidationPrice))
+		if meta := findOTCTopCandidate(ctx, pos.Symbol); meta != nil {
+			if line := formatOTCPeriodQualityLine(*meta); line != "" {
+				sb.WriteString(fmt.Sprintf("   %s\n", line))
+			}
+		}
 
 		// 添加分析提示
 		if drawdown < -0.30*pos.PeakPnLPct && pos.PeakPnLPct > 0.02 {
@@ -271,6 +276,9 @@ func formatCandidateCoinsZH(ctx *Context) string {
 
 	for i, coin := range ctx.CandidateCoins {
 		sb.WriteString(fmt.Sprintf("### %d. %s\n\n", i+1, coin.Symbol))
+		if line := formatOTCPeriodQualityLine(coin); line != "" {
+			sb.WriteString(line + "\n\n")
+		}
 
 		// 当前价格
 		if ctx.MarketDataMap != nil {
@@ -512,6 +520,11 @@ func formatCurrentPositionsEN(ctx *Context) string {
 		sb.WriteString(fmt.Sprintf("Leverage %dx | ", pos.Leverage))
 		sb.WriteString(fmt.Sprintf("Margin %.0f USDT | ", pos.MarginUsed))
 		sb.WriteString(fmt.Sprintf("Liq Price %.4f\n", pos.LiquidationPrice))
+		if meta := findOTCTopCandidate(ctx, pos.Symbol); meta != nil {
+			if line := formatOTCPeriodQualityLine(*meta); line != "" {
+				sb.WriteString(fmt.Sprintf("   %s\n", line))
+			}
+		}
 
 		// Analysis hints
 		if drawdown < -0.30*pos.PeakPnLPct && pos.PeakPnLPct > 0.02 {
@@ -542,6 +555,9 @@ func formatCandidateCoinsEN(ctx *Context) string {
 
 	for i, coin := range ctx.CandidateCoins {
 		sb.WriteString(fmt.Sprintf("### %d. %s\n\n", i+1, coin.Symbol))
+		if line := formatOTCPeriodQualityLine(coin); line != "" {
+			sb.WriteString(line + "\n\n")
+		}
 
 		if ctx.MarketDataMap != nil {
 			if mdata, ok := ctx.MarketDataMap[coin.Symbol]; ok {

@@ -467,7 +467,7 @@ export const translations = {
     tradingSymbolsDescription:
       'Empty = use default symbols. Must end with USDT (e.g., BTCUSDT, ETHUSDT)',
     btcEthLeverageValidation: 'BTC/ETH leverage must be between 1-50x',
-    altcoinLeverageValidation: 'Altcoin leverage must be between 1-20x',
+    altcoinLeverageValidation: 'Altcoin leverage must be between 1-40x',
     invalidSymbolFormat: 'Invalid symbol format: {symbol}, must end with USDT',
 
     // System Prompt Templates
@@ -1656,7 +1656,7 @@ export const translations = {
     tradingSymbolsDescription:
       '留空 = 使用默认币种。必须以USDT结尾（如：BTCUSDT, ETHUSDT）',
     btcEthLeverageValidation: 'BTC/ETH杠杆必须在1-50倍之间',
-    altcoinLeverageValidation: '山寨币杠杆必须在1-20倍之间',
+    altcoinLeverageValidation: '山寨币杠杆必须在1-40倍之间',
     invalidSymbolFormat: '无效的币种格式：{symbol}，必须以USDT结尾',
 
     // System Prompt Templates

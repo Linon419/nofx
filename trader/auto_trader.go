@@ -36,13 +36,13 @@ type AutoTraderConfig struct {
 	BybitSecretKey string
 
 	// OKX API configuration
-	OKXAPIKey    string
-	OKXSecretKey string
+	OKXAPIKey     string
+	OKXSecretKey  string
 	OKXPassphrase string
 
 	// Bitget API configuration
-	BitgetAPIKey    string
-	BitgetSecretKey string
+	BitgetAPIKey     string
+	BitgetSecretKey  string
 	BitgetPassphrase string
 
 	// Hyperliquid configuration
@@ -124,6 +124,10 @@ type AutoTrader struct {
 	peakPnLCacheMutex     sync.RWMutex       // Cache read-write lock
 	lastBalanceSyncTime   time.Time          // Last balance sync time
 	userID                string             // User ID
+	exitPlanLocks         map[string]*sync.Mutex
+	exitPlanLocksMu       sync.Mutex
+	pendingExitPlans      map[string]pendingExitPlan
+	pendingExitPlansMu    sync.Mutex
 }
 
 // NewAutoTrader creates an automatic trader
@@ -339,6 +343,8 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		peakPnLCacheMutex:     sync.RWMutex{},
 		lastBalanceSyncTime:   time.Now(),
 		userID:                userID,
+		exitPlanLocks:         make(map[string]*sync.Mutex),
+		pendingExitPlans:      make(map[string]pendingExitPlan),
 	}, nil
 }
 
@@ -444,7 +450,6 @@ func (at *AutoTrader) Run() error {
 	})
 	return nil
 }
-
 
 type decisionSchedule struct {
 	alignTimeframe string
@@ -568,6 +573,11 @@ func (at *AutoTrader) runCycle() error {
 		at.dailyPnL = 0
 		at.lastResetTime = time.Now()
 		logger.Info("📅 Daily P&L reset")
+	}
+
+	if err := at.monitorExitPlans(); err != nil {
+		logger.Infof("Exit plan monitor failed: %v", err)
+		record.ExecutionLog = append(record.ExecutionLog, fmt.Sprintf("exit plan monitor failed: %v", err))
 	}
 
 	// 4. Collect trading context
@@ -1098,6 +1108,8 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *decision.Decision, act
 		equity = availableBalance // Fallback to available balance
 	}
 
+	at.applyATRLeverageAndSize(decision, marketData.CurrentPrice, equity)
+
 	// [CODE ENFORCED] Position Value Ratio Check: position_value <= equity × ratio
 	adjustedPositionSize, wasCapped := at.enforcePositionValueRatio(decision.PositionSizeUSD, equity, decision.Symbol)
 	if wasCapped {
@@ -1156,12 +1168,14 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *decision.Decision, act
 	posKey := decision.Symbol + "_long"
 	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
 
-	// Set stop loss and take profit
-	if err := at.trader.SetStopLoss(decision.Symbol, "LONG", quantity, decision.StopLoss); err != nil {
-		logger.Infof("  Failed to set stop loss: %v", err)
-	}
-	if err := at.trader.SetTakeProfit(decision.Symbol, "LONG", quantity, decision.TakeProfit); err != nil {
-		logger.Infof("  Failed to set take profit: %v", err)
+	if !at.applyExitPlanOnOpen(decision, "LONG", marketData.CurrentPrice, quantity) {
+		// Set stop loss and take profit
+		if err := at.trader.SetStopLoss(decision.Symbol, "LONG", quantity, decision.StopLoss); err != nil {
+			logger.Infof("  Failed to set stop loss: %v", err)
+		}
+		if err := at.trader.SetTakeProfit(decision.Symbol, "LONG", quantity, decision.TakeProfit); err != nil {
+			logger.Infof("  Failed to set take profit: %v", err)
+		}
 	}
 
 	return nil
@@ -1214,6 +1228,8 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *decision.Decision, ac
 	} else {
 		equity = availableBalance // Fallback to available balance
 	}
+
+	at.applyATRLeverageAndSize(decision, marketData.CurrentPrice, equity)
 
 	// [CODE ENFORCED] Position Value Ratio Check: position_value <= equity × ratio
 	adjustedPositionSize, wasCapped := at.enforcePositionValueRatio(decision.PositionSizeUSD, equity, decision.Symbol)
@@ -1273,12 +1289,14 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *decision.Decision, ac
 	posKey := decision.Symbol + "_short"
 	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
 
-	// Set stop loss and take profit
-	if err := at.trader.SetStopLoss(decision.Symbol, "SHORT", quantity, decision.StopLoss); err != nil {
-		logger.Infof("  Failed to set stop loss: %v", err)
-	}
-	if err := at.trader.SetTakeProfit(decision.Symbol, "SHORT", quantity, decision.TakeProfit); err != nil {
-		logger.Infof("  Failed to set take profit: %v", err)
+	if !at.applyExitPlanOnOpen(decision, "SHORT", marketData.CurrentPrice, quantity) {
+		// Set stop loss and take profit
+		if err := at.trader.SetStopLoss(decision.Symbol, "SHORT", quantity, decision.StopLoss); err != nil {
+			logger.Infof("  Failed to set stop loss: %v", err)
+		}
+		if err := at.trader.SetTakeProfit(decision.Symbol, "SHORT", quantity, decision.TakeProfit); err != nil {
+			logger.Infof("  Failed to set take profit: %v", err)
+		}
 	}
 
 	return nil
@@ -2128,22 +2146,22 @@ func (at *AutoTrader) recordOrderFill(orderRecordID int64, exchangeOrderID, symb
 	normalizedSymbol := market.Normalize(symbol)
 
 	fill := &store.TraderFill{
-		TraderID:         at.id,
-		ExchangeID:       at.exchangeID,
-		ExchangeType:     at.exchange,
-		OrderID:          orderRecordID,
-		ExchangeOrderID:  exchangeOrderID,
-		ExchangeTradeID:  tradeID,
-		Symbol:           normalizedSymbol,
-		Side:             side,
-		Price:            price,
-		Quantity:         quantity,
-		QuoteQuantity:    price * quantity,
-		Commission:       fee,
-		CommissionAsset:  "USDT",
-		RealizedPnL:      0, // Will be calculated for close orders
-		IsMaker:          false, // Market orders are usually taker
-		CreatedAt:        time.Now(),
+		TraderID:        at.id,
+		ExchangeID:      at.exchangeID,
+		ExchangeType:    at.exchange,
+		OrderID:         orderRecordID,
+		ExchangeOrderID: exchangeOrderID,
+		ExchangeTradeID: tradeID,
+		Symbol:          normalizedSymbol,
+		Side:            side,
+		Price:           price,
+		Quantity:        quantity,
+		QuoteQuantity:   price * quantity,
+		Commission:      fee,
+		CommissionAsset: "USDT",
+		RealizedPnL:     0,     // Will be calculated for close orders
+		IsMaker:         false, // Market orders are usually taker
+		CreatedAt:       time.Now(),
 	}
 
 	// Calculate realized PnL for close orders
@@ -2180,6 +2198,85 @@ func (at *AutoTrader) recordOrderFill(orderRecordID int64, exchangeOrderID, symb
 func isBTCETH(symbol string) bool {
 	symbol = strings.ToUpper(symbol)
 	return strings.HasPrefix(symbol, "BTC") || strings.HasPrefix(symbol, "ETH")
+}
+
+func (at *AutoTrader) applyATRLeverageAndSize(dec *decision.Decision, entryPrice float64, equity float64) {
+	if at == nil || dec == nil || at.config.StrategyConfig == nil {
+		return
+	}
+	riskControl := at.config.StrategyConfig.RiskControl
+	if !riskControl.ATREnabled {
+		return
+	}
+
+	cfg := decision.NormalizeLeverageConfig(decision.LeverageConfig{
+		ATRPeriod:       riskControl.ATRPeriod,
+		ATRTimeframe:    riskControl.ATRTimeframe,
+		MaxLeverage:     at.maxLeverageForSymbol(dec.Symbol),
+		MinLeverage:     1,
+		StopLossRiskPct: riskControl.StopLossRiskPct,
+	})
+
+	limit := atrKlineLimit(cfg.ATRPeriod, cfg.ATRTimeframe)
+	klines, err := market.GetKlines(dec.Symbol, cfg.ATRTimeframe, limit)
+	if err != nil || len(klines) == 0 {
+		logger.Infof("  ⚠️ [ATR] Klines unavailable for %s %s, fallback leverage=%dx",
+			dec.Symbol, cfg.ATRTimeframe, cfg.MinLeverage)
+		klines = nil
+	}
+
+	stopDistPct := stopDistancePct(entryPrice, dec.StopLoss)
+	result := decision.CalcLeverageWithPositionSize(klines, cfg.ATRTimeframe, cfg, equity, stopDistPct)
+	if result.Leverage > 0 {
+		dec.Leverage = result.Leverage
+	}
+	if result.PositionSizeUSD > 0 {
+		dec.PositionSizeUSD = result.PositionSizeUSD
+	}
+}
+
+func (at *AutoTrader) maxLeverageForSymbol(symbol string) int {
+	if at == nil || at.config.StrategyConfig == nil {
+		return 0
+	}
+	riskControl := at.config.StrategyConfig.RiskControl
+	if isBTCETH(symbol) {
+		if riskControl.BTCETHMaxLeverage > 0 {
+			return riskControl.BTCETHMaxLeverage
+		}
+	} else if riskControl.AltcoinMaxLeverage > 0 {
+		return riskControl.AltcoinMaxLeverage
+	}
+	return 5
+}
+
+func atrKlineLimit(period int, timeframe string) int {
+	if period <= 0 {
+		period = 14
+	}
+	dur, err := market.TFDuration(timeframe)
+	if err != nil || dur <= 0 {
+		return 200
+	}
+	barsIn24h := int(math.Ceil((24 * time.Hour).Hours() / dur.Hours()))
+	if barsIn24h < 1 {
+		barsIn24h = 1
+	}
+	limit := period + barsIn24h + 5
+	if limit < 100 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	return limit
+}
+
+func stopDistancePct(entryPrice float64, stopLoss float64) float64 {
+	if entryPrice <= 0 || stopLoss <= 0 {
+		return 0
+	}
+	return math.Abs(entryPrice-stopLoss) / entryPrice * 100
 }
 
 // enforcePositionValueRatio checks and enforces position value ratio limits (CODE ENFORCED)
@@ -2266,4 +2363,3 @@ func getSideFromAction(action string) string {
 		return "BUY"
 	}
 }
-

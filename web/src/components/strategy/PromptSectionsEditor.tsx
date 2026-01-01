@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { ChevronDown, ChevronRight, RotateCcw, FileText } from 'lucide-react'
 import type { PromptSectionsConfig } from '../../types'
 
@@ -39,6 +39,7 @@ const defaultSections: PromptSectionsConfig = {
 2. 扫描候选币 + 多时间框 → 是否存在强信号
 3. 评估风险回报比 → 是否满足最小要求
 4. 先写思维链，再输出结构化JSON`,
+  exit_strategy_plan: 'plan_tp_tiers_sl_single',
   recent_trades_limit: 3,
 }
 
@@ -67,8 +68,19 @@ export function PromptSectionsEditor({
       entryStandardsDesc: { zh: '定义开仓信号条件和避免事项', en: 'Define entry signal conditions and avoidances' },
       decisionProcess: { zh: '决策流程', en: 'Decision Process' },
       decisionProcessDesc: { zh: '设定决策步骤和思考流程', en: 'Set decision steps and thinking process' },
-      recentTradesLimit: { zh: '最近成交条数', en: 'Recent Trades Count' },
-      recentTradesLimitDesc: { zh: '附加到 User Prompt 的最近平仓订单数量（默认 3）', en: 'Number of recent closed trades appended to the User Prompt (default 3).' },
+      exitStrategyPlan: { zh: '止盈止损方案', en: 'Exit Strategy Plan' },
+      exitStrategyPlanDesc: { zh: '选择 exit_plan 模板，影响 LLM 输出结构', en: 'Select the exit_plan template to shape LLM output' },
+      exitPlanHint: { zh: '提示', en: 'Hint' },
+      exitPlanTpTiersSlSingle: { zh: '分段止盈 + 单止损（默认）', en: 'Tiered TP + single SL (default)' },
+      exitPlanTpTiersSlSingleHint: { zh: 'children = tp_tiers + sl_single', en: 'children = tp_tiers + sl_single' },
+      exitPlanTpSingleSlSingle: { zh: '单止盈 + 单止损', en: 'Single TP + single SL' },
+      exitPlanTpSingleSlSingleHint: { zh: 'children = tp_single + sl_single', en: 'children = tp_single + sl_single' },
+      exitPlanSlAtrTpSingle: { zh: 'ATR 止损 + 单止盈', en: 'ATR SL + single TP' },
+      exitPlanSlAtrTpSingleHint: { zh: 'children = sl_atr + tp_single', en: 'children = sl_atr + tp_single' },
+      exitPlanTpAtrSlSingle: { zh: 'ATR 止盈 + 单止损', en: 'ATR TP + single SL' },
+      exitPlanTpAtrSlSingleHint: { zh: 'children = tp_atr + sl_single', en: 'children = tp_atr + sl_single' },
+      recentTradesLimit: { zh: '最近平仓条数', en: 'Recent Trades Count' },
+      recentTradesLimitDesc: { zh: '追加到 User Prompt 的最近平仓记录数量（默认 3）', en: 'Number of recent closed trades appended to the User Prompt (default 3).' },
       resetToDefault: { zh: '重置为默认', en: 'Reset to Default' },
       chars: { zh: '字符', en: 'chars' },
     }
@@ -82,12 +94,37 @@ export function PromptSectionsEditor({
     { key: 'decision_process', label: t('decisionProcess'), desc: t('decisionProcessDesc') },
   ]
 
+  const exitPlanOptions = [
+    { value: 'plan_tp_tiers_sl_single', label: t('exitPlanTpTiersSlSingle'), hint: t('exitPlanTpTiersSlSingleHint') },
+    { value: 'plan_tp_single_sl_single', label: t('exitPlanTpSingleSlSingle'), hint: t('exitPlanTpSingleSlSingleHint') },
+    { value: 'plan_sl_atr_tp_single', label: t('exitPlanSlAtrTpSingle'), hint: t('exitPlanSlAtrTpSingleHint') },
+    { value: 'plan_tp_atr_sl_single', label: t('exitPlanTpAtrSlSingle'), hint: t('exitPlanTpAtrSlSingleHint') },
+  ]
+
   const currentConfig = config || {}
+  const defaultExitPlan = defaultSections.exit_strategy_plan ?? 'plan_tp_tiers_sl_single'
+  const exitPlanValue = currentConfig.exit_strategy_plan ?? defaultExitPlan
+  const selectedExitPlan = exitPlanOptions.find((option) => option.value === exitPlanValue)
+  const isExitPlanModified =
+    currentConfig.exit_strategy_plan !== undefined && currentConfig.exit_strategy_plan !== defaultExitPlan
+
   const defaultRecentTradesLimit = defaultSections.recent_trades_limit ?? 3
   const recentTradesLimit = currentConfig.recent_trades_limit ?? defaultRecentTradesLimit
   const isRecentTradesLimitModified =
     currentConfig.recent_trades_limit !== undefined &&
     currentConfig.recent_trades_limit !== defaultRecentTradesLimit
+
+  const updateExitPlan = (value: string) => {
+    if (!disabled) {
+      onChange({ ...currentConfig, exit_strategy_plan: value })
+    }
+  }
+
+  const resetExitPlan = () => {
+    if (!disabled) {
+      onChange({ ...currentConfig, exit_strategy_plan: defaultExitPlan })
+    }
+  }
 
   const updateRecentTradesLimit = (value: string) => {
     if (disabled) {
@@ -143,6 +180,54 @@ export function PromptSectionsEditor({
           <p className="text-xs mt-1" style={{ color: '#848E9C' }}>
             {t('promptSectionsDesc')}
           </p>
+        </div>
+      </div>
+
+      <div
+        className="rounded-lg px-3 py-3"
+        style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium" style={{ color: '#EAECEF' }}>
+              {t('exitStrategyPlan')}
+            </p>
+            <p className="text-xs mt-1" style={{ color: '#848E9C' }}>
+              {t('exitStrategyPlanDesc')}
+            </p>
+          </div>
+          <select
+            value={exitPlanValue}
+            onChange={(e) => updateExitPlan(e.target.value)}
+            disabled={disabled}
+            className="px-2 py-1 rounded text-sm"
+            style={{ background: '#1E2329', border: '1px solid #2B3139', color: '#EAECEF' }}
+          >
+            {exitPlanOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        {selectedExitPlan?.hint && (
+          <p className="text-xs mt-2" style={{ color: '#848E9C' }}>
+            <span className="font-medium" style={{ color: '#AEB4C0' }}>
+              {t('exitPlanHint')}:
+            </span>{' '}
+            {selectedExitPlan.hint}
+          </p>
+        )}
+        <div className="flex justify-end mt-2">
+          <button
+            onClick={resetExitPlan}
+            disabled={disabled || !isExitPlanModified}
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors hover:bg-white/5 disabled:opacity-30"
+            style={{ color: '#848E9C' }}
+          >
+            <RotateCcw className="w-3 h-3" />
+            {t('resetToDefault')}
+          </button>
         </div>
       </div>
 

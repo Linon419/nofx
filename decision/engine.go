@@ -68,8 +68,11 @@ type AccountInfo struct {
 
 // CandidateCoin candidate coin (from coin pool)
 type CandidateCoin struct {
-	Symbol  string   `json:"symbol"`
-	Sources []string `json:"sources"` // Sources: "ai500", "oi_top", "otc_top", "static"
+	Symbol               string   `json:"symbol"`
+	Sources              []string `json:"sources"` // Sources: "ai500", "oi_top", "otc_top", "static"
+	PeriodQuality        string   `json:"period_quality,omitempty"`
+	PeriodQualityTime    string   `json:"period_quality_time,omitempty"`
+	PeriodQualityExpired bool     `json:"period_quality_expired,omitempty"`
 }
 
 // OITopData open interest growth top data (for AI decision reference)
@@ -132,15 +135,52 @@ type Decision struct {
 	Action string `json:"action"` // "open_long", "open_short", "close_long", "close_short", "hold", "wait"
 
 	// Opening position parameters
-	Leverage        int     `json:"leverage,omitempty"`
-	PositionSizeUSD float64 `json:"position_size_usd,omitempty"`
-	StopLoss        float64 `json:"stop_loss,omitempty"`
-	TakeProfit      float64 `json:"take_profit,omitempty"`
+	Leverage        int       `json:"leverage,omitempty"`
+	PositionSizeUSD float64   `json:"position_size_usd,omitempty"`
+	StopLoss        float64   `json:"stop_loss,omitempty"`
+	TakeProfit      float64   `json:"take_profit,omitempty"`
+	ExitPlan        *ExitPlan `json:"exit_plan,omitempty"`
 
 	// Common parameters
 	Confidence int     `json:"confidence,omitempty"` // Confidence level (0-100)
 	RiskUSD    float64 `json:"risk_usd,omitempty"`   // Maximum USD risk
 	Reasoning  string  `json:"reasoning"`
+}
+
+// UnmarshalJSON accepts both "reasoning" (preferred) and legacy/incorrect "reason".
+func (d *Decision) UnmarshalJSON(data []byte) error {
+	type wireDecision struct {
+		Symbol          string  `json:"symbol"`
+		Action          string  `json:"action"`
+		Leverage        int     `json:"leverage,omitempty"`
+		PositionSizeUSD float64 `json:"position_size_usd,omitempty"`
+		StopLoss        float64 `json:"stop_loss,omitempty"`
+		TakeProfit      float64 `json:"take_profit,omitempty"`
+		Confidence      int     `json:"confidence,omitempty"`
+		RiskUSD         float64 `json:"risk_usd,omitempty"`
+		Reasoning       string  `json:"reasoning,omitempty"`
+		Reason          string  `json:"reason,omitempty"`
+	}
+
+	var wd wireDecision
+	if err := json.Unmarshal(data, &wd); err != nil {
+		return err
+	}
+
+	d.Symbol = wd.Symbol
+	d.Action = wd.Action
+	d.Leverage = wd.Leverage
+	d.PositionSizeUSD = wd.PositionSizeUSD
+	d.StopLoss = wd.StopLoss
+	d.TakeProfit = wd.TakeProfit
+	d.Confidence = wd.Confidence
+	d.RiskUSD = wd.RiskUSD
+	if strings.TrimSpace(wd.Reasoning) != "" {
+		d.Reasoning = wd.Reasoning
+	} else {
+		d.Reasoning = wd.Reason
+	}
+	return nil
 }
 
 // FullDecision AI's complete decision (including chain of thought)
@@ -255,6 +295,7 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 
 	// 2. Build System Prompt using strategy engine
 	riskConfig := engine.GetRiskControlConfig()
+	exitPlanID := normalizeExitPlanID(engine.config.PromptSections.ExitStrategyPlan)
 	systemPrompt := engine.BuildSystemPrompt(ctx.Account.TotalEquity, variant)
 
 	// 3. Build User Prompt using strategy engine
@@ -276,6 +317,7 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 		riskConfig.AltcoinMaxLeverage,
 		riskConfig.BTCETHMaxPositionValueRatio,
 		riskConfig.AltcoinMaxPositionValueRatio,
+		exitPlanID,
 	)
 
 	if decision != nil {
@@ -324,13 +366,13 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 		klineCount = 30
 	}
 
-	logger.Infof("📊 Strategy timeframes: %v, Primary: %s, Kline count: %d", timeframes, primaryTimeframe, klineCount)
+	logger.Infof("馃搳 Strategy timeframes: %v, Primary: %s, Kline count: %d", timeframes, primaryTimeframe, klineCount)
 
 	// 1. First fetch data for position coins (must fetch)
 	for _, pos := range ctx.Positions {
 		data, err := market.GetWithTimeframes(pos.Symbol, timeframes, primaryTimeframe, klineCount)
 		if err != nil {
-			logger.Infof("⚠️  Failed to fetch market data for position %s: %v", pos.Symbol, err)
+			logger.Infof("鈿狅笍  Failed to fetch market data for position %s: %v", pos.Symbol, err)
 			continue
 		}
 		ctx.MarketDataMap[pos.Symbol] = data
@@ -351,7 +393,7 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 
 		data, err := market.GetWithTimeframes(coin.Symbol, timeframes, primaryTimeframe, klineCount)
 		if err != nil {
-			logger.Infof("⚠️  Failed to fetch market data for %s: %v", coin.Symbol, err)
+			logger.Infof("鈿狅笍  Failed to fetch market data for %s: %v", coin.Symbol, err)
 			continue
 		}
 
@@ -362,7 +404,7 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 			oiValue := data.OpenInterest.Latest * data.CurrentPrice
 			oiValueInMillions := oiValue / 1_000_000
 			if oiValueInMillions < minOIThresholdMillions {
-				logger.Infof("⚠️  %s OI value too low (%.2fM USD < %.1fM), skipping coin",
+				logger.Infof("鈿狅笍  %s OI value too low (%.2fM USD < %.1fM), skipping coin",
 					coin.Symbol, oiValueInMillions, minOIThresholdMillions)
 				continue
 			}
@@ -371,7 +413,7 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 		ctx.MarketDataMap[coin.Symbol] = data
 	}
 
-	logger.Infof("📊 Successfully fetched multi-timeframe market data for %d coins", len(ctx.MarketDataMap))
+	logger.Infof("馃搳 Successfully fetched multi-timeframe market data for %d coins", len(ctx.MarketDataMap))
 	return nil
 }
 
@@ -408,9 +450,9 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 		return candidates, nil
 
 	case "coinpool":
-		// 检查 use_coin_pool 标志，如果为 false 则回退到静态币种
+		// 妫€鏌?use_coin_pool 鏍囧織锛屽鏋滀负 false 鍒欏洖閫€鍒伴潤鎬佸竵绉?
 		if !coinSource.UseCoinPool {
-			logger.Infof("⚠️  source_type is 'coinpool' but use_coin_pool is false, falling back to static coins")
+			logger.Infof("鈿狅笍  source_type is 'coinpool' but use_coin_pool is false, falling back to static coins")
 			for _, symbol := range coinSource.StaticCoins {
 				symbol = market.Normalize(symbol)
 				candidates = append(candidates, CandidateCoin{
@@ -423,9 +465,9 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 		return e.getCoinPoolCoins(coinSource.CoinPoolLimit)
 
 	case "oi_top":
-		// 检查 use_oi_top 标志，如果为 false 则回退到静态币种
+		// 妫€鏌?use_oi_top 鏍囧織锛屽鏋滀负 false 鍒欏洖閫€鍒伴潤鎬佸竵绉?
 		if !coinSource.UseOITop {
-			logger.Infof("⚠️  source_type is 'oi_top' but use_oi_top is false, falling back to static coins")
+			logger.Infof("鈿狅笍  source_type is 'oi_top' but use_oi_top is false, falling back to static coins")
 			for _, symbol := range coinSource.StaticCoins {
 				symbol = market.Normalize(symbol)
 				candidates = append(candidates, CandidateCoin{
@@ -440,7 +482,7 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 	case "otc_top":
 		// Fallback to static coins when use_otc_top is false.
 		if !coinSource.UseOTCTop {
-			logger.Infof("âš ï¸  source_type is 'otc_top' but use_otc_top is false, falling back to static coins")
+			logger.Infof("芒拧聽茂赂聫  source_type is 'otc_top' but use_otc_top is false, falling back to static coins")
 			for _, symbol := range coinSource.StaticCoins {
 				symbol = market.Normalize(symbol)
 				candidates = append(candidates, CandidateCoin{
@@ -453,10 +495,11 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 		return e.getOTCTopCoins()
 
 	case "mixed":
+		otcMetaBySymbol := make(map[string]CandidateCoin)
 		if coinSource.UseCoinPool {
 			poolCoins, err := e.getCoinPoolCoins(coinSource.CoinPoolLimit)
 			if err != nil {
-				logger.Infof("⚠️  Failed to get AI500 coin pool: %v", err)
+				logger.Infof("鈿狅笍  Failed to get AI500 coin pool: %v", err)
 			} else {
 				for _, coin := range poolCoins {
 					symbolSources[coin.Symbol] = append(symbolSources[coin.Symbol], "ai500")
@@ -467,7 +510,7 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 		if coinSource.UseOITop {
 			oiCoins, err := e.getOITopCoins(coinSource.OITopLimit)
 			if err != nil {
-				logger.Infof("⚠️  Failed to get OI Top: %v", err)
+				logger.Infof("鈿狅笍  Failed to get OI Top: %v", err)
 			} else {
 				for _, coin := range oiCoins {
 					symbolSources[coin.Symbol] = append(symbolSources[coin.Symbol], "oi_top")
@@ -482,6 +525,7 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 			} else {
 				for _, coin := range otcCoins {
 					symbolSources[coin.Symbol] = append(symbolSources[coin.Symbol], "otc_top")
+					otcMetaBySymbol[coin.Symbol] = coin
 				}
 			}
 		}
@@ -496,10 +540,18 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 		}
 
 		for symbol, sources := range symbolSources {
-			candidates = append(candidates, CandidateCoin{
+			candidate := CandidateCoin{
 				Symbol:  symbol,
 				Sources: sources,
-			})
+			}
+			if hasSource(sources, "otc_top") {
+				if meta, ok := otcMetaBySymbol[symbol]; ok {
+					candidate.PeriodQuality = meta.PeriodQuality
+					candidate.PeriodQualityTime = meta.PeriodQualityTime
+					candidate.PeriodQualityExpired = meta.PeriodQualityExpired
+				}
+			}
+			candidates = append(candidates, candidate)
 		}
 		return candidates, nil
 
@@ -553,17 +605,22 @@ func (e *StrategyEngine) getOITopCoins(limit int) ([]CandidateCoin, error) {
 }
 
 func (e *StrategyEngine) getOTCTopCoins() ([]CandidateCoin, error) {
-	symbols, err := provider.GetOTCTopSymbols()
+	items, err := provider.GetOTCTopCoins()
 	if err != nil {
 		return nil, err
 	}
 
 	var candidates []CandidateCoin
-	for _, symbol := range symbols {
-		symbol = market.Normalize(symbol)
+	now := time.Now().UTC()
+	for _, item := range items {
+		symbol := market.Normalize(item.Symbol)
+		meta := buildOTCPeriodQualityMeta(item, now)
 		candidates = append(candidates, CandidateCoin{
-			Symbol:  symbol,
-			Sources: []string{"otc_top"},
+			Symbol:               symbol,
+			Sources:              []string{"otc_top"},
+			PeriodQuality:        meta.Quality,
+			PeriodQualityTime:    meta.Time,
+			PeriodQualityExpired: meta.Expired,
 		})
 	}
 	return candidates, nil
@@ -585,7 +642,7 @@ func (e *StrategyEngine) FetchExternalData() (map[string]interface{}, error) {
 	for _, source := range e.config.Indicators.ExternalDataSources {
 		data, err := e.fetchSingleExternalSource(source)
 		if err != nil {
-			logger.Infof("⚠️  Failed to fetch external data source [%s]: %v", source.Name, err)
+			logger.Infof("鈿狅笍  Failed to fetch external data source [%s]: %v", source.Name, err)
 			continue
 		}
 		externalData[source.Name] = data
@@ -707,7 +764,7 @@ func (e *StrategyEngine) FetchQuantDataBatch(symbols []string) map[string]*Quant
 	for _, symbol := range symbols {
 		data, err := e.FetchQuantData(symbol)
 		if err != nil {
-			logger.Infof("⚠️  Failed to fetch quantitative data for %s: %v", symbol, err)
+			logger.Infof("鈿狅笍  Failed to fetch quantitative data for %s: %v", symbol, err)
 			continue
 		}
 		if data != nil {
@@ -751,15 +808,15 @@ func (e *StrategyEngine) FetchOIRankingData() *provider.OIRankingData {
 		limit = 10
 	}
 
-	logger.Infof("📊 Fetching OI ranking data (duration: %s, limit: %d)", duration, limit)
+	logger.Infof("馃搳 Fetching OI ranking data (duration: %s, limit: %d)", duration, limit)
 
 	data, err := provider.GetOIRankingData(baseURL, authKey, duration, limit)
 	if err != nil {
-		logger.Warnf("⚠️  Failed to fetch OI ranking data: %v", err)
+		logger.Warnf("鈿狅笍  Failed to fetch OI ranking data: %v", err)
 		return nil
 	}
 
-	logger.Infof("✓ OI ranking data ready: %d top, %d low positions",
+	logger.Infof("鉁?OI ranking data ready: %d top, %d low positions",
 		len(data.TopPositions), len(data.LowPositions))
 
 	return data
@@ -774,6 +831,7 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	var sb strings.Builder
 	riskControl := e.config.RiskControl
 	promptSections := e.config.PromptSections
+	exitPlanID := normalizeExitPlanID(promptSections.ExitStrategyPlan)
 
 	// 0. Data Dictionary & Schema (ensure AI understands all fields)
 	lang := detectLanguage(promptSections.RoleDefinition)
@@ -794,7 +852,7 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	// 2. Trading mode variant
 	switch strings.ToLower(strings.TrimSpace(variant)) {
 	case "aggressive":
-		sb.WriteString("## Mode: Aggressive\n- Prioritize capturing trend breakouts, can build positions in batches when confidence ≥ 70\n- Allow higher positions, but must strictly set stop-loss and explain risk-reward ratio\n\n")
+		sb.WriteString("## Mode: Aggressive\n- Prioritize capturing trend breakouts, can build positions in batches when confidence >=70\n- Allow higher positions, but must strictly set stop-loss and explain risk-reward ratio\n\n")
 	case "conservative":
 		sb.WriteString("## Mode: Conservative\n- Only open positions when multiple signals resonate\n- Prioritize cash preservation, must pause for multiple periods after consecutive losses\n\n")
 	case "scalping":
@@ -814,39 +872,57 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	sb.WriteString("# Hard Constraints (Risk Control)\n\n")
 	sb.WriteString("## CODE ENFORCED (Backend validation, cannot be bypassed):\n")
 	sb.WriteString(fmt.Sprintf("- Max Positions: %d coins simultaneously\n", riskControl.MaxPositions))
-	sb.WriteString(fmt.Sprintf("- Position Value Limit (Altcoins): max %.0f USDT (= equity %.0f × %.1fx)\n",
+	sb.WriteString(fmt.Sprintf("- Position Value Limit (Altcoins): max %.0f USDT (= equity %.0f * %.1fx)\n",
 		accountEquity*altcoinPosValueRatio, accountEquity, altcoinPosValueRatio))
-	sb.WriteString(fmt.Sprintf("- Position Value Limit (BTC/ETH): max %.0f USDT (= equity %.0f × %.1fx)\n",
+	sb.WriteString(fmt.Sprintf("- Position Value Limit (BTC/ETH): max %.0f USDT (= equity %.0f * %.1fx)\n",
 		accountEquity*btcEthPosValueRatio, accountEquity, btcEthPosValueRatio))
-	sb.WriteString(fmt.Sprintf("- Max Margin Usage: ≤%.0f%%\n", riskControl.MaxMarginUsage*100))
-	sb.WriteString(fmt.Sprintf("- Min Position Size: ≥%.0f USDT\n\n", riskControl.MinPositionSize))
+	sb.WriteString(fmt.Sprintf("- Max Margin Usage: <=%.0f%%\n", riskControl.MaxMarginUsage*100))
+	sb.WriteString(fmt.Sprintf("- Min Position Size: >=%.0f USDT\n\n", riskControl.MinPositionSize))
 
 	sb.WriteString("## AI GUIDED (Recommended, you should follow):\n")
 	sb.WriteString(fmt.Sprintf("- Trading Leverage: Altcoins max %dx | BTC/ETH max %dx\n",
 		riskControl.AltcoinMaxLeverage, riskControl.BTCETHMaxLeverage))
-	sb.WriteString(fmt.Sprintf("- Risk-Reward Ratio: ≥1:%.1f (take_profit / stop_loss)\n", riskControl.MinRiskRewardRatio))
-	sb.WriteString(fmt.Sprintf("- Min Confidence: ≥%d to open position\n\n", riskControl.MinConfidence))
+	sb.WriteString(fmt.Sprintf("- Risk-Reward Ratio: >=1:%.1f (take_profit / stop_loss)\n", riskControl.MinRiskRewardRatio))
+	sb.WriteString(fmt.Sprintf("- Min Confidence: >=%d to open position\n\n", riskControl.MinConfidence))
 
 	// Position sizing guidance
 	sb.WriteString("## Position Sizing Guidance\n")
 	sb.WriteString("Calculate `position_size_usd` based on your confidence and the Position Value Limits above:\n")
-	sb.WriteString("- High confidence (≥85): Use 80-100%% of max position value limit\n")
+	sb.WriteString("- High confidence (>=85): Use 80-100%% of max position value limit\n")
 	sb.WriteString("- Medium confidence (70-84): Use 50-80%% of max position value limit\n")
 	sb.WriteString("- Low confidence (60-69): Use 30-50%% of max position value limit\n")
 	sb.WriteString(fmt.Sprintf("- Example: With equity %.0f and BTC/ETH ratio %.1fx, max is %.0f USDT\n",
 		accountEquity, btcEthPosValueRatio, accountEquity*btcEthPosValueRatio))
 	sb.WriteString("- **DO NOT** just use available_balance as position_size_usd. Use the Position Value Limits!\n\n")
+	if riskControl.ATREnabled {
+		atrPeriod := riskControl.ATRPeriod
+		if atrPeriod <= 0 {
+			atrPeriod = 14
+		}
+		atrTF := strings.TrimSpace(riskControl.ATRTimeframe)
+		if atrTF == "" {
+			atrTF = "1d"
+		}
+		riskPct := riskControl.StopLossRiskPct
+		if riskPct <= 0 {
+			riskPct = 5.0
+		}
 
+		sb.WriteString("## ATR Leverage & Stop-Loss Position Sizing (Code Enforced)\n")
+		sb.WriteString(fmt.Sprintf("- Leverage = round(close / max_atr_24h) using %s ATR (period %d), clamped to [1, max]\n", atrTF, atrPeriod))
+		sb.WriteString(fmt.Sprintf("- position_size_usd = equity * %.1f%% * leverage / stop_distance_pct\n", riskPct))
+		sb.WriteString("- Still output stop_loss/take_profit; the system may override leverage and position_size_usd when enabled.\n\n")
+	}
 	// 4. Trading frequency (editable)
 	if promptSections.TradingFrequency != "" {
 		sb.WriteString(promptSections.TradingFrequency)
 		sb.WriteString("\n\n")
 	} else {
-		sb.WriteString("# ⏱️ Trading Frequency Awareness\n\n")
-		sb.WriteString("- Excellent traders: 2-4 trades/day ≈ 0.1-0.2 trades/hour\n")
+		sb.WriteString("# 鈴憋笍 Trading Frequency Awareness\n\n")
+		sb.WriteString("- Excellent traders: 2-4 trades/day (about 0.1-0.2 trades/hour)\n")
 		sb.WriteString("- >2 trades/hour = Overtrading\n")
-		sb.WriteString("- Single position hold time ≥ 30-60 minutes\n")
-		sb.WriteString("If you find yourself trading every period → standards too low; if closing positions < 30 minutes → too impatient.\n\n")
+		sb.WriteString("- Single position hold time around 30-60 minutes\n")
+		sb.WriteString("If you find yourself trading every period 鈫?standards too low; if closing positions < 30 minutes 鈫?too impatient.\n\n")
 	}
 
 	// 5. Entry standards (editable)
@@ -854,12 +930,12 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 		sb.WriteString(promptSections.EntryStandards)
 		sb.WriteString("\n\nYou have the following indicator data:\n")
 		e.writeAvailableIndicators(&sb)
-		sb.WriteString(fmt.Sprintf("\n**Confidence ≥ %d** required to open positions.\n\n", riskControl.MinConfidence))
+		sb.WriteString(fmt.Sprintf("\n**Confidence >=%d** required to open positions.\n\n", riskControl.MinConfidence))
 	} else {
-		sb.WriteString("# 🎯 Entry Standards (Strict)\n\n")
+		sb.WriteString("# 馃幆 Entry Standards (Strict)\n\n")
 		sb.WriteString("Only open positions when multiple signals resonate. You have:\n")
 		e.writeAvailableIndicators(&sb)
-		sb.WriteString(fmt.Sprintf("\nFeel free to use any effective analysis method, but **confidence ≥ %d** required to open positions; avoid low-quality behaviors such as single indicators, contradictory signals, sideways consolidation, reopening immediately after closing, etc.\n\n", riskControl.MinConfidence))
+		sb.WriteString(fmt.Sprintf("\n**Confidence >=%d** required to open positions.\n\n", riskControl.MinConfidence))
 	}
 
 	// 6. Decision process (editable)
@@ -867,10 +943,15 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 		sb.WriteString(promptSections.DecisionProcess)
 		sb.WriteString("\n\n")
 	} else {
-		sb.WriteString("# 📋 Decision Process\n\n")
-		sb.WriteString("1. Check positions → Should we take profit/stop-loss\n")
-		sb.WriteString("2. Scan candidate coins + multi-timeframe → Are there strong signals\n")
+		sb.WriteString("# 馃搵 Decision Process\n\n")
+		sb.WriteString("1. Check positions 鈫?Should we take profit/stop-loss\n")
+		sb.WriteString("2. Scan candidate coins + multi-timeframe 鈫?Are there strong signals\n")
 		sb.WriteString("3. Write chain of thought first, then output structured JSON\n\n")
+	}
+
+	exitPlanPrompt := buildExitPlanPrompt(exitPlanID)
+	if exitPlanPrompt != "" {
+		sb.WriteString(exitPlanPrompt)
 	}
 
 	// 7. Output format
@@ -886,20 +967,41 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	sb.WriteString("```json\n[\n")
 	// Use the actual configured position value ratio for BTC/ETH in the example
 	examplePositionSize := accountEquity * btcEthPosValueRatio
-	sb.WriteString(fmt.Sprintf("  {\"symbol\": \"BTCUSDT\", \"action\": \"open_short\", \"leverage\": %d, \"position_size_usd\": %.0f, \"stop_loss\": 97000, \"take_profit\": 91000, \"confidence\": 85, \"risk_usd\": 300},\n",
-		riskControl.BTCETHMaxLeverage, examplePositionSize))
+	exitPlanExample := buildExitPlanExample(exitPlanID)
+	sb.WriteString("  {\n")
+	sb.WriteString("    \"symbol\": \"BTCUSDT\",\n")
+	sb.WriteString("    \"action\": \"open_short\",\n")
+	sb.WriteString(fmt.Sprintf("    \"leverage\": %d,\n", riskControl.BTCETHMaxLeverage))
+	sb.WriteString(fmt.Sprintf("    \"position_size_usd\": %.0f,\n", examplePositionSize))
+	sb.WriteString("    \"stop_loss\": 97000,\n")
+	sb.WriteString("    \"take_profit\": 91000,\n")
+	sb.WriteString("    \"confidence\": 85,\n")
+	sb.WriteString("    \"risk_usd\": 300,\n")
+	sb.WriteString("    \"reasoning\": \"One sentence summary of why this action is taken\"")
+	if exitPlanExample != "" {
+		sb.WriteString(",\n")
+		sb.WriteString(exitPlanExample)
+	} else {
+		sb.WriteString("\n")
+	}
+	sb.WriteString("  },\n")
 	sb.WriteString("  {\"symbol\": \"ETHUSDT\", \"action\": \"close_long\"}\n")
 	sb.WriteString("]\n```\n")
 	sb.WriteString("</decision>\n\n")
 	sb.WriteString("## Field Description\n\n")
 	sb.WriteString("- `action`: open_long | open_short | close_long | close_short | hold | wait\n")
-	sb.WriteString(fmt.Sprintf("- `confidence`: 0-100 (opening recommended ≥ %d)\n", riskControl.MinConfidence))
+	sb.WriteString(fmt.Sprintf("- `confidence`: 0-100 (opening recommended >=%d)\n", riskControl.MinConfidence))
 	sb.WriteString("- Required when opening: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd\n")
+	sb.WriteString("- `exit_plan`: required when opening if exit plan is configured; must match plan_id and component rules\n")
 	sb.WriteString("- **IMPORTANT**: All numeric values must be calculated numbers, NOT formulas/expressions (e.g., use `27.76` not `3000 * 0.01`)\n\n")
+	sb.WriteString("## JSON Strictness (Must Follow)\n\n")
+	sb.WriteString("- No range/approx symbols in JSON: do not use `~` or `～` anywhere (e.g., use `88336`, not `~88336` or `88000~89000`)\n")
+	sb.WriteString("- No thousand separators in JSON numbers (e.g., `98000`, not `98,000`)\n")
+	sb.WriteString("- No comments in JSON (no `//` or `/* */`)\n\n")
 
 	// 8. Custom Prompt
 	if e.config.CustomPrompt != "" {
-		sb.WriteString("# 📌 Personalized Trading Strategy\n\n")
+		sb.WriteString("# 馃搶 Personalized Trading Strategy\n\n")
 		sb.WriteString(e.config.CustomPrompt)
 		sb.WriteString("\n\n")
 		sb.WriteString("Note: The above personalized strategy is a supplement to the basic rules and cannot violate the basic risk control principles.\n")
@@ -1012,7 +1114,7 @@ func (e *StrategyEngine) BuildUserPrompt(ctx *Context) string {
 			if order.RealizedPnL < 0 {
 				resultStr = "Loss"
 			}
-			sb.WriteString(fmt.Sprintf("%d. %s %s | Entry %.4f Exit %.4f | %s: %+.2f USDT (%+.2f%%) | %s→%s (%s)\n",
+			sb.WriteString(fmt.Sprintf("%d. %s %s | Entry %.4f Exit %.4f | %s: %+.2f USDT (%+.2f%%) | %s -> %s (%s)\n",
 				i+1, order.Symbol, order.Side,
 				order.EntryPrice, order.ExitPrice,
 				resultStr, order.RealizedPnL, order.PnLPct,
@@ -1033,13 +1135,13 @@ func (e *StrategyEngine) BuildUserPrompt(ctx *Context) string {
 		}
 
 		if lang == LangChinese {
-			sb.WriteString("## 历史交易统计\n")
-			sb.WriteString(fmt.Sprintf("总交易: %d 笔 | 盈利因子: %.2f | 夏普比率: %.2f | 盈亏比: %.2f\n",
+			sb.WriteString("## 鍘嗗彶浜ゆ槗缁熻\n")
+			sb.WriteString(fmt.Sprintf("鎬讳氦鏄? %d 绗?| 鐩堝埄鍥犲瓙: %.2f | 澶忔櫘姣旂巼: %.2f | 鐩堜簭姣? %.2f\n",
 				ctx.TradingStats.TotalTrades,
 				ctx.TradingStats.ProfitFactor,
 				ctx.TradingStats.SharpeRatio,
 				winLossRatio))
-			sb.WriteString(fmt.Sprintf("总盈亏: %+.2f USDT | 平均盈利: +%.2f | 平均亏损: -%.2f | 最大回撤: %.1f%%\n",
+			sb.WriteString(fmt.Sprintf("鎬荤泩浜? %+.2f USDT | 骞冲潎鐩堝埄: +%.2f | 骞冲潎浜忔崯: -%.2f | 鏈€澶у洖鎾? %.1f%%\n",
 				ctx.TradingStats.TotalPnL,
 				ctx.TradingStats.AvgWin,
 				ctx.TradingStats.AvgLoss,
@@ -1047,13 +1149,13 @@ func (e *StrategyEngine) BuildUserPrompt(ctx *Context) string {
 
 			// Performance hints based on profit factor, sharpe, and drawdown
 			if ctx.TradingStats.ProfitFactor >= 1.5 && ctx.TradingStats.SharpeRatio >= 1 {
-				sb.WriteString("表现: 良好 - 保持当前策略\n")
+				sb.WriteString("琛ㄧ幇: 鑹ソ - 淇濇寔褰撳墠绛栫暐\n")
 			} else if ctx.TradingStats.ProfitFactor < 1 {
-				sb.WriteString("表现: 需改进 - 提高盈亏比，优化止盈止损\n")
+				sb.WriteString("琛ㄧ幇: 闇€鏀硅繘 - 鎻愰珮鐩堜簭姣旓紝浼樺寲姝㈢泩姝㈡崯\n")
 			} else if ctx.TradingStats.MaxDrawdownPct > 30 {
-				sb.WriteString("表现: 风险偏高 - 减少仓位，控制回撤\n")
+				sb.WriteString("琛ㄧ幇: 椋庨櫓鍋忛珮 - 鍑忓皯浠撲綅锛屾帶鍒跺洖鎾n")
 			} else {
-				sb.WriteString("表现: 正常 - 有优化空间\n")
+				sb.WriteString("琛ㄧ幇: 姝ｅ父 - 鏈変紭鍖栫┖闂碶n")
 			}
 		} else {
 			sb.WriteString("## Historical Trading Statistics\n")
@@ -1117,6 +1219,9 @@ func (e *StrategyEngine) BuildUserPrompt(ctx *Context) string {
 
 		sourceTags := e.formatCoinSourceTag(coin.Sources)
 		sb.WriteString(fmt.Sprintf("### %d. %s%s\n\n", displayedCount, coin.Symbol, sourceTags))
+		if line := formatOTCPeriodQualityLine(coin); line != "" {
+			sb.WriteString(line + "\n\n")
+		}
 		sb.WriteString(e.formatMarketData(marketData))
 
 		if ctx.QuantDataMap != nil {
@@ -1165,6 +1270,12 @@ func (e *StrategyEngine) formatPositionInfo(index int, pos PositionInfo, ctx *Co
 		pos.EntryPrice, pos.MarkPrice, pos.Quantity, positionValue, pos.UnrealizedPnLPct, pos.UnrealizedPnL, pos.PeakPnLPct,
 		pos.Leverage, pos.MarginUsed, pos.LiquidationPrice, holdingDuration))
 
+	if meta := findOTCTopCandidate(ctx, pos.Symbol); meta != nil {
+		if line := formatOTCPeriodQualityLine(*meta); line != "" {
+			sb.WriteString(line + "\n\n")
+		}
+	}
+
 	if marketData, ok := ctx.MarketDataMap[pos.Symbol]; ok {
 		sb.WriteString(e.formatMarketData(marketData))
 
@@ -1188,6 +1299,8 @@ func (e *StrategyEngine) formatCoinSourceTag(sources []string) string {
 			return " (AI500)"
 		case "oi_top":
 			return " (OI_Top position growth)"
+		case "otc_top":
+			return " (OTC Top)"
 		case "static":
 			return " (Manual selection)"
 		}
@@ -1203,7 +1316,7 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 	var sb strings.Builder
 	indicators := e.config.Indicators
 
-	// 明确标注币种
+	// 鏄庣‘鏍囨敞甯佺
 	sb.WriteString(fmt.Sprintf("=== %s Market Data ===\n\n", data.Symbol))
 	sb.WriteString(fmt.Sprintf("current_price = %.4f", data.CurrentPrice))
 
@@ -1236,10 +1349,13 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 	}
 
 	if len(data.TimeframeData) > 0 {
-		timeframeOrder := []string{"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w"}
+		timeframeOrder := normalizeAndDedupTimeframes(indicators.Klines.SelectedTimeframes)
+		if len(timeframeOrder) == 0 {
+			timeframeOrder = []string{"1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w"}
+		}
 		for _, tf := range timeframeOrder {
 			if tfData, ok := data.TimeframeData[tf]; ok {
-				sb.WriteString(fmt.Sprintf("=== %s Timeframe (oldest → latest) ===\n\n", strings.ToUpper(tf)))
+				sb.WriteString(fmt.Sprintf("=== %s Timeframe (oldest -> latest) ===\n\n", strings.ToUpper(tf)))
 				e.formatTimeframeSeriesData(&sb, tfData, indicators)
 			}
 		}
@@ -1247,7 +1363,7 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 		// Compatible with old data format
 		if data.IntradaySeries != nil {
 			klineConfig := indicators.Klines
-			sb.WriteString(fmt.Sprintf("Intraday series (%s intervals, oldest → latest):\n\n", klineConfig.PrimaryTimeframe))
+			sb.WriteString(fmt.Sprintf("Intraday series (%s intervals, oldest -> latest):\n\n", klineConfig.PrimaryTimeframe))
 
 			if len(data.IntradaySeries.MidPrices) > 0 {
 				sb.WriteString(fmt.Sprintf("Mid prices: %s\n\n", formatFloatSlice(data.IntradaySeries.MidPrices)))
@@ -1320,36 +1436,149 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 	}
 
 	// Technical Analysis (pattern detection, wavetrend, trend analysis)
-	// Perform analysis on the primary timeframe klines if available
+	// Perform analysis according to selected timeframes (from strategy config) if available.
 	if len(data.TimeframeData) > 0 {
-		// Try to find klines from preferred timeframes in order
-		preferredTimeframes := []string{"5m", "15m", "3m", "1h", "30m"}
-		var klines []market.Kline
-		var selectedTF string
+		klineCfg := indicators.Klines
 
-		for _, tf := range preferredTimeframes {
-			if tfData, ok := data.TimeframeData[tf]; ok && len(tfData.Klines) > 0 {
-				klines = convertKlineBarsToKlines(tfData.Klines)
-				selectedTF = tf
-				break
-			}
+		analysisTimeframes := make([]string, 0, len(klineCfg.SelectedTimeframes)+1)
+		if len(klineCfg.SelectedTimeframes) > 0 {
+			analysisTimeframes = append(analysisTimeframes, klineCfg.SelectedTimeframes...)
+		} else if klineCfg.PrimaryTimeframe != "" {
+			analysisTimeframes = append(analysisTimeframes, klineCfg.PrimaryTimeframe)
 		}
 
-		if len(klines) > 0 {
-			analysisResult := analysis.AnalyzeWithDefaults(klines)
-			if analysisResult != nil {
-				analysisJSON := formatAnalysisResult(analysisResult)
-				if analysisJSON != "" && analysisJSON != "{}" {
-					sb.WriteString(fmt.Sprintf("=== Technical Analysis (%s) ===\n\n", strings.ToUpper(selectedTF)))
-					sb.WriteString("```json\n")
-					sb.WriteString(analysisJSON)
-					sb.WriteString("\n```\n\n")
-				}
+		analysisTimeframes = normalizeAndDedupTimeframes(analysisTimeframes)
+		if len(analysisTimeframes) == 0 {
+			analysisTimeframes = []string{"15m", "1h", "4h", "5m"}
+		}
+
+		for _, tf := range analysisTimeframes {
+			sb.WriteString(fmt.Sprintf("=== Technical Analysis (%s) ===\n\n", strings.ToUpper(tf)))
+
+			tfData, ok := data.TimeframeData[tf]
+			if !ok || tfData == nil || len(tfData.Klines) == 0 {
+				sb.WriteString("```json\n")
+				sb.WriteString(`{"note":"timeframe_data_missing_or_empty"}`)
+				sb.WriteString("\n```\n\n")
+				continue
 			}
+
+			klines := convertKlineBarsToKlines(tf, tfData.Klines)
+			analysisResult := safeAnalyzeWithDefaults(klines)
+			analysisJSON := formatAnalysisEnvelopeJSON(tf, tfData, analysisResult)
+
+			sb.WriteString("```json\n")
+			sb.WriteString(analysisJSON)
+			sb.WriteString("\n```\n\n")
 		}
 	}
 
 	return sb.String()
+}
+
+func safeAnalyzeWithDefaults(klines []market.Kline) (result *analysis.AnalysisResult) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = nil
+		}
+	}()
+	return analysis.AnalyzeWithDefaults(klines)
+}
+
+type emaSnapshot struct {
+	TF     string   `json:"tf,omitempty"`
+	Price  float64  `json:"price,omitempty"`
+	EMA21  *float64 `json:"ema21,omitempty"`
+	EMA55  *float64 `json:"ema55,omitempty"`
+	EMA100 *float64 `json:"ema100,omitempty"`
+	EMA200 *float64 `json:"ema200,omitempty"`
+}
+
+type analysisEnvelope struct {
+	Note string `json:"note,omitempty"`
+	*analysis.AnalysisResult
+	EMASnapshot *emaSnapshot `json:"ema_snapshot,omitempty"`
+}
+
+func formatAnalysisEnvelopeJSON(tf string, tfData *market.TimeframeSeriesData, analysisResult *analysis.AnalysisResult) string {
+	envelope := analysisEnvelope{
+		AnalysisResult: analysisResult,
+		EMASnapshot:    buildEMASnapshot(tf, tfData),
+	}
+	if envelope.AnalysisResult == nil {
+		envelope.Note = "analysis_unavailable"
+		envelope.AnalysisResult = &analysis.AnalysisResult{}
+	}
+
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		return `{"note":"analysis_unavailable"}`
+	}
+	if len(data) == 0 || string(data) == "{}" {
+		return `{"note":"analysis_unavailable"}`
+	}
+	return string(data)
+}
+
+func buildEMASnapshot(tf string, tfData *market.TimeframeSeriesData) *emaSnapshot {
+	if tfData == nil {
+		return nil
+	}
+
+	price := 0.0
+	if len(tfData.Klines) > 0 {
+		price = tfData.Klines[len(tfData.Klines)-1].Close
+	} else if len(tfData.MidPrices) > 0 {
+		price = tfData.MidPrices[len(tfData.MidPrices)-1]
+	}
+	if price <= 0 {
+		return nil
+	}
+
+	snap := &emaSnapshot{TF: tf, Price: price}
+	if v, ok := lastPositive(tfData.EMA21Values); ok {
+		snap.EMA21 = float64Ptr(v)
+	}
+	if v, ok := lastPositive(tfData.EMA55Values); ok {
+		snap.EMA55 = float64Ptr(v)
+	}
+	if v, ok := lastPositive(tfData.EMA100Values); ok {
+		snap.EMA100 = float64Ptr(v)
+	}
+	if v, ok := lastPositive(tfData.EMA200Values); ok {
+		snap.EMA200 = float64Ptr(v)
+	}
+	return snap
+}
+
+func lastPositive(values []float64) (float64, bool) {
+	for i := len(values) - 1; i >= 0; i-- {
+		if values[i] > 0 {
+			return values[i], true
+		}
+	}
+	return 0, false
+}
+
+func float64Ptr(v float64) *float64 {
+	return &v
+}
+
+func normalizeAndDedupTimeframes(timeframes []string) []string {
+	seen := make(map[string]bool, len(timeframes))
+	out := make([]string, 0, len(timeframes))
+	for _, tf := range timeframes {
+		normalized := strings.ToLower(strings.TrimSpace(tf))
+		if normalized == "" {
+			continue
+		}
+		if seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		out = append(out, normalized)
+	}
+	return out
 }
 
 func (e *StrategyEngine) formatTimeframeSeriesData(sb *strings.Builder, data *market.TimeframeSeriesData, indicators store.IndicatorConfig) {
@@ -1425,7 +1654,7 @@ func (e *StrategyEngine) formatQuantData(data *QuantData) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📊 %s Quantitative Data:\n", data.Symbol))
+	sb.WriteString(fmt.Sprintf("=== %s Quantitative Data ===\n", data.Symbol))
 
 	if len(data.PriceChange) > 0 {
 		sb.WriteString("Price Change: ")
@@ -1526,9 +1755,45 @@ func formatFloatSlice(values []float64) string {
 	return "[" + strings.Join(strValues, ", ") + "]"
 }
 
+func timeframeToMillis(tf string) int64 {
+	switch strings.ToLower(strings.TrimSpace(tf)) {
+	case "1m":
+		return int64(time.Minute / time.Millisecond)
+	case "3m":
+		return int64((3 * time.Minute) / time.Millisecond)
+	case "5m":
+		return int64((5 * time.Minute) / time.Millisecond)
+	case "15m":
+		return int64((15 * time.Minute) / time.Millisecond)
+	case "30m":
+		return int64((30 * time.Minute) / time.Millisecond)
+	case "1h":
+		return int64(time.Hour / time.Millisecond)
+	case "2h":
+		return int64((2 * time.Hour) / time.Millisecond)
+	case "4h":
+		return int64((4 * time.Hour) / time.Millisecond)
+	case "6h":
+		return int64((6 * time.Hour) / time.Millisecond)
+	case "8h":
+		return int64((8 * time.Hour) / time.Millisecond)
+	case "12h":
+		return int64((12 * time.Hour) / time.Millisecond)
+	case "1d":
+		return int64((24 * time.Hour) / time.Millisecond)
+	case "3d":
+		return int64((72 * time.Hour) / time.Millisecond)
+	case "1w":
+		return int64((7 * 24 * time.Hour) / time.Millisecond)
+	default:
+		return int64(time.Minute / time.Millisecond)
+	}
+}
+
 // convertKlineBarsToKlines converts market.KlineBar slice to market.Kline slice
 // for use with the analysis module.
-func convertKlineBarsToKlines(bars []market.KlineBar) []market.Kline {
+func convertKlineBarsToKlines(timeframe string, bars []market.KlineBar) []market.Kline {
+	stepMillis := timeframeToMillis(timeframe)
 	klines := make([]market.Kline, len(bars))
 	for i, bar := range bars {
 		klines[i] = market.Kline{
@@ -1538,7 +1803,7 @@ func convertKlineBarsToKlines(bars []market.KlineBar) []market.Kline {
 			Low:       bar.Low,
 			Close:     bar.Close,
 			Volume:    bar.Volume,
-			CloseTime: bar.Time + 60000, // Approximate close time (1 minute later)
+			CloseTime: bar.Time + stepMillis, // Approximate close time based on timeframe
 		}
 	}
 	return klines
@@ -1563,7 +1828,7 @@ func formatAnalysisResult(result *analysis.AnalysisResult) string {
 // AI Response Parsing
 // ============================================================================
 
-func parseFullDecisionResponse(aiResponse string, accountEquity float64, btcEthLeverage, altcoinLeverage int, btcEthPosRatio, altcoinPosRatio float64) (*FullDecision, error) {
+func parseFullDecisionResponse(aiResponse string, accountEquity float64, btcEthLeverage, altcoinLeverage int, btcEthPosRatio, altcoinPosRatio float64, exitPlanID string) (*FullDecision, error) {
 	cotTrace := extractCoTTrace(aiResponse)
 
 	decisions, err := extractDecisions(aiResponse)
@@ -1574,7 +1839,7 @@ func parseFullDecisionResponse(aiResponse string, accountEquity float64, btcEthL
 		}, fmt.Errorf("failed to extract decisions: %w", err)
 	}
 
-	if err := validateDecisions(decisions, accountEquity, btcEthLeverage, altcoinLeverage, btcEthPosRatio, altcoinPosRatio); err != nil {
+	if err := validateDecisions(decisions, accountEquity, btcEthLeverage, altcoinLeverage, btcEthPosRatio, altcoinPosRatio, exitPlanID); err != nil {
 		return &FullDecision{
 			CoTTrace:  cotTrace,
 			Decisions: decisions,
@@ -1589,18 +1854,18 @@ func parseFullDecisionResponse(aiResponse string, accountEquity float64, btcEthL
 
 func extractCoTTrace(response string) string {
 	if match := reReasoningTag.FindStringSubmatch(response); match != nil && len(match) > 1 {
-		logger.Infof("✓ Extracted reasoning chain using <reasoning> tag")
+		logger.Infof("鉁?Extracted reasoning chain using <reasoning> tag")
 		return strings.TrimSpace(match[1])
 	}
 
 	if decisionIdx := strings.Index(response, "<decision>"); decisionIdx > 0 {
-		logger.Infof("✓ Extracted content before <decision> tag as reasoning chain")
+		logger.Infof("鉁?Extracted content before <decision> tag as reasoning chain")
 		return strings.TrimSpace(response[:decisionIdx])
 	}
 
 	jsonStart := strings.Index(response, "[")
 	if jsonStart > 0 {
-		logger.Infof("⚠️  Extracted reasoning chain using old format ([ character separator)")
+		logger.Infof("鈿狅笍  Extracted reasoning chain using old format ([ character separator)")
 		return strings.TrimSpace(response[:jsonStart])
 	}
 
@@ -1615,10 +1880,10 @@ func extractDecisions(response string) ([]Decision, error) {
 	var jsonPart string
 	if match := reDecisionTag.FindStringSubmatch(s); match != nil && len(match) > 1 {
 		jsonPart = strings.TrimSpace(match[1])
-		logger.Infof("✓ Extracted JSON using <decision> tag")
+		logger.Infof("鉁?Extracted JSON using <decision> tag")
 	} else {
 		jsonPart = s
-		logger.Infof("⚠️  <decision> tag not found, searching JSON in full text")
+		logger.Infof("鈿狅笍  <decision> tag not found, searching JSON in full text")
 	}
 
 	jsonPart = fixMissingQuotes(jsonPart)
@@ -1639,7 +1904,7 @@ func extractDecisions(response string) ([]Decision, error) {
 
 	jsonContent := strings.TrimSpace(reJSONArray.FindString(jsonPart))
 	if jsonContent == "" {
-		logger.Infof("⚠️  [SafeFallback] AI didn't output JSON decision, entering safe wait mode")
+		logger.Infof("鈿狅笍  [SafeFallback] AI didn't output JSON decision, entering safe wait mode")
 
 		cotSummary := jsonPart
 		if len(cotSummary) > 240 {
@@ -1704,20 +1969,6 @@ func validateJSONFormat(jsonStr string) error {
 		return fmt.Errorf("JSON must start with [{ (whitespace allowed), actual: %s", trimmed[:min(20, len(trimmed))])
 	}
 
-	if strings.Contains(jsonStr, "~") {
-		return fmt.Errorf("JSON cannot contain range symbol ~, all numbers must be precise single values")
-	}
-
-	for i := 0; i < len(jsonStr)-4; i++ {
-		if jsonStr[i] >= '0' && jsonStr[i] <= '9' &&
-			jsonStr[i+1] == ',' &&
-			jsonStr[i+2] >= '0' && jsonStr[i+2] <= '9' &&
-			jsonStr[i+3] >= '0' && jsonStr[i+3] <= '9' &&
-			jsonStr[i+4] >= '0' && jsonStr[i+4] <= '9' {
-			return fmt.Errorf("JSON numbers cannot contain thousand separator comma, found: %s", jsonStr[i:min(i+10, len(jsonStr))])
-		}
-	}
-
 	return nil
 }
 
@@ -1740,16 +1991,16 @@ func compactArrayOpen(s string) string {
 // Decision Validation
 // ============================================================================
 
-func validateDecisions(decisions []Decision, accountEquity float64, btcEthLeverage, altcoinLeverage int, btcEthPosRatio, altcoinPosRatio float64) error {
+func validateDecisions(decisions []Decision, accountEquity float64, btcEthLeverage, altcoinLeverage int, btcEthPosRatio, altcoinPosRatio float64, exitPlanID string) error {
 	for i, decision := range decisions {
-		if err := validateDecision(&decision, accountEquity, btcEthLeverage, altcoinLeverage, btcEthPosRatio, altcoinPosRatio); err != nil {
+		if err := validateDecision(&decision, accountEquity, btcEthLeverage, altcoinLeverage, btcEthPosRatio, altcoinPosRatio, exitPlanID); err != nil {
 			return fmt.Errorf("decision #%d validation failed: %w", i+1, err)
 		}
 	}
 	return nil
 }
 
-func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoinLeverage int, btcEthPosRatio, altcoinPosRatio float64) error {
+func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoinLeverage int, btcEthPosRatio, altcoinPosRatio float64, exitPlanID string) error {
 	validActions := map[string]bool{
 		"open_long":   true,
 		"open_short":  true,
@@ -1777,7 +2028,7 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 			return fmt.Errorf("leverage must be greater than 0: %d", d.Leverage)
 		}
 		if d.Leverage > maxLeverage {
-			logger.Infof("⚠️  [Leverage Fallback] %s leverage exceeded (%dx > %dx), auto-adjusting to limit %dx",
+			logger.Infof("鈿狅笍  [Leverage Fallback] %s leverage exceeded (%dx > %dx), auto-adjusting to limit %dx",
 				d.Symbol, d.Leverage, maxLeverage, maxLeverage)
 			d.Leverage = maxLeverage
 		}
@@ -1790,11 +2041,11 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 
 		if d.Symbol == "BTCUSDT" || d.Symbol == "ETHUSDT" {
 			if d.PositionSizeUSD < minPositionSizeBTCETH {
-				return fmt.Errorf("%s opening amount too small (%.2f USDT), must be ≥%.2f USDT", d.Symbol, d.PositionSizeUSD, minPositionSizeBTCETH)
+				return fmt.Errorf("%s opening amount too small (%.2f USDT), must be >=%.2f USDT", d.Symbol, d.PositionSizeUSD, minPositionSizeBTCETH)
 			}
 		} else {
 			if d.PositionSizeUSD < minPositionSizeGeneral {
-				return fmt.Errorf("opening amount too small (%.2f USDT), must be ≥%.2f USDT", d.PositionSizeUSD, minPositionSizeGeneral)
+				return fmt.Errorf("opening amount too small (%.2f USDT), must be >=%.2f USDT", d.PositionSizeUSD, minPositionSizeGeneral)
 			}
 		}
 
@@ -1843,8 +2094,12 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 		}
 
 		if riskRewardRatio < 3.0 {
-			return fmt.Errorf("risk/reward ratio too low (%.2f:1), must be ≥3.0:1 [risk: %.2f%% reward: %.2f%%] [stop loss: %.2f take profit: %.2f]",
+			return fmt.Errorf("risk/reward ratio too low (%.2f:1), must be >=3.0:1 [risk: %.2f%% reward: %.2f%%] [stop loss: %.2f take profit: %.2f]",
 				riskRewardRatio, riskPercent, rewardPercent, d.StopLoss, d.TakeProfit)
+		}
+
+		if err := validateExitPlan(d, exitPlanID); err != nil {
+			return err
 		}
 	}
 

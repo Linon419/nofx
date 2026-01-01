@@ -74,7 +74,7 @@ func main() {
 
 	if dryRun {
 		fmt.Println("\n⚠️  预览模式（--dry-run），不会修改数据")
-		fmt.Println("   运行 'go run scripts/fix_order_data.go' 来执行实际修复")
+		fmt.Println("   运行 'go run ./scripts/fix_order_data' 来执行实际修复")
 		return
 	}
 

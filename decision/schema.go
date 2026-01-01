@@ -157,7 +157,7 @@ var DataDictionary = map[string]map[string]BilingualFieldDef{
 			NameZH: "峰值盈亏百分比",
 			NameEN: "Peak PnL Percentage",
 			Unit:   "%",
-			DescZH: "该持仓曾经达到的最高未实现盈亏。用于判断是否需要止盈",
+			DescZH: "该持仓曾经达到的峰值未实现盈亏。用于判断是否需要止盈",
 			DescEN: "Historical max unrealized PnL for this position. Used for take-profit decisions",
 		},
 		"Drawdown": {
@@ -219,6 +219,48 @@ var DataDictionary = map[string]map[string]BilingualFieldDef{
 	},
 
 	"TechnicalAnalysis": {
+		"ema_snapshot.tf": {
+			NameZH: "EMA 快照周期",
+			NameEN: "EMA Snapshot Timeframe",
+			Unit:   "",
+			DescZH: "该技术分析块对应的周期标识（例如 15m/1h/4h）",
+			DescEN: "Timeframe identifier for this technical analysis block (e.g., 15m/1h/4h)",
+		},
+		"ema_snapshot.price": {
+			NameZH: "EMA 快照价格",
+			NameEN: "EMA Snapshot Price",
+			Unit:   "USDT",
+			DescZH: "该周期最新收盘价（用于与 EMA 序列比较）",
+			DescEN: "Latest close price for the timeframe (for comparing against EMA chain)",
+		},
+		"ema_snapshot.ema21": {
+			NameZH: "EMA21 快照",
+			NameEN: "EMA21 Snapshot",
+			Unit:   "USDT",
+			DescZH: "该周期最新 EMA21 数值（可能缺失）",
+			DescEN: "Latest EMA21 value for the timeframe (may be missing)",
+		},
+		"ema_snapshot.ema55": {
+			NameZH: "EMA55 快照",
+			NameEN: "EMA55 Snapshot",
+			Unit:   "USDT",
+			DescZH: "该周期最新 EMA55 数值（可能缺失）",
+			DescEN: "Latest EMA55 value for the timeframe (may be missing)",
+		},
+		"ema_snapshot.ema100": {
+			NameZH: "EMA100 快照",
+			NameEN: "EMA100 Snapshot",
+			Unit:   "USDT",
+			DescZH: "该周期最新 EMA100 数值（可能缺失）",
+			DescEN: "Latest EMA100 value for the timeframe (may be missing)",
+		},
+		"ema_snapshot.ema200": {
+			NameZH: "EMA200 快照",
+			NameEN: "EMA200 Snapshot",
+			Unit:   "USDT",
+			DescZH: "该周期最新 EMA200 数值（可能缺失）",
+			DescEN: "Latest EMA200 value for the timeframe (may be missing)",
+		},
 		"wavetrend.value": {
 			NameZH: "震荡指标值",
 			NameEN: "WaveTrend Value",
@@ -268,13 +310,6 @@ var DataDictionary = map[string]map[string]BilingualFieldDef{
 			DescZH: "Consecutive squeeze bars",
 			DescEN: "Consecutive squeeze bars",
 		},
-		"volatility_warning.tightness_ratio": {
-			NameZH: "Tightness ratio",
-			NameEN: "Tightness Ratio",
-			Unit:   "",
-			DescZH: "BB width divided by KC width",
-			DescEN: "BB width divided by KC width",
-		},
 		"volatility_warning.warning_l1": {
 			NameZH: "Volatility warning L1",
 			NameEN: "Volatility Warning L1",
@@ -288,185 +323,6 @@ var DataDictionary = map[string]map[string]BilingualFieldDef{
 			Unit:   "",
 			DescZH: "L1 and tightness below threshold",
 			DescEN: "L1 and tightness below threshold",
-		},
-		"volatility_warning.bb_width": {
-			NameZH: "BB width",
-			NameEN: "BB Width",
-			Unit:   "price",
-			DescZH: "Bollinger Band width",
-			DescEN: "Bollinger Band width",
-		},
-		"volatility_warning.kc_width": {
-			NameZH: "KC width",
-			NameEN: "KC Width",
-			Unit:   "price",
-			DescZH: "Keltner Channel width",
-			DescEN: "Keltner Channel width",
-		},
-		"volatility_warning.bb_upper": {
-			NameZH: "BB upper",
-			NameEN: "BB Upper",
-			Unit:   "price",
-			DescZH: "Bollinger Band upper",
-			DescEN: "Bollinger Band upper",
-		},
-		"volatility_warning.bb_lower": {
-			NameZH: "BB lower",
-			NameEN: "BB Lower",
-			Unit:   "price",
-			DescZH: "Bollinger Band lower",
-			DescEN: "Bollinger Band lower",
-		},
-		"volatility_warning.bb_mid": {
-			NameZH: "BB middle",
-			NameEN: "BB Middle",
-			Unit:   "price",
-			DescZH: "Bollinger Band middle",
-			DescEN: "Bollinger Band middle",
-		},
-		"volatility_warning.kc_upper": {
-			NameZH: "KC upper",
-			NameEN: "KC Upper",
-			Unit:   "price",
-			DescZH: "Keltner Channel upper",
-			DescEN: "Keltner Channel upper",
-		},
-		"volatility_warning.kc_lower": {
-			NameZH: "KC lower",
-			NameEN: "KC Lower",
-			Unit:   "price",
-			DescZH: "Keltner Channel lower",
-			DescEN: "Keltner Channel lower",
-		},
-		"volatility_warning.kc_mid": {
-			NameZH: "KC middle",
-			NameEN: "KC Middle",
-			Unit:   "price",
-			DescZH: "Keltner Channel middle",
-			DescEN: "Keltner Channel middle",
-		},
-	},
-}
-
-// ========== 双语规则定义 ==========
-
-// BilingualRuleDef 双语规则定义
-type BilingualRuleDef struct {
-	Value    interface{} // 规则值
-	DescZH   string      // 中文描述
-	DescEN   string      // English description
-	ReasonZH string      // 中文原因
-	ReasonEN string      // English reason
-}
-
-// GetDesc 获取描述（根据语言）
-func (d BilingualRuleDef) GetDesc(lang Language) string {
-	if lang == LangChinese {
-		return d.DescZH
-	}
-	return d.DescEN
-}
-
-// GetReason 获取原因（根据语言）
-func (d BilingualRuleDef) GetReason(lang Language) string {
-	if lang == LangChinese {
-		return d.ReasonZH
-	}
-	return d.ReasonEN
-}
-
-// ========== 交易规则 ==========
-
-// TradingRules 交易规则定义
-var TradingRules = struct {
-	RiskManagement  map[string]BilingualRuleDef
-	EntrySignals    map[string]BilingualRuleDef
-	ExitSignals     map[string]BilingualRuleDef
-	PositionControl map[string]BilingualRuleDef
-}{
-	RiskManagement: map[string]BilingualRuleDef{
-		"MaxMarginUsage": {
-			Value:    0.30,
-			DescZH:   "保证金使用率不得超过30%",
-			DescEN:   "Margin usage must not exceed 30%",
-			ReasonZH: "保留70%的资金应对极端行情和追加保证金",
-			ReasonEN: "Reserve 70% capital for extreme market conditions and margin calls",
-		},
-		"MaxPositionLoss": {
-			Value:    -0.05,
-			DescZH:   "单个持仓亏损达到-5%时必须止损",
-			DescEN:   "Must stop-loss when single position loss reaches -5%",
-			ReasonZH: "避免单笔交易造成过大损失",
-			ReasonEN: "Prevent excessive loss from single trade",
-		},
-		"MaxDailyLoss": {
-			Value:    -0.10,
-			DescZH:   "单日亏损达到-10%时停止交易",
-			DescEN:   "Stop trading when daily loss reaches -10%",
-			ReasonZH: "防止情绪化交易导致连续亏损",
-			ReasonEN: "Prevent emotional trading leading to consecutive losses",
-		},
-		"PositionSizeLimit": {
-			Value:    0.15,
-			DescZH:   "单个仓位不得超过总权益的15%",
-			DescEN:   "Single position must not exceed 15% of total equity",
-			ReasonZH: "避免过度集中风险",
-			ReasonEN: "Avoid excessive risk concentration",
-		},
-	},
-
-	EntrySignals: map[string]BilingualRuleDef{
-		"VolumeSpike": {
-			Value:    2.0,
-			DescZH:   "成交量是平均值的2倍以上时考虑进场",
-			DescEN:   "Consider entry when volume is 2x above average",
-			ReasonZH: "放量突破通常意味着强趋势",
-			ReasonEN: "Volume breakout usually indicates strong trend",
-		},
-		"OIChangeThreshold": {
-			Value:    0.02,
-			DescZH:   "持仓量1小时内变化超过2%视为显著变化",
-			DescEN:   "OI change >2% in 1 hour is considered significant",
-			ReasonZH: "大额资金进出会导致持仓量显著变化",
-			ReasonEN: "Large capital flows cause significant OI changes",
-		},
-	},
-
-	ExitSignals: map[string]BilingualRuleDef{
-		"TrailingStop": {
-			Value:    0.30,
-			DescZH:   "当盈亏从峰值回撤30%时平仓止盈",
-			DescEN:   "Close position when PnL pulls back 30% from peak",
-			ReasonZH: "锁定大部分利润，避免盈利回吐。例如：峰值+5%，回撤到+3.5%时平仓",
-			ReasonEN: "Lock in most profits, avoid profit giveback. E.g., Peak +5%, close at +3.5%",
-		},
-		"StopLoss": {
-			Value:    -0.05,
-			DescZH:   "硬止损设置在-5%",
-			DescEN:   "Hard stop-loss at -5%",
-			ReasonZH: "严格控制单笔最大损失",
-			ReasonEN: "Strictly control maximum single-trade loss",
-		},
-	},
-
-	PositionControl: map[string]BilingualRuleDef{
-		"ScaleIn": {
-			Value:    map[string]interface{}{"enabled": true, "max_additions": 2, "price_requirement": 0.01},
-			DescZH:   "只在盈利仓位上加仓，最多加2次，价格需比平均成本高1%",
-			DescEN:   "Only add to winning positions, max 2 additions, price must be 1% above avg cost",
-			ReasonZH: "顺势加仓，不追亏损",
-			ReasonEN: "Add to winners, never average down losers",
-		},
-		"ScaleOut": {
-			Value: []map[string]interface{}{
-				{"pnl": 0.03, "close_pct": 0.33},
-				{"pnl": 0.05, "close_pct": 0.50},
-				{"pnl": 0.08, "close_pct": 1.00},
-			},
-			DescZH:   "分批止盈：盈利3%时平33%，5%时平50%，8%时全平",
-			DescEN:   "Scale-out: Close 33% at +3%, 50% at +5%, 100% at +8%",
-			ReasonZH: "在保证利润的同时让盈利奔跑",
-			ReasonEN: "Lock profits while letting winners run",
 		},
 	},
 }
@@ -583,7 +439,7 @@ func GetSchemaPrompt(lang Language) string {
 
 // getSchemaPromptZH 生成中文Prompt
 func getSchemaPromptZH() string {
-	prompt := "# 📖 数据字典与交易规则\n\n"
+	prompt := "# 📖 数据字典\n\n"
 	prompt += "## 📊 字段含义说明\n\n"
 
 	// 账户指标
@@ -616,18 +472,6 @@ func getSchemaPromptZH() string {
 		prompt += formatFieldDefZH(key, field)
 	}
 
-	// 交易规则
-	prompt += "\n## ⚖️ 交易规则\n\n"
-	prompt += "### 风险管理\n"
-	for name, rule := range TradingRules.RiskManagement {
-		prompt += "- **" + name + "**: " + rule.DescZH + "\n  理由：" + rule.ReasonZH + "\n"
-	}
-
-	prompt += "\n### 出场信号\n"
-	for name, rule := range TradingRules.ExitSignals {
-		prompt += "- **" + name + "**: " + rule.DescZH + "\n  理由：" + rule.ReasonZH + "\n"
-	}
-
 	// OI解读
 	prompt += "\n## 💹 持仓量(OI)变化解读\n\n"
 	prompt += "- **OI增加 + 价格上涨**: " + OIInterpretation.OIUp_PriceUp.ZH + "\n"
@@ -648,7 +492,7 @@ func getSchemaPromptZH() string {
 
 // getSchemaPromptEN 生成英文Prompt
 func getSchemaPromptEN() string {
-	prompt := "# 📖 Data Dictionary & Trading Rules\n\n"
+	prompt := "# 📖 Data Dictionary\n\n"
 	prompt += "## 📊 Field Definitions\n\n"
 
 	// Account Metrics
@@ -679,18 +523,6 @@ func getSchemaPromptEN() string {
 	prompt += "\n### Technical Analysis\n"
 	for key, field := range DataDictionary["TechnicalAnalysis"] {
 		prompt += formatFieldDefEN(key, field)
-	}
-
-	// Trading Rules
-	prompt += "\n## ⚖️ Trading Rules\n\n"
-	prompt += "### Risk Management\n"
-	for name, rule := range TradingRules.RiskManagement {
-		prompt += "- **" + name + "**: " + rule.DescEN + "\n  Reason: " + rule.ReasonEN + "\n"
-	}
-
-	prompt += "\n### Exit Signals\n"
-	for name, rule := range TradingRules.ExitSignals {
-		prompt += "- **" + name + "**: " + rule.DescEN + "\n  Reason: " + rule.ReasonEN + "\n"
 	}
 
 	// OI Interpretation

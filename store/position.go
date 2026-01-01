@@ -31,21 +31,23 @@ type TraderPosition struct {
 	ExchangeType       string     `json:"exchange_type"`        // Exchange type: binance/bybit/okx/hyperliquid/aster/lighter
 	ExchangePositionID string     `json:"exchange_position_id"` // Exchange-specific unique position ID for deduplication
 	Symbol             string     `json:"symbol"`
-	Side               string     `json:"side"`            // LONG/SHORT
-	EntryQuantity      float64    `json:"entry_quantity"`  // Original entry quantity (never modified)
-	Quantity           float64    `json:"quantity"`        // Remaining quantity (reduced on partial close)
-	EntryPrice         float64    `json:"entry_price"`     // Entry price
-	EntryOrderID       string     `json:"entry_order_id"`  // Entry order ID
-	EntryTime          time.Time  `json:"entry_time"`      // Entry time
-	ExitPrice          float64    `json:"exit_price"`      // Exit price
-	ExitOrderID        string     `json:"exit_order_id"`   // Exit order ID
-	ExitTime           *time.Time `json:"exit_time"`       // Exit time
-	RealizedPnL        float64    `json:"realized_pnl"`    // Realized profit and loss
-	Fee                float64    `json:"fee"`             // Fee
-	Leverage           int        `json:"leverage"`        // Leverage multiplier
-	Status             string     `json:"status"`          // OPEN/CLOSED
-	CloseReason        string     `json:"close_reason"`    // Close reason: ai_decision/manual/stop_loss/take_profit
-	Source             string     `json:"source"`          // Source: system/manual/sync
+	Side               string     `json:"side"`           // LONG/SHORT
+	EntryQuantity      float64    `json:"entry_quantity"` // Original entry quantity (never modified)
+	Quantity           float64    `json:"quantity"`       // Remaining quantity (reduced on partial close)
+	EntryPrice         float64    `json:"entry_price"`    // Entry price
+	EntryOrderID       string     `json:"entry_order_id"` // Entry order ID
+	EntryTime          time.Time  `json:"entry_time"`     // Entry time
+	ExitPrice          float64    `json:"exit_price"`     // Exit price
+	ExitOrderID        string     `json:"exit_order_id"`  // Exit order ID
+	ExitTime           *time.Time `json:"exit_time"`      // Exit time
+	RealizedPnL        float64    `json:"realized_pnl"`   // Realized profit and loss
+	Fee                float64    `json:"fee"`            // Fee
+	Leverage           int        `json:"leverage"`       // Leverage multiplier
+	Status             string     `json:"status"`         // OPEN/CLOSED
+	CloseReason        string     `json:"close_reason"`   // Close reason: ai_decision/manual/stop_loss/take_profit
+	Source             string     `json:"source"`         // Source: system/manual/sync
+	ExitPlanSnapshot   string     `json:"exit_plan_snapshot,omitempty"`
+	ExitPlanState      string     `json:"exit_plan_state,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
@@ -84,6 +86,8 @@ func (s *PositionStore) InitTables() error {
 			status TEXT DEFAULT 'OPEN',
 			close_reason TEXT DEFAULT '',
 			source TEXT DEFAULT 'system',
+			exit_plan_snapshot TEXT DEFAULT '',
+			exit_plan_state TEXT DEFAULT '',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)
@@ -101,6 +105,9 @@ func (s *PositionStore) InitTables() error {
 	s.db.Exec(`ALTER TABLE trader_positions ADD COLUMN exchange_position_id TEXT NOT NULL DEFAULT ''`)
 	// Migration: add source field (system/manual/sync)
 	s.db.Exec(`ALTER TABLE trader_positions ADD COLUMN source TEXT DEFAULT 'system'`)
+	// Migration: exit plan snapshot/state (JSON text)
+	s.db.Exec(`ALTER TABLE trader_positions ADD COLUMN exit_plan_snapshot TEXT DEFAULT ''`)
+	s.db.Exec(`ALTER TABLE trader_positions ADD COLUMN exit_plan_state TEXT DEFAULT ''`)
 	// Migration: add entry_quantity field (original quantity, never modified on partial close)
 	s.db.Exec(`ALTER TABLE trader_positions ADD COLUMN entry_quantity REAL DEFAULT 0`)
 	// Backfill: set entry_quantity = quantity for existing records where entry_quantity is 0
@@ -144,12 +151,12 @@ func (s *PositionStore) Create(pos *TraderPosition) error {
 	result, err := s.db.Exec(`
 		INSERT INTO trader_positions (
 			trader_id, exchange_id, exchange_type, symbol, side, quantity, entry_quantity, entry_price, entry_order_id,
-			entry_time, leverage, status, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			entry_time, leverage, status, exit_plan_snapshot, exit_plan_state, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		pos.TraderID, pos.ExchangeID, pos.ExchangeType, pos.Symbol, pos.Side, pos.Quantity, pos.EntryQuantity, pos.EntryPrice,
 		pos.EntryOrderID, pos.EntryTime.Format(time.RFC3339), pos.Leverage,
-		pos.Status, now.Format(time.RFC3339), now.Format(time.RFC3339),
+		pos.Status, pos.ExitPlanSnapshot, pos.ExitPlanState, now.Format(time.RFC3339), now.Format(time.RFC3339),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create position record: %w", err)
@@ -278,6 +285,58 @@ func (s *PositionStore) UpdatePositionExchangeInfo(id int64, exchangeID, exchang
 	return nil
 }
 
+// UpdateExitPlanSnapshotAndState updates exit plan snapshot/state by position ID.
+func (s *PositionStore) UpdateExitPlanSnapshotAndState(id int64, snapshot, state string) error {
+	now := time.Now()
+	_, err := s.db.Exec(`
+		UPDATE trader_positions SET
+			exit_plan_snapshot = ?,
+			exit_plan_state = ?,
+			updated_at = ?
+		WHERE id = ?
+	`, snapshot, state, now.Format(time.RFC3339), id)
+	if err != nil {
+		return fmt.Errorf("failed to update exit plan snapshot/state: %w", err)
+	}
+	return nil
+}
+
+// UpdateExitPlanState updates exit plan runtime state by position ID.
+func (s *PositionStore) UpdateExitPlanState(id int64, state string) error {
+	now := time.Now()
+	_, err := s.db.Exec(`
+		UPDATE trader_positions SET
+			exit_plan_state = ?,
+			updated_at = ?
+		WHERE id = ?
+	`, state, now.Format(time.RFC3339), id)
+	if err != nil {
+		return fmt.Errorf("failed to update exit plan state: %w", err)
+	}
+	return nil
+}
+
+// UpdateExitPlanForOpenPosition updates exit plan fields for latest open position by symbol/side.
+func (s *PositionStore) UpdateExitPlanForOpenPosition(traderID, symbol, side, snapshot, state string) (bool, error) {
+	now := time.Now()
+	result, err := s.db.Exec(`
+		UPDATE trader_positions SET
+			exit_plan_snapshot = ?,
+			exit_plan_state = ?,
+			updated_at = ?
+		WHERE id = (
+			SELECT id FROM trader_positions
+			WHERE trader_id = ? AND symbol = ? AND side = ? AND status = 'OPEN'
+			ORDER BY entry_time DESC LIMIT 1
+		)
+	`, snapshot, state, now.Format(time.RFC3339), traderID, symbol, side)
+	if err != nil {
+		return false, fmt.Errorf("failed to update exit plan by symbol: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	return affected > 0, nil
+}
+
 // ClosePositionFully marks position as fully closed with exit time and accumulated PnL
 func (s *PositionStore) ClosePositionFully(
 	id int64,
@@ -328,7 +387,7 @@ func (s *PositionStore) GetOpenPositions(traderID string) ([]*TraderPosition, er
 	rows, err := s.db.Query(`
 		SELECT id, trader_id, exchange_id, COALESCE(exchange_type, '') as exchange_type, symbol, side, quantity, COALESCE(entry_quantity, quantity) as entry_quantity, entry_price, entry_order_id,
 			entry_time, exit_price, exit_order_id, exit_time, realized_pnl, fee,
-			leverage, status, close_reason, created_at, updated_at
+			leverage, status, close_reason, exit_plan_snapshot, exit_plan_state, created_at, updated_at
 		FROM trader_positions
 		WHERE trader_id = ? AND status = 'OPEN'
 		ORDER BY entry_time DESC
@@ -351,7 +410,7 @@ func (s *PositionStore) GetOpenPositionBySymbol(traderID, symbol, side string) (
 	err := s.db.QueryRow(`
 		SELECT id, trader_id, exchange_id, COALESCE(exchange_type, '') as exchange_type, symbol, side, quantity, COALESCE(entry_quantity, quantity) as entry_quantity, entry_price, entry_order_id,
 			entry_time, exit_price, exit_order_id, exit_time, realized_pnl, fee,
-			leverage, status, close_reason, created_at, updated_at
+			leverage, status, close_reason, exit_plan_snapshot, exit_plan_state, created_at, updated_at
 		FROM trader_positions
 		WHERE trader_id = ? AND symbol = ? AND side = ? AND status = 'OPEN'
 		ORDER BY entry_time DESC LIMIT 1
@@ -359,7 +418,7 @@ func (s *PositionStore) GetOpenPositionBySymbol(traderID, symbol, side string) (
 		&pos.ID, &pos.TraderID, &pos.ExchangeID, &pos.ExchangeType, &pos.Symbol, &pos.Side, &pos.Quantity, &pos.EntryQuantity,
 		&pos.EntryPrice, &pos.EntryOrderID, &entryTime, &pos.ExitPrice,
 		&pos.ExitOrderID, &exitTime, &pos.RealizedPnL, &pos.Fee,
-		&pos.Leverage, &pos.Status, &pos.CloseReason, &createdAt, &updatedAt,
+		&pos.Leverage, &pos.Status, &pos.CloseReason, &pos.ExitPlanSnapshot, &pos.ExitPlanState, &createdAt, &updatedAt,
 	)
 	if err == nil {
 		s.parsePositionTimes(&pos, entryTime, exitTime, createdAt, updatedAt)
@@ -372,7 +431,7 @@ func (s *PositionStore) GetOpenPositionBySymbol(traderID, symbol, side string) (
 		err = s.db.QueryRow(`
 			SELECT id, trader_id, exchange_id, COALESCE(exchange_type, '') as exchange_type, symbol, side, quantity, COALESCE(entry_quantity, quantity) as entry_quantity, entry_price, entry_order_id,
 				entry_time, exit_price, exit_order_id, exit_time, realized_pnl, fee,
-				leverage, status, close_reason, created_at, updated_at
+				leverage, status, close_reason, exit_plan_snapshot, exit_plan_state, created_at, updated_at
 			FROM trader_positions
 			WHERE trader_id = ? AND symbol = ? AND side = ? AND status = 'OPEN'
 			ORDER BY entry_time DESC LIMIT 1
@@ -380,7 +439,7 @@ func (s *PositionStore) GetOpenPositionBySymbol(traderID, symbol, side string) (
 			&pos.ID, &pos.TraderID, &pos.ExchangeID, &pos.ExchangeType, &pos.Symbol, &pos.Side, &pos.Quantity, &pos.EntryQuantity,
 			&pos.EntryPrice, &pos.EntryOrderID, &entryTime, &pos.ExitPrice,
 			&pos.ExitOrderID, &exitTime, &pos.RealizedPnL, &pos.Fee,
-			&pos.Leverage, &pos.Status, &pos.CloseReason, &createdAt, &updatedAt,
+			&pos.Leverage, &pos.Status, &pos.CloseReason, &pos.ExitPlanSnapshot, &pos.ExitPlanState, &createdAt, &updatedAt,
 		)
 		if err == nil {
 			s.parsePositionTimes(&pos, entryTime, exitTime, createdAt, updatedAt)
@@ -399,7 +458,7 @@ func (s *PositionStore) GetClosedPositions(traderID string, limit int) ([]*Trade
 	rows, err := s.db.Query(`
 		SELECT id, trader_id, exchange_id, COALESCE(exchange_type, '') as exchange_type, symbol, side, quantity, COALESCE(entry_quantity, quantity) as entry_quantity, entry_price, entry_order_id,
 			entry_time, exit_price, exit_order_id, exit_time, realized_pnl, fee,
-			leverage, status, close_reason, created_at, updated_at
+			leverage, status, close_reason, exit_plan_snapshot, exit_plan_state, created_at, updated_at
 		FROM trader_positions
 		WHERE trader_id = ? AND status = 'CLOSED'
 		ORDER BY exit_time DESC
@@ -418,7 +477,7 @@ func (s *PositionStore) GetAllOpenPositions() ([]*TraderPosition, error) {
 	rows, err := s.db.Query(`
 		SELECT id, trader_id, exchange_id, COALESCE(exchange_type, '') as exchange_type, symbol, side, quantity, COALESCE(entry_quantity, quantity) as entry_quantity, entry_price, entry_order_id,
 			entry_time, exit_price, exit_order_id, exit_time, realized_pnl, fee,
-			leverage, status, close_reason, created_at, updated_at
+			leverage, status, close_reason, exit_plan_snapshot, exit_plan_state, created_at, updated_at
 		FROM trader_positions
 		WHERE status = 'OPEN'
 		ORDER BY trader_id, entry_time DESC
@@ -716,7 +775,7 @@ func (s *PositionStore) scanPositions(rows *sql.Rows) ([]*TraderPosition, error)
 			&pos.ID, &pos.TraderID, &pos.ExchangeID, &pos.ExchangeType, &pos.Symbol, &pos.Side, &pos.Quantity, &pos.EntryQuantity,
 			&pos.EntryPrice, &pos.EntryOrderID, &entryTime, &pos.ExitPrice,
 			&pos.ExitOrderID, &exitTime, &pos.RealizedPnL, &pos.Fee,
-			&pos.Leverage, &pos.Status, &pos.CloseReason, &createdAt, &updatedAt,
+			&pos.Leverage, &pos.Status, &pos.CloseReason, &pos.ExitPlanSnapshot, &pos.ExitPlanState, &createdAt, &updatedAt,
 		)
 		if err != nil {
 			continue
@@ -795,10 +854,10 @@ func (s *PositionStore) GetSymbolStats(traderID string, limit int) ([]SymbolStat
 
 // HoldingTimeStats holding duration analysis
 type HoldingTimeStats struct {
-	Range       string  `json:"range"`        // e.g., "<1h", "1-4h", "4-24h", ">24h"
-	TradeCount  int     `json:"trade_count"`
-	WinRate     float64 `json:"win_rate"`
-	AvgPnL      float64 `json:"avg_pnl"`
+	Range      string  `json:"range"` // e.g., "<1h", "1-4h", "4-24h", ">24h"
+	TradeCount int     `json:"trade_count"`
+	WinRate    float64 `json:"win_rate"`
+	AvgPnL     float64 `json:"avg_pnl"`
 }
 
 // GetHoldingTimeStats analyzes performance by holding duration
@@ -914,9 +973,9 @@ type HistorySummary struct {
 	RecentPnL     float64 `json:"recent_pnl"`
 
 	// Streak info
-	CurrentStreak     int    `json:"current_streak"`      // Positive = wins, negative = losses
-	MaxWinStreak      int    `json:"max_win_streak"`
-	MaxLoseStreak     int    `json:"max_lose_streak"`
+	CurrentStreak int `json:"current_streak"` // Positive = wins, negative = losses
+	MaxWinStreak  int `json:"max_win_streak"`
+	MaxLoseStreak int `json:"max_lose_streak"`
 }
 
 // GetHistorySummary generates comprehensive AI context summary
@@ -1112,7 +1171,7 @@ func (s *PositionStore) GetOpenPositionByExchangePositionID(exchangeID, exchange
 	err := s.db.QueryRow(`
 		SELECT id, trader_id, exchange_id, COALESCE(exchange_type, '') as exchange_type, symbol, side, quantity, COALESCE(entry_quantity, quantity) as entry_quantity, entry_price, entry_order_id,
 			entry_time, exit_price, exit_order_id, exit_time, realized_pnl, fee,
-			leverage, status, close_reason, created_at, updated_at
+			leverage, status, close_reason, exit_plan_snapshot, exit_plan_state, created_at, updated_at
 		FROM trader_positions
 		WHERE exchange_id = ? AND exchange_position_id = ? AND status = 'OPEN'
 		LIMIT 1
@@ -1120,7 +1179,7 @@ func (s *PositionStore) GetOpenPositionByExchangePositionID(exchangeID, exchange
 		&pos.ID, &pos.TraderID, &pos.ExchangeID, &pos.ExchangeType, &pos.Symbol, &pos.Side, &pos.Quantity, &pos.EntryQuantity,
 		&pos.EntryPrice, &pos.EntryOrderID, &entryTime, &pos.ExitPrice,
 		&pos.ExitOrderID, &exitTime, &pos.RealizedPnL, &pos.Fee,
-		&pos.Leverage, &pos.Status, &pos.CloseReason, &createdAt, &updatedAt,
+		&pos.Leverage, &pos.Status, &pos.CloseReason, &pos.ExitPlanSnapshot, &pos.ExitPlanState, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -1218,15 +1277,15 @@ func (s *PositionStore) CreateFromClosedPnL(traderID, exchangeID, exchangeType s
 			trader_id, exchange_id, exchange_type, exchange_position_id, symbol, side, quantity,
 			entry_price, entry_order_id, entry_time,
 			exit_price, exit_order_id, exit_time,
-			realized_pnl, fee, leverage, status, close_reason, source,
+			realized_pnl, fee, leverage, status, close_reason, source, exit_plan_snapshot, exit_plan_state,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CLOSED', ?, 'sync', ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CLOSED', ?, 'sync', ?, ?, ?, ?)
 	`,
 		traderID, exchangeID, exchangeType, exchangePositionID, record.Symbol, side, record.Quantity,
 		record.EntryPrice, "", entryTime.Format(time.RFC3339),
 		record.ExitPrice, record.OrderID, exitTime.Format(time.RFC3339),
 		record.RealizedPnL, record.Fee, record.Leverage, record.CloseType,
-		now.Format(time.RFC3339), now.Format(time.RFC3339),
+		"", "", now.Format(time.RFC3339), now.Format(time.RFC3339),
 	)
 	if err != nil {
 		// Duplicate key error, treat as already exists
@@ -1331,13 +1390,14 @@ func (s *PositionStore) CreateOpenPosition(pos *TraderPosition) error {
 		INSERT INTO trader_positions (
 			trader_id, exchange_id, exchange_type, exchange_position_id, symbol, side, quantity, entry_quantity,
 			entry_price, entry_order_id, entry_time, exit_price, exit_order_id, exit_time,
-			realized_pnl, leverage, status, source, fee,
+			realized_pnl, leverage, status, source, fee, exit_plan_snapshot, exit_plan_state,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		pos.TraderID, pos.ExchangeID, pos.ExchangeType, pos.ExchangePositionID, pos.Symbol, pos.Side, pos.Quantity, pos.EntryQuantity,
 		pos.EntryPrice, pos.EntryOrderID, pos.EntryTime.Format(time.RFC3339), pos.ExitPrice, pos.ExitOrderID, exitTimeStr,
-		pos.RealizedPnL, pos.Leverage, pos.Status, pos.Source, pos.Fee, now.Format(time.RFC3339), now.Format(time.RFC3339),
+		pos.RealizedPnL, pos.Leverage, pos.Status, pos.Source, pos.Fee, pos.ExitPlanSnapshot, pos.ExitPlanState,
+		now.Format(time.RFC3339), now.Format(time.RFC3339),
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {

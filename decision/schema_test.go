@@ -50,45 +50,6 @@ func TestDataDictionary(t *testing.T) {
 	})
 }
 
-// TestTradingRules 测试交易规则定义
-func TestTradingRules(t *testing.T) {
-	t.Run("RiskManagement", func(t *testing.T) {
-		maxMargin := TradingRules.RiskManagement["MaxMarginUsage"]
-
-		if maxMargin.Value != 0.30 {
-			t.Errorf("Expected MaxMarginUsage=0.30, got %v", maxMargin.Value)
-		}
-
-		if maxMargin.GetDesc(LangChinese) == "" {
-			t.Error("MaxMarginUsage DescZH is empty")
-		}
-
-		if maxMargin.GetDesc(LangEnglish) == "" {
-			t.Error("MaxMarginUsage DescEN is empty")
-		}
-
-		if !strings.Contains(maxMargin.DescZH, "30%") {
-			t.Error("MaxMarginUsage DescZH should mention 30%")
-		}
-	})
-
-	t.Run("ExitSignals", func(t *testing.T) {
-		trailing := TradingRules.ExitSignals["TrailingStop"]
-
-		if trailing.Value != 0.30 {
-			t.Errorf("Expected TrailingStop=0.30, got %v", trailing.Value)
-		}
-
-		if !strings.Contains(trailing.ReasonZH, "止盈") {
-			t.Error("TrailingStop ReasonZH should mention '止盈'")
-		}
-
-		if !strings.Contains(trailing.ReasonEN, "profit") {
-			t.Error("TrailingStop ReasonEN should mention 'profit'")
-		}
-	})
-}
-
 // TestOIInterpretation 测试OI解读
 func TestOIInterpretation(t *testing.T) {
 	t.Run("OI_Up_Price_Up", func(t *testing.T) {
@@ -147,8 +108,6 @@ func TestGetSchemaPrompt(t *testing.T) {
 			"交易指标",
 			"持仓指标",
 			"市场数据",
-			"交易规则",
-			"风险管理",
 			"持仓量(OI)变化解读",
 			"常见错误",
 		}
@@ -174,8 +133,6 @@ func TestGetSchemaPrompt(t *testing.T) {
 			"Trade Metrics",
 			"Position Metrics",
 			"Market Data",
-			"Trading Rules",
-			"Risk Management",
 			"Open Interest",
 			"Common Mistakes",
 		}
@@ -258,27 +215,4 @@ func TestFieldDefinitionMethods(t *testing.T) {
 	}
 }
 
-// TestRuleDefinitionMethods 测试规则定义方法
-func TestRuleDefinitionMethods(t *testing.T) {
-	rule := BilingualRuleDef{
-		Value:    0.30,
-		DescZH:   "中文描述",
-		DescEN:   "English description",
-		ReasonZH: "中文原因",
-		ReasonEN: "English reason",
-	}
-
-	if rule.GetDesc(LangChinese) != "中文描述" {
-		t.Error("GetDesc(Chinese) failed")
-	}
-	if rule.GetDesc(LangEnglish) != "English description" {
-		t.Error("GetDesc(English) failed")
-	}
-
-	if rule.GetReason(LangChinese) != "中文原因" {
-		t.Error("GetReason(Chinese) failed")
-	}
-	if rule.GetReason(LangEnglish) != "English reason" {
-		t.Error("GetReason(English) failed")
-	}
-}
+// (TradingRules removed from schema; no rule-definition tests.)

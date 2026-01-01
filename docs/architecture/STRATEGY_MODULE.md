@@ -475,7 +475,7 @@ RetryDelay: 2 seconds (exponential backoff)
 
 **Core File:** `decision/engine.go:1303-1604`
 
-**Entry Method:** `parseFullDecisionResponse(response, accountEquity, leverage, ratio)`
+**Entry Method:** `parseFullDecisionResponse(response, accountEquity, btcEthLeverage, altcoinLeverage, btcEthPosRatio, altcoinPosRatio, exitPlanID)`
 
 ### 6.1 Parsing Flow
 
@@ -586,6 +586,7 @@ type Decision struct {
     PositionSizeUSD float64  // Position value (USDT)
     StopLoss        float64  // Stop loss price
     TakeProfit      float64  // Take profit price
+    ExitPlan        *ExitPlan // Structured exit plan (tiered TP/SL)
     Confidence      int      // Confidence 0-100
     RiskUSD         float64  // Max risk (USDT)
     Reasoning       string   // Decision reasoning
@@ -593,6 +594,24 @@ type Decision struct {
 ```
 
 ---
+
+### 6.7 Exit Plan Structure
+
+When `prompt_sections.exit_strategy_plan` is set, open decisions must include `exit_plan`
+to match the configured plan ID. The system uses exchange-native stop-loss and
+system-driven tiered take-profit execution.
+
+```json
+{
+  "exit_plan": {
+    "plan_id": "plan_tp_tiers_sl_single",
+    "children": [
+      { "component": "tp_tiers", "handler": "tier_take_profit", "params": { "tiers": [ { "target_price": 100, "ratio": 0.5 }, { "target_price": 110, "ratio": 0.5 } ] } },
+      { "component": "sl_single", "handler": "tier_stop_loss", "params": { "tiers": [ { "target_price": 90, "ratio": 1.0 } ] } }
+    ]
+  }
+}
+```
 
 ## 7. Decision Execution
 

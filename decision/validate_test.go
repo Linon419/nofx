@@ -1,8 +1,43 @@
 package decision
 
 import (
+	"encoding/json"
 	"testing"
 )
+
+func makeExitPlanForAction(t *testing.T, action string) *ExitPlan {
+	t.Helper()
+	tpTiers := []exitPlanTier{
+		{TargetPrice: 110, Ratio: 0.5},
+		{TargetPrice: 120, Ratio: 0.5},
+	}
+	slTier := exitPlanTier{TargetPrice: 90, Ratio: 1.0}
+
+	if action == "open_short" {
+		tpTiers = []exitPlanTier{
+			{TargetPrice: 90, Ratio: 0.5},
+			{TargetPrice: 80, Ratio: 0.5},
+		}
+		slTier = exitPlanTier{TargetPrice: 110, Ratio: 1.0}
+	}
+
+	tpParams, err := json.Marshal(exitPlanTierParams{Tiers: tpTiers})
+	if err != nil {
+		t.Fatalf("marshal tp tiers: %v", err)
+	}
+	slParams, err := json.Marshal(exitPlanTierParams{Tiers: []exitPlanTier{slTier}})
+	if err != nil {
+		t.Fatalf("marshal sl tiers: %v", err)
+	}
+
+	return &ExitPlan{
+		PlanID: "plan_tp_tiers_sl_single",
+		Children: []ExitPlanChild{
+			{Component: "tp_tiers", Handler: "tier_take_profit", Params: tpParams},
+			{Component: "sl_single", Handler: "tier_stop_loss", Params: slParams},
+		},
+	}
+}
 
 // TestLeverageFallback tests automatic correction when leverage exceeds limit
 func TestLeverageFallback(t *testing.T) {
@@ -83,8 +118,9 @@ func TestLeverageFallback(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tt.decision.ExitPlan = makeExitPlanForAction(t, tt.decision.Action)
 			// Use default position value ratios for testing (10x for BTC/ETH, 1.5x for altcoins)
-			err := validateDecision(&tt.decision, tt.accountEquity, tt.btcEthLeverage, tt.altcoinLeverage, 10.0, 1.5)
+			err := validateDecision(&tt.decision, tt.accountEquity, tt.btcEthLeverage, tt.altcoinLeverage, 10.0, 1.5, "plan_tp_tiers_sl_single")
 
 			// Check error status
 			if (err != nil) != tt.wantError {
@@ -99,7 +135,6 @@ func TestLeverageFallback(t *testing.T) {
 		})
 	}
 }
-
 
 // contains checks if string contains substring (helper function)
 func contains(s, substr string) bool {

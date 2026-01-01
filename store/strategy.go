@@ -49,6 +49,8 @@ type PromptSectionsConfig struct {
 	EntryStandards string `json:"entry_standards,omitempty"`
 	// decision process
 	DecisionProcess string `json:"decision_process,omitempty"`
+	// exit strategy plan (LLM output schema)
+	ExitStrategyPlan string `json:"exit_strategy_plan,omitempty"`
 	// recent closed trades to include in User Prompt context
 	RecentTradesLimit int `json:"recent_trades_limit,omitempty"`
 }
@@ -154,6 +156,10 @@ type ExternalDataSource struct {
 // Trading Leverage (exchange leverage for opening positions):
 //   - BTCETHMaxLeverage: BTC/ETH max exchange leverage (AI guided)
 //   - AltcoinMaxLeverage: Altcoin max exchange leverage (AI guided)
+//   - ATREnabled: enable ATR-based leverage + stop-loss sizing
+//   - ATRPeriod: ATR period for leverage calc
+//   - ATRTimeframe: timeframe used for ATR
+//   - StopLossRiskPct: risk per trade (% of equity) for stop-loss sizing
 //
 // Position Value Limits (single position notional value / account equity):
 //   - BTCETHMaxPositionValueRatio: BTC/ETH max = equity × ratio (CODE ENFORCED)
@@ -172,6 +178,12 @@ type RiskControlConfig struct {
 	BTCETHMaxLeverage int `json:"btc_eth_max_leverage"`
 	// Altcoin exchange leverage for opening positions (AI guided)
 	AltcoinMaxLeverage int `json:"altcoin_max_leverage"`
+
+	// ATR-based leverage and stop-loss sizing
+	ATREnabled      bool    `json:"atr_enabled"`
+	ATRPeriod       int     `json:"atr_period"`
+	ATRTimeframe    string  `json:"atr_timeframe"`
+	StopLossRiskPct float64 `json:"stop_loss_risk_pct"`
 
 	// BTC/ETH single position max value = equity × this ratio (CODE ENFORCED, default: 5)
 	BTCETHMaxPositionValueRatio float64 `json:"btc_eth_max_position_value_ratio"`
@@ -244,12 +256,12 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 		},
 		Indicators: IndicatorConfig{
 			Klines: KlineConfig{
-				PrimaryTimeframe:     "5m",
-				PrimaryCount:         30,
-				LongerTimeframe:      "4h",
-				LongerCount:          10,
-				EnableMultiTimeframe: true,
-				SelectedTimeframes:   []string{"5m", "15m", "1h", "4h"},
+				PrimaryTimeframe:         "5m",
+				PrimaryCount:             30,
+				LongerTimeframe:          "4h",
+				LongerCount:              10,
+				EnableMultiTimeframe:     true,
+				SelectedTimeframes:       []string{"5m", "15m", "1h", "4h"},
 				DecisionIntervalMultiple: 1,
 				DecisionOffsetSeconds:    10,
 				DecisionRunImmediately:   false,
@@ -278,9 +290,13 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			OIRankingLimit:    10,
 		},
 		RiskControl: RiskControlConfig{
-			MaxPositions:                 3,   // Max 3 coins simultaneously (CODE ENFORCED)
-			BTCETHMaxLeverage:            5,   // BTC/ETH exchange leverage (AI guided)
-			AltcoinMaxLeverage:           5,   // Altcoin exchange leverage (AI guided)
+			MaxPositions:                 3, // Max 3 coins simultaneously (CODE ENFORCED)
+			BTCETHMaxLeverage:            5, // BTC/ETH exchange leverage (AI guided)
+			AltcoinMaxLeverage:           5, // Altcoin exchange leverage (AI guided)
+			ATREnabled:                   true,
+			ATRPeriod:                    14,
+			ATRTimeframe:                 "1d",
+			StopLossRiskPct:              5.0,
 			BTCETHMaxPositionValueRatio:  5.0, // BTC/ETH: max position = 5x equity (CODE ENFORCED)
 			AltcoinMaxPositionValueRatio: 1.0, // Altcoin: max position = 1x equity (CODE ENFORCED)
 			MaxMarginUsage:               0.9, // Max 90% margin usage (CODE ENFORCED)
@@ -333,6 +349,9 @@ Only enter positions when multiple signals resonate. Freely use any effective an
 	}
 
 	config.PromptSections.RecentTradesLimit = 3
+	if config.PromptSections.ExitStrategyPlan == "" {
+		config.PromptSections.ExitStrategyPlan = "plan_tp_tiers_sl_single"
+	}
 
 	return config
 }

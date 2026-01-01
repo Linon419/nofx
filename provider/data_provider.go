@@ -68,8 +68,14 @@ var otcTopConfig = OTCTopConfig{
 
 // OTCTopItem OTC Top data item
 type OTCTopItem struct {
-	Symbol   string  `json:"symbol"`
-	OTCIndex float64 `json:"otc_index"`
+	Symbol        string    `json:"symbol"`
+	OTCIndex      float64   `json:"otc_index"`
+	PeriodQuality string    `json:"period_quality"`
+	Time          string    `json:"time"`
+	Timestamp     string    `json:"timestamp"`
+	Date          string    `json:"date"`
+	AsOf          time.Time `json:"-"`
+	AsOfRaw       string    `json:"-"`
 }
 
 // OTCTopAPIResponse data structure returned by OTC Top API
@@ -127,6 +133,9 @@ func parseOTCTopResponse(body []byte) ([]OTCTopItem, error) {
 		if strings.TrimSpace(item.Symbol) == "" {
 			continue
 		}
+		item.Symbol = strings.TrimSpace(item.Symbol)
+		item.PeriodQuality = strings.TrimSpace(item.PeriodQuality)
+		parseOTCTopItemTime(&item)
 		items = append(items, item)
 	}
 	if len(items) == 0 {
@@ -141,6 +150,34 @@ func parseOTCTopResponse(body []byte) ([]OTCTopItem, error) {
 	})
 
 	return items, nil
+}
+
+func parseOTCTopItemTime(item *OTCTopItem) {
+	candidates := []string{item.Timestamp, item.Time, item.Date}
+	for _, raw := range candidates {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if item.AsOfRaw == "" {
+			item.AsOfRaw = raw
+		}
+		if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+			item.AsOf = parsed.UTC()
+			item.AsOfRaw = raw
+			return
+		}
+		if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+			item.AsOf = parsed.UTC()
+			item.AsOfRaw = raw
+			return
+		}
+		if parsed, err := time.Parse("2006-01-02", raw); err == nil {
+			item.AsOf = parsed.UTC()
+			item.AsOfRaw = raw
+			return
+		}
+	}
 }
 
 // GetOTCTopSymbols retrieves OTC Top coin symbol list
