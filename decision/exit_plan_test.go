@@ -25,11 +25,13 @@ func TestValidateExitPlan(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		action    string
-		planID    string
-		exitPlan  *ExitPlan
-		wantError bool
+		name       string
+		action     string
+		planID     string
+		exitPlan   *ExitPlan
+		stopLoss   float64
+		takeProfit float64
+		wantError  bool
 	}{
 		{
 			name:   "valid tp_tiers + sl_single (long)",
@@ -56,7 +58,9 @@ func TestValidateExitPlan(t *testing.T) {
 					},
 				},
 			},
-			wantError: false,
+			stopLoss:   90,
+			takeProfit: 130,
+			wantError:  false,
 		},
 		{
 			name:   "invalid tier ratio sum",
@@ -82,7 +86,9 @@ func TestValidateExitPlan(t *testing.T) {
 					},
 				},
 			},
-			wantError: true,
+			stopLoss:   90,
+			takeProfit: 120,
+			wantError:  true,
 		},
 		{
 			name:   "invalid tp order for short",
@@ -109,7 +115,9 @@ func TestValidateExitPlan(t *testing.T) {
 					},
 				},
 			},
-			wantError: true,
+			stopLoss:   150,
+			takeProfit: 130,
+			wantError:  true,
 		},
 		{
 			name:   "missing component",
@@ -127,7 +135,9 @@ func TestValidateExitPlan(t *testing.T) {
 					},
 				},
 			},
-			wantError: true,
+			stopLoss:   90,
+			takeProfit: 110,
+			wantError:  true,
 		},
 		{
 			name:   "invalid atr mode",
@@ -155,19 +165,46 @@ func TestValidateExitPlan(t *testing.T) {
 					},
 				},
 			},
-			wantError: true,
+			stopLoss:   90,
+			takeProfit: 110,
+			wantError:  true,
+		},
+		{
+			name:       "autofill exit_plan when missing (tp_tiers + sl_single)",
+			action:     "open_long",
+			planID:     "plan_tp_tiers_sl_single",
+			exitPlan:   nil,
+			stopLoss:   90,
+			takeProfit: 110,
+			wantError:  false,
+		},
+		{
+			name:       "autofill exit_plan when missing (sl_atr + tp_single)",
+			action:     "open_long",
+			planID:     "plan_sl_atr_tp_single",
+			exitPlan:   nil,
+			stopLoss:   90,
+			takeProfit: 110,
+			wantError:  false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dec := Decision{
-				Action:   tt.action,
-				ExitPlan: tt.exitPlan,
+				Action:     tt.action,
+				ExitPlan:   tt.exitPlan,
+				StopLoss:   tt.stopLoss,
+				TakeProfit: tt.takeProfit,
 			}
 			err := validateExitPlan(&dec, tt.planID)
 			if (err != nil) != tt.wantError {
 				t.Fatalf("validateExitPlan() error = %v, wantError %v", err, tt.wantError)
+			}
+			if !tt.wantError && tt.exitPlan == nil && (tt.action == "open_long" || tt.action == "open_short") {
+				if dec.ExitPlan == nil || dec.ExitPlan.PlanID == "" || len(dec.ExitPlan.Children) == 0 {
+					t.Fatalf("expected exit_plan to be auto-filled, got: %+v", dec.ExitPlan)
+				}
 			}
 		})
 	}

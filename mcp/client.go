@@ -55,7 +55,7 @@ type Client struct {
 	MaxTokens  int  // Maximum tokens for AI response
 
 	httpClient *http.Client
-	logger     Logger // Logger (replaceable)
+	logger     Logger  // Logger (replaceable)
 	config     *Config // Config object (stores all configurations)
 
 	// hooks are used to implement dynamic dispatch (polymorphism)
@@ -235,7 +235,14 @@ func (client *Client) parseMCPResponse(body []byte) (string, error) {
 	var result struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					Type     string `json:"type"`
+					Function struct {
+						Name      string `json:"name"`
+						Arguments string `json:"arguments"`
+					} `json:"function"`
+				} `json:"tool_calls,omitempty"`
 			} `json:"message"`
 		} `json:"choices"`
 		Usage struct {
@@ -251,6 +258,14 @@ func (client *Client) parseMCPResponse(body []byte) (string, error) {
 
 	if len(result.Choices) == 0 {
 		return "", fmt.Errorf("API returned empty response")
+	}
+
+	// Tool calling: return the arguments of the first tool call (structured output)
+	if len(result.Choices[0].Message.ToolCalls) > 0 {
+		args := strings.TrimSpace(result.Choices[0].Message.ToolCalls[0].Function.Arguments)
+		if args != "" {
+			return args, nil
+		}
 	}
 
 	// Report token usage if callback is set

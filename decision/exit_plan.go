@@ -79,6 +79,115 @@ type exitPlanAtrParams struct {
 	InitialStopMultiplier float64 `json:"initial_stop_multiplier,omitempty"`
 }
 
+func fillExitPlanFromLegacyFields(decision *Decision, expectedPlanID string) error {
+	if decision == nil {
+		return fmt.Errorf("decision is nil")
+	}
+
+	if decision.Action != "open_long" && decision.Action != "open_short" {
+		return nil
+	}
+
+	planID := normalizeExitPlanID(expectedPlanID)
+	if planID == "" {
+		return nil
+	}
+
+	if decision.StopLoss <= 0 || decision.TakeProfit <= 0 {
+		return fmt.Errorf("exit_plan is required when action is %s", decision.Action)
+	}
+
+	makeTierParams := func(tiers []exitPlanTier) (json.RawMessage, error) {
+		data, err := json.Marshal(exitPlanTierParams{Tiers: tiers})
+		if err != nil {
+			return nil, err
+		}
+		return data, nil
+	}
+
+	makeAtrParams := func(params exitPlanAtrParams) (json.RawMessage, error) {
+		data, err := json.Marshal(params)
+		if err != nil {
+			return nil, err
+		}
+		return data, nil
+	}
+
+	children := make([]ExitPlanChild, 0, 2)
+	switch planID {
+	case "plan_tp_single_sl_single":
+		tpParams, err := makeTierParams([]exitPlanTier{{TargetPrice: decision.TakeProfit, Ratio: 1.0}})
+		if err != nil {
+			return err
+		}
+		slParams, err := makeTierParams([]exitPlanTier{{TargetPrice: decision.StopLoss, Ratio: 1.0}})
+		if err != nil {
+			return err
+		}
+		children = append(children,
+			ExitPlanChild{Component: "tp_single", Handler: exitPlanComponentHandlers["tp_single"], Params: tpParams},
+			ExitPlanChild{Component: "sl_single", Handler: exitPlanComponentHandlers["sl_single"], Params: slParams},
+		)
+	case "plan_sl_atr_tp_single":
+		atrParams, err := makeAtrParams(exitPlanAtrParams{
+			Mode:              exitPlanComponentModes["sl_atr"],
+			ATRValue:          0,
+			TriggerMultiplier: 2.0,
+			TrailMultiplier:   1.0,
+		})
+		if err != nil {
+			return err
+		}
+		tpParams, err := makeTierParams([]exitPlanTier{{TargetPrice: decision.TakeProfit, Ratio: 1.0}})
+		if err != nil {
+			return err
+		}
+		children = append(children,
+			ExitPlanChild{Component: "sl_atr", Handler: exitPlanComponentHandlers["sl_atr"], Params: atrParams},
+			ExitPlanChild{Component: "tp_single", Handler: exitPlanComponentHandlers["tp_single"], Params: tpParams},
+		)
+	case "plan_tp_atr_sl_single":
+		atrParams, err := makeAtrParams(exitPlanAtrParams{
+			Mode:              exitPlanComponentModes["tp_atr"],
+			ATRValue:          0,
+			TriggerMultiplier: 2.0,
+			TrailMultiplier:   1.0,
+		})
+		if err != nil {
+			return err
+		}
+		slParams, err := makeTierParams([]exitPlanTier{{TargetPrice: decision.StopLoss, Ratio: 1.0}})
+		if err != nil {
+			return err
+		}
+		children = append(children,
+			ExitPlanChild{Component: "tp_atr", Handler: exitPlanComponentHandlers["tp_atr"], Params: atrParams},
+			ExitPlanChild{Component: "sl_single", Handler: exitPlanComponentHandlers["sl_single"], Params: slParams},
+		)
+	default:
+		tpParams, err := makeTierParams([]exitPlanTier{{TargetPrice: decision.TakeProfit, Ratio: 1.0}})
+		if err != nil {
+			return err
+		}
+		slParams, err := makeTierParams([]exitPlanTier{{TargetPrice: decision.StopLoss, Ratio: 1.0}})
+		if err != nil {
+			return err
+		}
+		children = append(children,
+			ExitPlanChild{Component: "tp_tiers", Handler: exitPlanComponentHandlers["tp_tiers"], Params: tpParams},
+			ExitPlanChild{Component: "sl_single", Handler: exitPlanComponentHandlers["sl_single"], Params: slParams},
+		)
+	}
+
+	decision.ExitPlan = &ExitPlan{
+		PlanID:               planID,
+		FinalTakeProfitPrice: decision.TakeProfit,
+		FinalStopLossPrice:   decision.StopLoss,
+		Children:             children,
+	}
+	return nil
+}
+
 func normalizeExitPlanID(planID string) string {
 	planID = strings.TrimSpace(planID)
 	if planID == "" {
@@ -145,8 +254,10 @@ func validateExitPlan(decision *Decision, expectedPlanID string) error {
 		return nil
 	}
 
-	if decision.ExitPlan == nil {
-		return fmt.Errorf("exit_plan is required when action is %s", decision.Action)
+	if decision.ExitPlan == nil || len(decision.ExitPlan.Children) == 0 {
+		if err := fillExitPlanFromLegacyFields(decision, planID); err != nil {
+			return err
+		}
 	}
 
 	if strings.TrimSpace(decision.ExitPlan.PlanID) == "" {

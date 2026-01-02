@@ -301,38 +301,360 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 	// 3. Build User Prompt using strategy engine
 	userPrompt := engine.BuildUserPrompt(ctx)
 
-	// 4. Call AI API
-	aiCallStart := time.Now()
-	aiResponse, err := mcpClient.CallWithMessages(systemPrompt, userPrompt)
-	aiCallDuration := time.Since(aiCallStart)
-	if err != nil {
-		return nil, fmt.Errorf("AI API call failed: %w", err)
+	callAIAndParse := func(prompt string) (*FullDecision, error) {
+		aiCallStart := time.Now()
+		aiResponse, err := mcpClient.CallWithMessages(systemPrompt, prompt)
+		aiCallDuration := time.Since(aiCallStart)
+		if err != nil {
+			return nil, fmt.Errorf("AI API call failed: %w", err)
+		}
+
+		decision, parseErr := parseFullDecisionResponse(
+			aiResponse,
+			ctx.Account.TotalEquity,
+			riskConfig.BTCETHMaxLeverage,
+			riskConfig.AltcoinMaxLeverage,
+			riskConfig.BTCETHMaxPositionValueRatio,
+			riskConfig.AltcoinMaxPositionValueRatio,
+			exitPlanID,
+		)
+
+		if decision != nil {
+			decision.Timestamp = time.Now()
+			decision.SystemPrompt = systemPrompt
+			decision.UserPrompt = prompt
+			decision.AIRequestDurationMs = aiCallDuration.Milliseconds()
+			decision.RawResponse = aiResponse
+		}
+
+		if parseErr != nil {
+			return decision, fmt.Errorf("failed to parse AI response: %w", parseErr)
+		}
+		return decision, nil
 	}
 
-	// 5. Parse AI response
-	decision, err := parseFullDecisionResponse(
-		aiResponse,
+	toolDecision, toolErr := callAIWithDecisionTool(
+		ctx,
+		mcpClient,
+		systemPrompt,
+		userPrompt,
+		riskConfig,
+		exitPlanID,
+	)
+	if toolErr == nil && toolDecision != nil && len(toolDecision.Decisions) > 0 {
+		return toolDecision, nil
+	}
+	if toolErr != nil {
+		logger.Infof("AI tool-call decision failed, falling back to text decision parsing: %v", toolErr)
+	}
+
+	decision, err := callAIAndParse(userPrompt)
+	if err != nil {
+		return decision, err
+	}
+
+	if !isMissingDecisionJSONFallback(decision) {
+		return decision, nil
+	}
+
+	const maxDecisionFormatRetries = 2
+	lastDecision := decision
+	lastAIResponse := ""
+	if decision != nil {
+		lastAIResponse = decision.RawResponse
+	}
+
+	logger.Infof("AI did not output JSON decision array; retrying up to %d time(s) for structured output", maxDecisionFormatRetries)
+	for attempt := 1; attempt <= maxDecisionFormatRetries; attempt++ {
+		time.Sleep(time.Duration(attempt) * decisionFormatRetryBaseDelay)
+		repairPrompt := buildDecisionRepairPrompt(userPrompt, lastAIResponse)
+
+		retryDecision, retryErr := callAIAndParse(repairPrompt)
+		if retryDecision != nil {
+			lastDecision = retryDecision
+			lastAIResponse = retryDecision.RawResponse
+		}
+		if retryErr != nil {
+			logger.Infof("AI decision format retry %d/%d failed: %v", attempt, maxDecisionFormatRetries, retryErr)
+			continue
+		}
+		if isMissingDecisionJSONFallback(retryDecision) {
+			logger.Infof("AI decision format retry %d/%d still missing JSON decision array", attempt, maxDecisionFormatRetries)
+			continue
+		}
+		return retryDecision, nil
+	}
+
+	return lastDecision, nil
+}
+
+var decisionFormatRetryBaseDelay = 300 * time.Millisecond
+
+const decisionToolName = "submit_decisions"
+
+func callAIWithDecisionTool(
+	ctx *Context,
+	mcpClient mcp.AIClient,
+	systemPrompt, userPrompt string,
+	riskConfig store.RiskControlConfig,
+	exitPlanID string,
+) (*FullDecision, error) {
+	if mcpClient == nil {
+		return nil, fmt.Errorf("mcp client is nil")
+	}
+	if ctx == nil {
+		return nil, fmt.Errorf("context is nil")
+	}
+
+	parameters := buildDecisionToolParameters(exitPlanID)
+	req := mcp.NewRequestBuilder().
+		WithSystemPrompt(systemPrompt).
+		WithUserPrompt(userPrompt).
+		AddFunction(decisionToolName, "Submit trading decisions as structured JSON (no free-form text).", parameters).
+		WithToolChoice("required").
+		MustBuild()
+
+	aiCallStart := time.Now()
+	toolArgsJSON, err := mcpClient.CallWithRequest(req)
+	aiCallDuration := time.Since(aiCallStart)
+	if err != nil {
+		return nil, err
+	}
+
+	cotTrace, decisions, err := parseDecisionToolArguments(toolArgsJSON)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := validateDecisions(
+		decisions,
 		ctx.Account.TotalEquity,
 		riskConfig.BTCETHMaxLeverage,
 		riskConfig.AltcoinMaxLeverage,
 		riskConfig.BTCETHMaxPositionValueRatio,
 		riskConfig.AltcoinMaxPositionValueRatio,
 		exitPlanID,
-	)
-
-	if decision != nil {
-		decision.Timestamp = time.Now()
-		decision.SystemPrompt = systemPrompt
-		decision.UserPrompt = userPrompt
-		decision.AIRequestDurationMs = aiCallDuration.Milliseconds()
-		decision.RawResponse = aiResponse
+	); err != nil {
+		return &FullDecision{
+			CoTTrace:  cotTrace,
+			Decisions: decisions,
+		}, fmt.Errorf("decision validation failed: %w", err)
 	}
 
-	if err != nil {
-		return decision, fmt.Errorf("failed to parse AI response: %w", err)
+	return &FullDecision{
+		SystemPrompt:        systemPrompt,
+		UserPrompt:          userPrompt,
+		CoTTrace:            cotTrace,
+		Decisions:           decisions,
+		RawResponse:         toolArgsJSON,
+		Timestamp:           time.Now(),
+		AIRequestDurationMs: aiCallDuration.Milliseconds(),
+	}, nil
+}
+
+func parseDecisionToolArguments(toolArgsJSON string) (string, []Decision, error) {
+	s := strings.TrimSpace(removeInvisibleRunes(toolArgsJSON))
+	if s == "" {
+		return "", nil, fmt.Errorf("empty tool arguments")
 	}
 
-	return decision, nil
+	type toolPayload struct {
+		Reasoning string     `json:"reasoning,omitempty"`
+		Decisions []Decision `json:"decisions"`
+	}
+
+	var payload toolPayload
+	if err := json.Unmarshal([]byte(s), &payload); err != nil {
+		s2 := fixMissingQuotes(s)
+		if err2 := json.Unmarshal([]byte(s2), &payload); err2 != nil {
+			return "", nil, fmt.Errorf("failed to parse tool arguments: %w", err)
+		}
+	}
+	if len(payload.Decisions) == 0 {
+		return strings.TrimSpace(payload.Reasoning), nil, fmt.Errorf("tool arguments missing decisions")
+	}
+	return strings.TrimSpace(payload.Reasoning), payload.Decisions, nil
+}
+
+func buildDecisionToolParameters(exitPlanID string) map[string]any {
+	planID := normalizeExitPlanID(exitPlanID)
+	exitPlanHint := "Optional. If missing, the backend will auto-generate it from stop_loss/take_profit."
+	if planID != "" {
+		exitPlanHint = fmt.Sprintf("Strongly recommended. If provided, exit_plan.plan_id must be %s.", planID)
+	}
+
+	exitPlanSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"plan_id": map[string]any{
+				"type":        "string",
+				"description": "Exit plan template ID.",
+			},
+			"children": map[string]any{
+				"type":        "array",
+				"description": "Exit plan components (tp/sl).",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"component": map[string]any{"type": "string"},
+						"handler":   map[string]any{"type": "string"},
+						"params":    map[string]any{"type": "object"},
+					},
+					"required": []string{"component", "handler"},
+				},
+			},
+		},
+	}
+
+	decisionBaseProps := map[string]any{
+		"symbol": map[string]any{
+			"type":        "string",
+			"description": "Trading pair like BTCUSDT",
+		},
+		"action": map[string]any{
+			"type": "string",
+			"enum": []string{"open_long", "open_short", "close_long", "close_short", "hold", "wait"},
+		},
+		"leverage": map[string]any{
+			"type":        "integer",
+			"minimum":     1,
+			"description": "Leverage multiplier",
+		},
+		"position_size_usd": map[string]any{
+			"type":        "number",
+			"minimum":     0,
+			"description": "Position value in USDT",
+		},
+		"stop_loss": map[string]any{
+			"type":        "number",
+			"minimum":     0,
+			"description": "Stop loss price (absolute price)",
+		},
+		"take_profit": map[string]any{
+			"type":        "number",
+			"minimum":     0,
+			"description": "Take profit price (absolute price)",
+		},
+		"exit_plan": map[string]any{
+			"description": exitPlanHint,
+			"anyOf": []any{
+				exitPlanSchema,
+				map[string]any{"type": "null"},
+			},
+		},
+		"confidence": map[string]any{
+			"type":        "integer",
+			"minimum":     0,
+			"maximum":     100,
+			"description": "Confidence 0-100",
+		},
+		"risk_usd": map[string]any{
+			"type":        "number",
+			"minimum":     0,
+			"description": "Max risk in USDT",
+		},
+		"reasoning": map[string]any{
+			"type":        "string",
+			"description": "One sentence summary",
+		},
+	}
+
+	openRequired := []string{"symbol", "action", "leverage", "position_size_usd", "stop_loss", "take_profit", "confidence", "risk_usd", "reasoning"}
+	closeRequired := []string{"symbol", "action"}
+	waitRequired := []string{"symbol", "action", "reasoning"}
+
+	decisionItemSchema := map[string]any{
+		"type":       "object",
+		"properties": decisionBaseProps,
+		"oneOf": []any{
+			map[string]any{
+				"properties": map[string]any{"action": map[string]any{"const": "open_long"}},
+				"required":   openRequired,
+			},
+			map[string]any{
+				"properties": map[string]any{"action": map[string]any{"const": "open_short"}},
+				"required":   openRequired,
+			},
+			map[string]any{
+				"properties": map[string]any{"action": map[string]any{"const": "close_long"}},
+				"required":   closeRequired,
+			},
+			map[string]any{
+				"properties": map[string]any{"action": map[string]any{"const": "close_short"}},
+				"required":   closeRequired,
+			},
+			map[string]any{
+				"properties": map[string]any{"action": map[string]any{"const": "hold"}},
+				"required":   waitRequired,
+			},
+			map[string]any{
+				"properties": map[string]any{"action": map[string]any{"const": "wait"}},
+				"required":   waitRequired,
+			},
+		},
+	}
+
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"reasoning": map[string]any{
+				"type":        "string",
+				"description": "Short reasoning. Do not include JSON here.",
+			},
+			"decisions": map[string]any{
+				"type":        "array",
+				"minItems":    1,
+				"description": "Decision array to execute",
+				"items":       decisionItemSchema,
+			},
+		},
+		"required": []string{"decisions"},
+	}
+}
+
+func buildDecisionRepairPrompt(userPrompt, priorAIOutput string) string {
+	const priorOutputMaxRunes = 6000
+	priorAIOutput = truncateTailRunes(strings.TrimSpace(priorAIOutput), priorOutputMaxRunes)
+
+	var sb strings.Builder
+	sb.WriteString(userPrompt)
+	sb.WriteString("\n\n")
+	sb.WriteString("# OUTPUT REPAIR (CRITICAL)\n")
+	sb.WriteString("Your previous reply did not include a JSON decision array and cannot be executed.\n")
+	sb.WriteString("Convert your previous reply into the required format.\n")
+	sb.WriteString("\n")
+	sb.WriteString("## Previous reply (for extraction)\n")
+	sb.WriteString(priorAIOutput)
+	sb.WriteString("\n\n")
+	sb.WriteString("## Requirements (MUST FOLLOW)\n")
+	sb.WriteString("- Output ONLY the required XML tags <reasoning> and <decision>.\n")
+	sb.WriteString("- Inside <decision>, output a single ```json fenced JSON array of objects.\n")
+	sb.WriteString("- Do NOT add any extra text outside these tags.\n")
+	sb.WriteString("- Do NOT change any numbers or decisions from your previous reply.\n")
+	sb.WriteString("- If you cannot extract a valid decision array, output: [{\"symbol\":\"ALL\",\"action\":\"wait\",\"reasoning\":\"missing structured JSON decision\"}]\n")
+	return sb.String()
+}
+
+func truncateTailRunes(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return "[TRUNCATED]\n" + string(runes[len(runes)-maxRunes:])
+}
+
+func isMissingDecisionJSONFallback(fd *FullDecision) bool {
+	if fd == nil || len(fd.Decisions) != 1 {
+		return false
+	}
+	d := fd.Decisions[0]
+	if strings.TrimSpace(d.Symbol) != "ALL" || strings.TrimSpace(d.Action) != "wait" {
+		return false
+	}
+	return strings.Contains(d.Reasoning, "Model didn't output structured JSON decision")
 }
 
 // ============================================================================
@@ -1992,8 +2314,8 @@ func compactArrayOpen(s string) string {
 // ============================================================================
 
 func validateDecisions(decisions []Decision, accountEquity float64, btcEthLeverage, altcoinLeverage int, btcEthPosRatio, altcoinPosRatio float64, exitPlanID string) error {
-	for i, decision := range decisions {
-		if err := validateDecision(&decision, accountEquity, btcEthLeverage, altcoinLeverage, btcEthPosRatio, altcoinPosRatio, exitPlanID); err != nil {
+	for i := range decisions {
+		if err := validateDecision(&decisions[i], accountEquity, btcEthLeverage, altcoinLeverage, btcEthPosRatio, altcoinPosRatio, exitPlanID); err != nil {
 			return fmt.Errorf("decision #%d validation failed: %w", i+1, err)
 		}
 	}

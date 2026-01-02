@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 )
 
@@ -424,6 +425,59 @@ func TestClient_CallWithRequest_WithTools(t *testing.T) {
 	toolChoice, ok := body["tool_choice"].(string)
 	if !ok || toolChoice != "auto" {
 		t.Error("tool_choice should be 'auto'")
+	}
+}
+
+func TestClient_CallWithRequest_ToolCallsResponse_ReturnsArguments(t *testing.T) {
+	mockHTTP := NewMockHTTPClient()
+	mockLogger := NewMockLogger()
+
+	mockHTTP.StatusCode = http.StatusOK
+	mockHTTP.Response = `{
+  "choices": [
+    {
+      "message": {
+        "content": "",
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "submit_decisions",
+              "arguments": "{\"decisions\":[{\"symbol\":\"ALL\",\"action\":\"wait\",\"reasoning\":\"x\"}]}"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}`
+
+	client := NewClient(
+		WithHTTPClient(mockHTTP.ToHTTPClient()),
+		WithLogger(mockLogger),
+		WithAPIKey("sk-test-key"),
+	)
+
+	request := NewRequestBuilder().
+		WithUserPrompt("Decision").
+		AddFunction("submit_decisions", "Submit decisions", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"decisions": map[string]any{"type": "array"},
+			},
+			"required": []string{"decisions"},
+		}).
+		WithToolChoice("required").
+		MustBuild()
+
+	result, err := client.CallWithRequest(request)
+	if err != nil {
+		t.Fatalf("should not error: %v", err)
+	}
+
+	want := `{"decisions":[{"symbol":"ALL","action":"wait","reasoning":"x"}]}`
+	if result != want {
+		t.Fatalf("unexpected tool arguments: got %q want %q", result, want)
 	}
 }
 

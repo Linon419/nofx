@@ -150,3 +150,30 @@ func stringContains(s, substr string) bool {
 	}
 	return false
 }
+
+func TestValidateDecisions_MutatesSlice(t *testing.T) {
+	decisions := []Decision{
+		{
+			Symbol:          "SOLUSDT",
+			Action:          "open_long",
+			Leverage:        20, // exceed limit, should be clamped
+			PositionSizeUSD: 100,
+			StopLoss:        50,
+			TakeProfit:      200,
+			ExitPlan:        nil, // should be auto-filled
+		},
+	}
+
+	// Use default position value ratios for testing (10x for BTC/ETH, 1.5x for altcoins)
+	err := validateDecisions(decisions, 1000, 10, 5, 10.0, 1.5, "plan_tp_tiers_sl_single")
+	if err != nil {
+		t.Fatalf("validateDecisions() error = %v", err)
+	}
+
+	if decisions[0].Leverage != 5 {
+		t.Fatalf("expected leverage to be clamped to 5, got %d", decisions[0].Leverage)
+	}
+	if decisions[0].ExitPlan == nil || len(decisions[0].ExitPlan.Children) == 0 {
+		t.Fatalf("expected exit_plan to be auto-filled, got %+v", decisions[0].ExitPlan)
+	}
+}
