@@ -277,3 +277,25 @@ func TestValidateDecision_MinPositionSizeEnforced_UsesConfigForBTCETH(t *testing
 		t.Fatalf("expected BTC position_size_usd to be adjusted to 100, got %.2f", d.PositionSizeUSD)
 	}
 }
+
+func TestValidateDecision_PositionSizeOverCap_AutoCaps(t *testing.T) {
+	d := Decision{
+		Symbol:          "BTCUSDT",
+		Action:          "open_long",
+		Leverage:        5,
+		PositionSizeUSD: 100,
+		StopLoss:        90000,
+		TakeProfit:      96000,
+		Reasoning:       "test",
+	}
+	d.ExitPlan = makeExitPlanForAction(t, d.Action)
+
+	// cap = equity * btcEthPosRatio = 10.6 * 5 = 53
+	err := validateDecision(&d, 10.6, 10, 5, 5.0, 1.5, 1.0, false, "plan_tp_tiers_sl_single")
+	if err != nil {
+		t.Fatalf("validateDecision() error = %v", err)
+	}
+	if d.PositionSizeUSD > 53.0+1e-9 {
+		t.Fatalf("expected position_size_usd to be capped to <=53, got %.2f", d.PositionSizeUSD)
+	}
+}

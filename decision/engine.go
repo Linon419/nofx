@@ -2485,11 +2485,9 @@ func validateDecision(
 		}
 
 		if d.PositionSizeUSD > maxPositionValue+tolerance {
-			if d.Symbol == "BTCUSDT" || d.Symbol == "ETHUSDT" {
-				return fmt.Errorf("BTC/ETH single coin position value cannot exceed %.0f USDT (%.1fx account equity), actual: %.0f", maxPositionValue, posRatio, d.PositionSizeUSD)
-			} else {
-				return fmt.Errorf("altcoin single coin position value cannot exceed %.0f USDT (%.1fx account equity), actual: %.0f", maxPositionValue, posRatio, d.PositionSizeUSD)
-			}
+			logger.Infof("[Position Size Cap] %s position value %.2f exceeds cap %.2f (= equity %.2f * %.1fx), auto-capping",
+				d.Symbol, d.PositionSizeUSD, maxPositionValue, accountEquity, posRatio)
+			d.PositionSizeUSD = maxPositionValue
 		}
 		if d.StopLoss <= 0 || d.TakeProfit <= 0 {
 			return fmt.Errorf("stop loss and take profit must be greater than 0")
