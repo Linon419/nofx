@@ -2442,6 +2442,24 @@ func validateDecision(
 		}
 
 		tolerance := maxPositionValue * 0.01
+		if minOpeningAmount > 0 && minOpeningAmount > maxPositionValue+tolerance {
+			originalAction := d.Action
+			d.Action = "wait"
+			if strings.TrimSpace(d.Reasoning) == "" {
+				d.Reasoning = fmt.Sprintf("Cannot open: min %.2f USDT > cap %.2f USDT (min position size enforcement)", minOpeningAmount, maxPositionValue)
+			} else {
+				d.Reasoning = fmt.Sprintf("%s | auto-wait: min %.2f USDT > cap %.2f USDT", strings.TrimSpace(d.Reasoning), minOpeningAmount, maxPositionValue)
+			}
+			d.Leverage = 0
+			d.PositionSizeUSD = 0
+			d.StopLoss = 0
+			d.TakeProfit = 0
+			d.ExitPlan = nil
+			d.Confidence = 0
+			d.RiskUSD = 0
+			logger.Warnf("[Min Position Size] %s cannot open: min %.2f USDT > cap %.2f USDT, converting %s -> wait", d.Symbol, minOpeningAmount, maxPositionValue, originalAction)
+			return nil
+		}
 		if d.PositionSizeUSD < minOpeningAmount {
 			if minOpeningAmount > maxPositionValue+tolerance {
 				originalAction := d.Action

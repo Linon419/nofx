@@ -234,6 +234,28 @@ func TestValidateDecision_MinPositionSizeEnforced_ConvertsImpossibleOpenToWait(t
 	}
 }
 
+func TestValidateDecision_MinPositionSizeEnforced_MinAboveCapConvertsToWaitEvenIfSizeMeetsMin(t *testing.T) {
+	d := Decision{
+		Symbol:          "BTCUSDT",
+		Action:          "open_long",
+		Leverage:        5,
+		PositionSizeUSD: 100,
+		StopLoss:        90000,
+		TakeProfit:      96000,
+		Reasoning:       "test",
+	}
+	d.ExitPlan = makeExitPlanForAction(t, d.Action)
+
+	// cap = equity * btcEthPosRatio = 10.6 * 5 = 53 < min(100)
+	err := validateDecision(&d, 10.6, 10, 5, 5.0, 1.5, 100.0, true, "plan_tp_tiers_sl_single")
+	if err != nil {
+		t.Fatalf("validateDecision() error = %v", err)
+	}
+	if d.Action != "wait" {
+		t.Fatalf("expected action to be converted to wait, got %s", d.Action)
+	}
+}
+
 func TestValidateDecision_MinPositionSizeEnforced_UsesConfigForBTCETH(t *testing.T) {
 	d := Decision{
 		Symbol:          "BTCUSDT",
