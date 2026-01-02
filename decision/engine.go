@@ -1221,7 +1221,11 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	}
 	if enforceMinPositionSize {
 		sb.WriteString(fmt.Sprintf("- Min Position Size (Altcoins): >=%.0f USDT\n", minPositionSize))
-		sb.WriteString("- Min Position Size (BTC/ETH): >=60 USDT\n\n")
+		btcEthMinPositionSize := minPositionSize
+		if btcEthMinPositionSize < 60 {
+			btcEthMinPositionSize = 60
+		}
+		sb.WriteString(fmt.Sprintf("- Min Position Size (BTC/ETH): >=%.0f USDT\n\n", btcEthMinPositionSize))
 	} else {
 		sb.WriteString("- Min Position Size: disabled (exchange may reject small orders)\n\n")
 	}
@@ -2417,7 +2421,9 @@ func validateDecision(
 			maxLeverage = btcEthLeverage
 			posRatio = btcEthPosRatio
 			maxPositionValue = accountEquity * posRatio
-			minOpeningAmount = 60.0
+			if minOpeningAmount < 60.0 {
+				minOpeningAmount = 60.0
+			}
 		}
 		if !enforceMinPositionSize {
 			minOpeningAmount = 0

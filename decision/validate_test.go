@@ -233,3 +233,25 @@ func TestValidateDecision_MinPositionSizeEnforced_ConvertsImpossibleOpenToWait(t
 		t.Fatalf("expected action to be converted to wait, got %s", d.Action)
 	}
 }
+
+func TestValidateDecision_MinPositionSizeEnforced_UsesConfigForBTCETH(t *testing.T) {
+	d := Decision{
+		Symbol:          "BTCUSDT",
+		Action:          "open_long",
+		Leverage:        5,
+		PositionSizeUSD: 30,
+		StopLoss:        90000,
+		TakeProfit:      96000,
+		Reasoning:       "test",
+	}
+	d.ExitPlan = makeExitPlanForAction(t, d.Action)
+
+	// equity cap = 1000 * 10 = 10000, so min can be satisfied.
+	err := validateDecision(&d, 1000, 10, 5, 10.0, 1.5, 100.0, true, "plan_tp_tiers_sl_single")
+	if err != nil {
+		t.Fatalf("validateDecision() error = %v", err)
+	}
+	if d.PositionSizeUSD != 100.0 {
+		t.Fatalf("expected BTC position_size_usd to be adjusted to 100, got %.2f", d.PositionSizeUSD)
+	}
+}
