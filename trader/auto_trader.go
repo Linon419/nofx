@@ -2324,6 +2324,14 @@ func (at *AutoTrader) enforceMinPositionSize(positionSizeUSD float64) error {
 		return nil
 	}
 
+	enforceMin := true
+	if at.config.StrategyConfig.RiskControl.EnforceMinPositionSize != nil {
+		enforceMin = *at.config.StrategyConfig.RiskControl.EnforceMinPositionSize
+	}
+	if !enforceMin {
+		return nil
+	}
+
 	minSize := at.config.StrategyConfig.RiskControl.MinPositionSize
 	if minSize <= 0 {
 		minSize = 12 // Default: 12 USDT

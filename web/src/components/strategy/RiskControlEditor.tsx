@@ -48,6 +48,8 @@ export function RiskControlEditor({
       entryRequirements: { zh: '开仓要求', en: 'Entry Requirements' },
       minPositionSize: { zh: '最小开仓金额', en: 'Min Position Size' },
       minPositionSizeDesc: { zh: 'USDT 最小名义价值', en: 'Minimum notional value in USDT' },
+      enforceMinPositionSize: { zh: '启用最小开仓金额校验', en: 'Enforce min position size' },
+      enforceMinPositionSizeDesc: { zh: '关闭后允许更小的单（可能被交易所拒单）', en: 'If disabled, system may place tiny orders (exchange may reject)' },
       minConfidence: { zh: '最低信心', en: 'Min Confidence' },
       minConfidenceDesc: { zh: 'AI 开仓的信心阈值', en: 'AI confidence threshold for entry' },
     }
@@ -64,6 +66,7 @@ export function RiskControlEditor({
   }
 
   const atrEnabled = config.atr_enabled ?? false
+  const enforceMinPositionSize = config.enforce_min_position_size ?? true
 
   return (
     <div className="space-y-6">
@@ -462,6 +465,25 @@ export function RiskControlEditor({
             <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
               {t('minPositionSizeDesc')}
             </p>
+            <div className="flex items-center gap-2 mb-2">
+              <input
+                type="checkbox"
+                checked={enforceMinPositionSize}
+                onChange={(e) =>
+                  updateField('enforce_min_position_size', e.target.checked)
+                }
+                disabled={disabled}
+                className="accent-green-500"
+              />
+              <span className="text-xs" style={{ color: '#EAECEF' }}>
+                {t('enforceMinPositionSize')}
+              </span>
+            </div>
+            {!enforceMinPositionSize && (
+              <p className="text-xs mb-2" style={{ color: '#F0B90B' }}>
+                {t('enforceMinPositionSizeDesc')}
+              </p>
+            )}
             <div className="flex items-center">
               <input
                 type="number"
@@ -469,7 +491,7 @@ export function RiskControlEditor({
                 onChange={(e) =>
                   updateField('min_position_size', parseFloat(e.target.value) || 12)
                 }
-                disabled={disabled}
+                disabled={disabled || !enforceMinPositionSize}
                 min={10}
                 max={1000}
                 className="w-24 px-3 py-2 rounded"

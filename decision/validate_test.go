@@ -120,7 +120,17 @@ func TestLeverageFallback(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.decision.ExitPlan = makeExitPlanForAction(t, tt.decision.Action)
 			// Use default position value ratios for testing (10x for BTC/ETH, 1.5x for altcoins)
-			err := validateDecision(&tt.decision, tt.accountEquity, tt.btcEthLeverage, tt.altcoinLeverage, 10.0, 1.5, "plan_tp_tiers_sl_single")
+			err := validateDecision(
+				&tt.decision,
+				tt.accountEquity,
+				tt.btcEthLeverage,
+				tt.altcoinLeverage,
+				10.0,
+				1.5,
+				12.0,
+				true,
+				"plan_tp_tiers_sl_single",
+			)
 
 			// Check error status
 			if (err != nil) != tt.wantError {
@@ -165,7 +175,7 @@ func TestValidateDecisions_MutatesSlice(t *testing.T) {
 	}
 
 	// Use default position value ratios for testing (10x for BTC/ETH, 1.5x for altcoins)
-	err := validateDecisions(decisions, 1000, 10, 5, 10.0, 1.5, "plan_tp_tiers_sl_single")
+	err := validateDecisions(decisions, 1000, 10, 5, 10.0, 1.5, 12.0, true, "plan_tp_tiers_sl_single")
 	if err != nil {
 		t.Fatalf("validateDecisions() error = %v", err)
 	}
@@ -175,5 +185,51 @@ func TestValidateDecisions_MutatesSlice(t *testing.T) {
 	}
 	if decisions[0].ExitPlan == nil || len(decisions[0].ExitPlan.Children) == 0 {
 		t.Fatalf("expected exit_plan to be auto-filled, got %+v", decisions[0].ExitPlan)
+	}
+}
+
+func TestValidateDecision_MinPositionSizeDisabled_AllowsSmallBTC(t *testing.T) {
+	d := Decision{
+		Symbol:          "BTCUSDT",
+		Action:          "open_long",
+		Leverage:        5,
+		PositionSizeUSD: 30,
+		StopLoss:        90000,
+		TakeProfit:      96000,
+		Reasoning:       "test",
+	}
+	d.ExitPlan = makeExitPlanForAction(t, d.Action)
+
+	err := validateDecision(&d, 1000, 10, 5, 10.0, 1.5, 12.0, false, "plan_tp_tiers_sl_single")
+	if err != nil {
+		t.Fatalf("validateDecision() error = %v", err)
+	}
+	if d.Action != "open_long" {
+		t.Fatalf("expected action to stay open_long, got %s", d.Action)
+	}
+	if d.PositionSizeUSD != 30 {
+		t.Fatalf("expected position_size_usd to stay 30, got %.2f", d.PositionSizeUSD)
+	}
+}
+
+func TestValidateDecision_MinPositionSizeEnforced_ConvertsImpossibleOpenToWait(t *testing.T) {
+	d := Decision{
+		Symbol:          "BTCUSDT",
+		Action:          "open_long",
+		Leverage:        5,
+		PositionSizeUSD: 30,
+		StopLoss:        90000,
+		TakeProfit:      96000,
+		Reasoning:       "test",
+	}
+	d.ExitPlan = makeExitPlanForAction(t, d.Action)
+
+	// cap = equity * btcEthPosRatio = 10.6 * 5 = 53 < 60
+	err := validateDecision(&d, 10.6, 10, 5, 5.0, 1.5, 12.0, true, "plan_tp_tiers_sl_single")
+	if err != nil {
+		t.Fatalf("validateDecision() error = %v", err)
+	}
+	if d.Action != "wait" {
+		t.Fatalf("expected action to be converted to wait, got %s", d.Action)
 	}
 }

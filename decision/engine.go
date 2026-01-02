@@ -309,6 +309,10 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 			return nil, fmt.Errorf("AI API call failed: %w", err)
 		}
 
+		enforceMinPosSize := true
+		if riskConfig.EnforceMinPositionSize != nil {
+			enforceMinPosSize = *riskConfig.EnforceMinPositionSize
+		}
 		decision, parseErr := parseFullDecisionResponse(
 			aiResponse,
 			ctx.Account.TotalEquity,
@@ -316,6 +320,8 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 			riskConfig.AltcoinMaxLeverage,
 			riskConfig.BTCETHMaxPositionValueRatio,
 			riskConfig.AltcoinMaxPositionValueRatio,
+			riskConfig.MinPositionSize,
+			enforceMinPosSize,
 			exitPlanID,
 		)
 
@@ -426,6 +432,10 @@ func callAIWithDecisionTool(
 		return nil, err
 	}
 
+	enforceMinPosSize := true
+	if riskConfig.EnforceMinPositionSize != nil {
+		enforceMinPosSize = *riskConfig.EnforceMinPositionSize
+	}
 	if err := validateDecisions(
 		decisions,
 		ctx.Account.TotalEquity,
@@ -433,6 +443,8 @@ func callAIWithDecisionTool(
 		riskConfig.AltcoinMaxLeverage,
 		riskConfig.BTCETHMaxPositionValueRatio,
 		riskConfig.AltcoinMaxPositionValueRatio,
+		riskConfig.MinPositionSize,
+		enforceMinPosSize,
 		exitPlanID,
 	); err != nil {
 		return &FullDecision{
@@ -1199,7 +1211,20 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	sb.WriteString(fmt.Sprintf("- Position Value Limit (BTC/ETH): max %.0f USDT (= equity %.0f * %.1fx)\n",
 		accountEquity*btcEthPosValueRatio, accountEquity, btcEthPosValueRatio))
 	sb.WriteString(fmt.Sprintf("- Max Margin Usage: <=%.0f%%\n", riskControl.MaxMarginUsage*100))
-	sb.WriteString(fmt.Sprintf("- Min Position Size: >=%.0f USDT\n\n", riskControl.MinPositionSize))
+	minPositionSize := riskControl.MinPositionSize
+	if minPositionSize <= 0 {
+		minPositionSize = 12
+	}
+	enforceMinPositionSize := true
+	if riskControl.EnforceMinPositionSize != nil {
+		enforceMinPositionSize = *riskControl.EnforceMinPositionSize
+	}
+	if enforceMinPositionSize {
+		sb.WriteString(fmt.Sprintf("- Min Position Size (Altcoins): >=%.0f USDT\n", minPositionSize))
+		sb.WriteString("- Min Position Size (BTC/ETH): >=60 USDT\n\n")
+	} else {
+		sb.WriteString("- Min Position Size: disabled (exchange may reject small orders)\n\n")
+	}
 
 	sb.WriteString("## AI GUIDED (Recommended, you should follow):\n")
 	sb.WriteString(fmt.Sprintf("- Trading Leverage: Altcoins max %dx | BTC/ETH max %dx\n",
@@ -2150,7 +2175,15 @@ func formatAnalysisResult(result *analysis.AnalysisResult) string {
 // AI Response Parsing
 // ============================================================================
 
-func parseFullDecisionResponse(aiResponse string, accountEquity float64, btcEthLeverage, altcoinLeverage int, btcEthPosRatio, altcoinPosRatio float64, exitPlanID string) (*FullDecision, error) {
+func parseFullDecisionResponse(
+	aiResponse string,
+	accountEquity float64,
+	btcEthLeverage, altcoinLeverage int,
+	btcEthPosRatio, altcoinPosRatio float64,
+	minPositionSize float64,
+	enforceMinPositionSize bool,
+	exitPlanID string,
+) (*FullDecision, error) {
 	cotTrace := extractCoTTrace(aiResponse)
 
 	decisions, err := extractDecisions(aiResponse)
@@ -2161,7 +2194,17 @@ func parseFullDecisionResponse(aiResponse string, accountEquity float64, btcEthL
 		}, fmt.Errorf("failed to extract decisions: %w", err)
 	}
 
-	if err := validateDecisions(decisions, accountEquity, btcEthLeverage, altcoinLeverage, btcEthPosRatio, altcoinPosRatio, exitPlanID); err != nil {
+	if err := validateDecisions(
+		decisions,
+		accountEquity,
+		btcEthLeverage,
+		altcoinLeverage,
+		btcEthPosRatio,
+		altcoinPosRatio,
+		minPositionSize,
+		enforceMinPositionSize,
+		exitPlanID,
+	); err != nil {
 		return &FullDecision{
 			CoTTrace:  cotTrace,
 			Decisions: decisions,
@@ -2313,16 +2356,42 @@ func compactArrayOpen(s string) string {
 // Decision Validation
 // ============================================================================
 
-func validateDecisions(decisions []Decision, accountEquity float64, btcEthLeverage, altcoinLeverage int, btcEthPosRatio, altcoinPosRatio float64, exitPlanID string) error {
+func validateDecisions(
+	decisions []Decision,
+	accountEquity float64,
+	btcEthLeverage, altcoinLeverage int,
+	btcEthPosRatio, altcoinPosRatio float64,
+	minPositionSize float64,
+	enforceMinPositionSize bool,
+	exitPlanID string,
+) error {
 	for i := range decisions {
-		if err := validateDecision(&decisions[i], accountEquity, btcEthLeverage, altcoinLeverage, btcEthPosRatio, altcoinPosRatio, exitPlanID); err != nil {
+		if err := validateDecision(
+			&decisions[i],
+			accountEquity,
+			btcEthLeverage,
+			altcoinLeverage,
+			btcEthPosRatio,
+			altcoinPosRatio,
+			minPositionSize,
+			enforceMinPositionSize,
+			exitPlanID,
+		); err != nil {
 			return fmt.Errorf("decision #%d validation failed: %w", i+1, err)
 		}
 	}
 	return nil
 }
 
-func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoinLeverage int, btcEthPosRatio, altcoinPosRatio float64, exitPlanID string) error {
+func validateDecision(
+	d *Decision,
+	accountEquity float64,
+	btcEthLeverage, altcoinLeverage int,
+	btcEthPosRatio, altcoinPosRatio float64,
+	minPositionSize float64,
+	enforceMinPositionSize bool,
+	exitPlanID string,
+) error {
 	validActions := map[string]bool{
 		"open_long":   true,
 		"open_short":  true,
@@ -2340,10 +2409,18 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 		maxLeverage := altcoinLeverage
 		posRatio := altcoinPosRatio
 		maxPositionValue := accountEquity * posRatio
+		minOpeningAmount := minPositionSize
+		if minOpeningAmount <= 0 {
+			minOpeningAmount = 12.0
+		}
 		if d.Symbol == "BTCUSDT" || d.Symbol == "ETHUSDT" {
 			maxLeverage = btcEthLeverage
 			posRatio = btcEthPosRatio
 			maxPositionValue = accountEquity * posRatio
+			minOpeningAmount = 60.0
+		}
+		if !enforceMinPositionSize {
+			minOpeningAmount = 0
 		}
 
 		if d.Leverage <= 0 {
@@ -2358,20 +2435,31 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 			return fmt.Errorf("position size must be greater than 0: %.2f", d.PositionSizeUSD)
 		}
 
-		const minPositionSizeGeneral = 12.0
-		const minPositionSizeBTCETH = 60.0
-
-		if d.Symbol == "BTCUSDT" || d.Symbol == "ETHUSDT" {
-			if d.PositionSizeUSD < minPositionSizeBTCETH {
-				return fmt.Errorf("%s opening amount too small (%.2f USDT), must be >=%.2f USDT", d.Symbol, d.PositionSizeUSD, minPositionSizeBTCETH)
+		tolerance := maxPositionValue * 0.01
+		if d.PositionSizeUSD < minOpeningAmount {
+			if minOpeningAmount > maxPositionValue+tolerance {
+				originalAction := d.Action
+				d.Action = "wait"
+				if strings.TrimSpace(d.Reasoning) == "" {
+					d.Reasoning = fmt.Sprintf("Cannot open: min %.2f USDT > cap %.2f USDT (min position size enforcement)", minOpeningAmount, maxPositionValue)
+				} else {
+					d.Reasoning = fmt.Sprintf("%s | auto-wait: min %.2f USDT > cap %.2f USDT", strings.TrimSpace(d.Reasoning), minOpeningAmount, maxPositionValue)
+				}
+				d.Leverage = 0
+				d.PositionSizeUSD = 0
+				d.StopLoss = 0
+				d.TakeProfit = 0
+				d.ExitPlan = nil
+				d.Confidence = 0
+				d.RiskUSD = 0
+				logger.Warnf("[Min Position Size] %s cannot open: min %.2f USDT > cap %.2f USDT, converting %s -> wait", d.Symbol, minOpeningAmount, maxPositionValue, originalAction)
+				return nil
 			}
-		} else {
-			if d.PositionSizeUSD < minPositionSizeGeneral {
-				return fmt.Errorf("opening amount too small (%.2f USDT), must be >=%.2f USDT", d.PositionSizeUSD, minPositionSizeGeneral)
-			}
+			logger.Infof("閳跨媴绗? [Min Amount Fallback] %s opening amount too small (%.2f USDT), auto-adjusting to minimum %.2f USDT",
+				d.Symbol, d.PositionSizeUSD, minOpeningAmount)
+			d.PositionSizeUSD = minOpeningAmount
 		}
 
-		tolerance := maxPositionValue * 0.01
 		if d.PositionSizeUSD > maxPositionValue+tolerance {
 			if d.Symbol == "BTCUSDT" || d.Symbol == "ETHUSDT" {
 				return fmt.Errorf("BTC/ETH single coin position value cannot exceed %.0f USDT (%.1fx account equity), actual: %.0f", maxPositionValue, posRatio, d.PositionSizeUSD)

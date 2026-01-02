@@ -194,6 +194,9 @@ type RiskControlConfig struct {
 	MaxMarginUsage float64 `json:"max_margin_usage"`
 	// Min position size in USDT (CODE ENFORCED)
 	MinPositionSize float64 `json:"min_position_size"`
+	// Enforce minimum order notional checks (CODE ENFORCED, default: true)
+	// When disabled, the system may attempt very small orders that could be rejected by the exchange.
+	EnforceMinPositionSize *bool `json:"enforce_min_position_size,omitempty"`
 
 	// Min take_profit / stop_loss ratio (AI guided)
 	MinRiskRewardRatio float64 `json:"min_risk_reward_ratio"`
@@ -242,6 +245,8 @@ func (s *StrategyStore) initDefaultData() error {
 
 // GetDefaultStrategyConfig returns the default strategy configuration for the given language
 func GetDefaultStrategyConfig(lang string) StrategyConfig {
+	enforceMinPositionSize := true
+
 	config := StrategyConfig{
 		CoinSource: CoinSourceConfig{
 			SourceType:     "coinpool",
@@ -301,6 +306,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			AltcoinMaxPositionValueRatio: 1.0, // Altcoin: max position = 1x equity (CODE ENFORCED)
 			MaxMarginUsage:               0.9, // Max 90% margin usage (CODE ENFORCED)
 			MinPositionSize:              12,  // Min 12 USDT per position (CODE ENFORCED)
+			EnforceMinPositionSize:       &enforceMinPositionSize,
 			MinRiskRewardRatio:           3.0, // Min 3:1 profit/loss ratio (AI guided)
 			MinConfidence:                75,  // Min 75% confidence (AI guided)
 		},
