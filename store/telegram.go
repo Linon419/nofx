@@ -116,11 +116,16 @@ func (s *TelegramStore) Upsert(userID string, enabled bool, botToken string, cha
 		tokenToStore = s.encrypt(existing.BotToken)
 	}
 
+	chatIDToStore := chatID
+	if chatIDToStore == "" && existing != nil && existing.ChatID != "" {
+		chatIDToStore = existing.ChatID
+	}
+
 	if existing == nil {
 		_, err := s.db.Exec(`
 			INSERT INTO telegram_configs (user_id, enabled, bot_token, chat_id, notify_on_open, notify_on_close, notify_on_error, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-		`, userID, enabled, tokenToStore, chatID, notifyOnOpen, notifyOnClose, notifyOnError)
+		`, userID, enabled, tokenToStore, chatIDToStore, notifyOnOpen, notifyOnClose, notifyOnError)
 		return err
 	}
 
@@ -128,6 +133,6 @@ func (s *TelegramStore) Upsert(userID string, enabled bool, botToken string, cha
 		UPDATE telegram_configs
 		SET enabled = ?, bot_token = ?, chat_id = ?, notify_on_open = ?, notify_on_close = ?, notify_on_error = ?, updated_at = datetime('now')
 		WHERE user_id = ?
-	`, enabled, tokenToStore, chatID, notifyOnOpen, notifyOnClose, notifyOnError, userID)
+	`, enabled, tokenToStore, chatIDToStore, notifyOnOpen, notifyOnClose, notifyOnError, userID)
 	return err
 }

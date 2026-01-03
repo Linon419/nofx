@@ -1881,16 +1881,23 @@ func (s *Server) handleUpdateTelegramConfig(c *gin.Context) {
 	}
 
 	trimmedChatID := strings.TrimSpace(req.ChatID)
-	if req.Enabled && trimmedChatID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "chat_id is required when telegram notifications are enabled"})
-		return
-	}
-	if req.Enabled && strings.TrimSpace(req.BotToken) == "" {
-		existing, err := s.store.Telegram().Get(userID)
+	var existing *store.TelegramConfig
+	if req.Enabled && (trimmedChatID == "" || strings.TrimSpace(req.BotToken) == "") {
+		var err error
+		existing, err = s.store.Telegram().Get(userID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to get telegram config: %v", err)})
 			return
 		}
+	}
+	if req.Enabled && trimmedChatID == "" {
+		if existing == nil || strings.TrimSpace(existing.ChatID) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "chat_id is required when telegram notifications are enabled"})
+			return
+		}
+		trimmedChatID = strings.TrimSpace(existing.ChatID)
+	}
+	if req.Enabled && strings.TrimSpace(req.BotToken) == "" {
 		if existing == nil || strings.TrimSpace(existing.BotToken) == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "bot_token is required when telegram notifications are enabled"})
 			return

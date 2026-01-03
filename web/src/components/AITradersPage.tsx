@@ -837,6 +837,16 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
 
   const handleSaveTelegram = async () => {
     if (!user || !token) return
+    if (telegramEnabled) {
+      if (!telegramChatId.trim()) {
+        toast.error(language === 'zh' ? '启用 Telegram 通知需要填写 Chat ID' : 'Chat ID is required when Telegram notifications are enabled')
+        return
+      }
+      if (!telegramHasBotToken && !telegramBotToken.trim()) {
+        toast.error(language === 'zh' ? '首次启用需要填写 Bot Token' : 'Bot token is required when enabling Telegram notifications for the first time')
+        return
+      }
+    }
     setTelegramSaving(true)
     try {
       const req = {
@@ -1097,6 +1107,13 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
               {telegramHasBotToken && (
                 <div className="mt-1 text-xs" style={{ color: '#848E9C' }}>
                   {t('telegramBotTokenAlreadySet', language)}
+                </div>
+              )}
+              {!telegramHasBotToken && (
+                <div className="mt-1 text-xs" style={{ color: '#848E9C' }}>
+                  {language === 'zh'
+                    ? '提示：保存后不会回显 Bot Token（已加密存储），刷新页面看到为空是正常的'
+                    : 'Note: Bot token is encrypted and will not be shown again after saving'}
                 </div>
               )}
             </div>
