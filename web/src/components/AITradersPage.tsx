@@ -625,8 +625,13 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
       let updatedModels
 
       // 找到要配置的模型（优先从已配置列表，其次从支持列表）
-      const modelToUpdate =
-        existingModel || supportedModels?.find((m) => m.id === modelId)
+      // 注意：新增模型时 `modelId` 可能是 `provider_<uuid>`，不在 supportedModels 的 id 列表中；此时用 provider 匹配模板。
+      const modelTemplate =
+        supportedModels?.find((m) => m.id === modelId) ||
+        supportedModels?.find((m) => m.provider === provider) ||
+        supportedModels?.find((m) => m.id === provider)
+
+      const modelToUpdate = existingModel || modelTemplate
       if (!modelToUpdate) {
         toast.error(t('modelNotExist', language))
         return
