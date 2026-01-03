@@ -27,7 +27,8 @@ func buildOTCPeriodQualityMeta(item provider.OTCTopItem, now time.Time) otcPerio
 	if !item.AsOf.IsZero() {
 		asOf := item.AsOf.UTC()
 		meta.Time = asOf.Format(time.RFC3339)
-		meta.Expired = now.Sub(asOf) > 24*time.Hour
+		// Expire after 2.5 days (60 hours)
+		meta.Expired = now.Sub(asOf) > 60*time.Hour
 		return meta
 	}
 
