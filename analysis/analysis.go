@@ -23,6 +23,9 @@ type AnalysisResult struct {
 	// WaveTrend indicator results
 	WaveTrend *indicator.WaveTrendResult `json:"wavetrend,omitempty"`
 
+	// Divergence detection results (multi-indicator divergence)
+	Divergence *indicator.DivergenceResult `json:"divergence,omitempty"`
+
 	// Volatility warning results (BB/KC squeeze)
 	VolatilityWarning *indicator.VolatilityWarningResult `json:"volatility_warning,omitempty"`
 
@@ -38,6 +41,9 @@ type Config struct {
 	// EnableWaveTrend enables WaveTrend indicator calculation
 	EnableWaveTrend bool `json:"enable_wavetrend"`
 
+	// EnableDivergence enables divergence detection calculation
+	EnableDivergence bool `json:"enable_divergence"`
+
 	// EnableVolatilityWarning enables volatility warning calculation
 	EnableVolatilityWarning bool `json:"enable_volatility_warning"`
 
@@ -46,6 +52,9 @@ type Config struct {
 
 	// WaveTrend specific settings
 	WaveTrend indicator.WaveTrendConfig `json:"wavetrend_config,omitempty"`
+
+	// Divergence specific settings
+	Divergence indicator.DivergenceConfig `json:"divergence_config,omitempty"`
 
 	// Volatility warning specific settings
 	VolatilityWarning indicator.VolatilityWarningConfig `json:"volatility_warning_config,omitempty"`
@@ -56,9 +65,11 @@ func DefaultConfig() Config {
 	return Config{
 		EnablePattern:           true,
 		EnableWaveTrend:         true,
+		EnableDivergence:        true,
 		EnableVolatilityWarning: true,
 		EnableTrend:             true,
 		WaveTrend:               indicator.DefaultWaveTrendConfig(),
+		Divergence:              indicator.DefaultDivergenceConfig(),
 		VolatilityWarning:       indicator.DefaultVolatilityWarningConfig(),
 	}
 }
@@ -80,6 +91,11 @@ func Analyze(klines []market.Kline, cfg Config) *AnalysisResult {
 	// WaveTrend indicator
 	if cfg.EnableWaveTrend {
 		result.WaveTrend = indicator.CalculateWaveTrend(klines, cfg.WaveTrend)
+	}
+
+	// Divergence
+	if cfg.EnableDivergence {
+		result.Divergence = indicator.CalculateDivergence(klines, cfg.Divergence)
 	}
 
 	// Volatility warning (BB/KC squeeze)

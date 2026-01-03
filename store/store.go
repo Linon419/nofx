@@ -19,6 +19,7 @@ type Store struct {
 	user     *UserStore
 	aiModel  *AIModelStore
 	exchange *ExchangeStore
+	telegram *TelegramStore
 	trader   *TraderStore
 	decision *DecisionStore
 	backtest *BacktestStore
@@ -109,6 +110,10 @@ func (s *Store) SetCryptoFuncs(encrypt, decrypt func(string) string) {
 		s.exchange.encryptFunc = encrypt
 		s.exchange.decryptFunc = decrypt
 	}
+	if s.telegram != nil {
+		s.telegram.encryptFunc = encrypt
+		s.telegram.decryptFunc = decrypt
+	}
 	if s.trader != nil {
 		s.trader.decryptFunc = decrypt
 	}
@@ -135,6 +140,9 @@ func (s *Store) initTables() error {
 	}
 	if err := s.Exchange().initTables(); err != nil {
 		return fmt.Errorf("failed to initialize exchange tables: %w", err)
+	}
+	if err := s.Telegram().initTables(); err != nil {
+		return fmt.Errorf("failed to initialize telegram config tables: %w", err)
 	}
 	if err := s.Trader().initTables(); err != nil {
 		return fmt.Errorf("failed to initialize trader tables: %w", err)
@@ -216,6 +224,20 @@ func (s *Store) Exchange() *ExchangeStore {
 		}
 	}
 	return s.exchange
+}
+
+// Telegram gets Telegram notification config storage
+func (s *Store) Telegram() *TelegramStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.telegram == nil {
+		s.telegram = &TelegramStore{
+			db:          s.db,
+			encryptFunc: s.encryptFunc,
+			decryptFunc: s.decryptFunc,
+		}
+	}
+	return s.telegram
 }
 
 // Trader gets trader storage

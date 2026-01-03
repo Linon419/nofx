@@ -238,6 +238,8 @@ func (t *BitgetTrader) SyncOrdersFromBitget(traderID string, exchangeID string, 
 			logger.Infof("  📍 Position updated for trade: %s (action: %s, qty: %.6f)", trade.TradeID, trade.OrderAction, trade.FillQty)
 		}
 
+		sendTelegramTradeNotification(st, traderID, exchangeID, exchangeType, trade.OrderAction, symbol, side, trade.FillQty, trade.FillPrice, trade.Fee, trade.ProfitLoss, trade.ExecTime)
+
 		syncedCount++
 		logger.Infof("  ✅ Synced trade: %s %s %s qty=%.6f price=%.6f pnl=%.2f fee=%.6f action=%s",
 			trade.TradeID, symbol, side, trade.FillQty, trade.FillPrice, trade.ProfitLoss, trade.Fee, trade.OrderAction)

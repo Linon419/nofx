@@ -6,14 +6,19 @@ import type {
   Statistics,
   TraderInfo,
   TraderConfigData,
-  AIModel,
-  Exchange,
-  CreateTraderRequest,
-  CreateExchangeRequest,
-  UpdateModelConfigRequest,
-  UpdateExchangeConfigRequest,
-  CompetitionData,
-  BacktestRunsResponse,
+    AIModel,
+    Exchange,
+    CreateTraderRequest,
+    CreateExchangeRequest,
+    UpdateModelConfigRequest,
+    ModelProbeRequest,
+    RemoteModelListItem,
+    ModelTestResponse,
+    TelegramConfig,
+    UpdateTelegramConfigRequest,
+    UpdateExchangeConfigRequest,
+    CompetitionData,
+    BacktestRunsResponse,
   BacktestStartConfig,
   BacktestStatusPayload,
   BacktestEquityPoint,
@@ -216,6 +221,110 @@ export const api = {
     // 发送加密数据
     const result = await httpClient.put(`${API_BASE}/models`, encryptedPayload)
     if (!result.success) throw new Error('更新模型配置失败')
+  },
+
+  // Fetch provider model list (uses API key; supports encrypted transport)
+  async fetchRemoteModels(request: ModelProbeRequest): Promise<RemoteModelListItem[]> {
+    const config = await CryptoService.fetchCryptoConfig()
+
+    if (!config.transport_encryption) {
+      const result = await httpClient.post<RemoteModelListItem[]>(
+        `${API_BASE}/models/available-models`,
+        request
+      )
+      if (!result.success) throw new Error(result.message || '获取模型列表失败')
+      return Array.isArray(result.data) ? result.data : []
+    }
+
+    const publicKey = await CryptoService.fetchPublicKey()
+    await CryptoService.initialize(publicKey)
+
+    const userId = localStorage.getItem('user_id') || ''
+    const sessionId = sessionStorage.getItem('session_id') || ''
+    const encryptedPayload = await CryptoService.encryptSensitiveData(
+      JSON.stringify(request),
+      userId,
+      sessionId
+    )
+
+    const result = await httpClient.post<RemoteModelListItem[]>(
+      `${API_BASE}/models/available-models`,
+      encryptedPayload
+    )
+    if (!result.success) throw new Error(result.message || '获取模型列表失败')
+    return Array.isArray(result.data) ? result.data : []
+  },
+
+  // Test a model config using tool-calling (uses API key; supports encrypted transport)
+  async testModelConfig(request: ModelProbeRequest): Promise<ModelTestResponse> {
+    const config = await CryptoService.fetchCryptoConfig()
+
+    if (!config.transport_encryption) {
+      const result = await httpClient.post<ModelTestResponse>(
+        `${API_BASE}/models/test`,
+        request
+      )
+      if (!result.success) throw new Error(result.message || '测试模型失败')
+      return result.data!
+    }
+
+    const publicKey = await CryptoService.fetchPublicKey()
+    await CryptoService.initialize(publicKey)
+
+    const userId = localStorage.getItem('user_id') || ''
+    const sessionId = sessionStorage.getItem('session_id') || ''
+    const encryptedPayload = await CryptoService.encryptSensitiveData(
+      JSON.stringify(request),
+      userId,
+      sessionId
+    )
+
+    const result = await httpClient.post<ModelTestResponse>(
+      `${API_BASE}/models/test`,
+      encryptedPayload
+    )
+    if (!result.success) throw new Error(result.message || '测试模型失败')
+    return result.data!
+  },
+
+  // Telegram notification config (per-user)
+  async getTelegramConfig(): Promise<TelegramConfig> {
+    const result = await httpClient.get<TelegramConfig>(
+      `${API_BASE}/notifications/telegram`
+    )
+    if (!result.success) throw new Error('获取 Telegram 配置失败')
+    return result.data!
+  },
+
+  async updateTelegramConfig(request: UpdateTelegramConfigRequest): Promise<void> {
+    const config = await CryptoService.fetchCryptoConfig()
+
+    if (!config.transport_encryption) {
+      const result = await httpClient.put(
+        `${API_BASE}/notifications/telegram`,
+        request
+      )
+      if (!result.success) throw new Error('更新 Telegram 配置失败')
+      return
+    }
+
+    const publicKey = await CryptoService.fetchPublicKey()
+    await CryptoService.initialize(publicKey)
+
+    const userId = localStorage.getItem('user_id') || ''
+    const sessionId = sessionStorage.getItem('session_id') || ''
+
+    const encryptedPayload = await CryptoService.encryptSensitiveData(
+      JSON.stringify(request),
+      userId,
+      sessionId
+    )
+
+    const result = await httpClient.put(
+      `${API_BASE}/notifications/telegram`,
+      encryptedPayload
+    )
+    if (!result.success) throw new Error('更新 Telegram 配置失败')
   },
 
   // 交易所配置接口

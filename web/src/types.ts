@@ -115,6 +115,40 @@ export interface AIModel {
   customModelName?: string
 }
 
+export interface ModelProbeRequest {
+  provider: string
+  apiKey: string
+  customApiUrl?: string
+  customModelName?: string
+}
+
+export interface RemoteModelListItem {
+  id: string
+  name?: string
+}
+
+export interface AIToolDecision {
+  symbol: string
+  action: string
+  leverage?: number
+  position_size_usd?: number
+  stop_loss?: number
+  take_profit?: number
+  confidence?: number
+  risk_usd?: number
+  reasoning?: string
+}
+
+export interface ModelTestResponse {
+  provider: string
+  model: string
+  baseUrl: string
+  latency_ms: number
+  reasoning?: string
+  decisions: AIToolDecision[]
+  raw_tool_args: string
+}
+
 export interface Exchange {
   id: string                     // UUID (empty for supported exchange templates)
   exchange_type: string          // "binance", "bybit", "okx", "hyperliquid", "aster", "lighter"
@@ -181,12 +215,34 @@ export interface CreateTraderRequest {
 export interface UpdateModelConfigRequest {
   models: {
     [key: string]: {
+      // New format: allow multiple models per provider by using model ID as key.
+      // Backward compatible: older clients used provider as key (e.g. "claude").
+      name?: string
+      provider?: string
       enabled: boolean
       api_key: string
       custom_api_url?: string
       custom_model_name?: string
     }
   }
+}
+
+export interface TelegramConfig {
+  enabled: boolean
+  has_bot_token: boolean
+  chat_id: string
+  notify_on_open: boolean
+  notify_on_close: boolean
+  notify_on_error: boolean
+}
+
+export interface UpdateTelegramConfigRequest {
+  enabled: boolean
+  bot_token: string
+  chat_id: string
+  notify_on_open: boolean
+  notify_on_close: boolean
+  notify_on_error: boolean
 }
 
 export interface UpdateExchangeConfigRequest {
@@ -522,6 +578,10 @@ export interface ExternalDataSource {
 export interface RiskControlConfig {
   // Max number of coins held simultaneously (CODE ENFORCED)
   max_positions: number;
+
+  // Execution guards (anti-hallucination / exit discipline)
+  enforce_ai_close_guard?: boolean;
+  enforce_ai_claim_guard?: boolean;
 
   // Trading Leverage - exchange leverage for opening positions (AI guided)
   btc_eth_max_leverage: number;    // BTC/ETH max exchange leverage

@@ -128,6 +128,10 @@ type AutoTrader struct {
 	exitPlanLocksMu       sync.Mutex
 	pendingExitPlans      map[string]pendingExitPlan
 	pendingExitPlansMu    sync.Mutex
+
+	pendingStrategyConfigMu     sync.Mutex
+	pendingStrategyConfig       *store.StrategyConfig
+	pendingStrategyUpdateSource string
 }
 
 // NewAutoTrader creates an automatic trader
@@ -558,6 +562,8 @@ func (at *AutoTrader) runCycle() error {
 		Success:      true,
 	}
 
+	at.applyPendingStrategyConfigUpdate(record)
+
 	// 1. Check if trading needs to be stopped
 	if time.Now().Before(at.stopUntil) {
 		remaining := at.stopUntil.Sub(time.Now())
@@ -586,6 +592,7 @@ func (at *AutoTrader) runCycle() error {
 		record.Success = false
 		record.ErrorMessage = fmt.Sprintf("Failed to build trading context: %v", err)
 		at.saveDecision(record)
+		sendTelegramErrorNotification(at.store, at.userID, at.name, at.exchange, "", "", fmt.Errorf("failed to build trading context: %w", err))
 		return fmt.Errorf("failed to build trading context: %w", err)
 	}
 
@@ -645,6 +652,7 @@ func (at *AutoTrader) runCycle() error {
 		}
 
 		at.saveDecision(record)
+		sendTelegramErrorNotification(at.store, at.userID, at.name, at.exchange, "", "", fmt.Errorf("failed to get AI decision: %w", err))
 		return fmt.Errorf("failed to get AI decision: %w", err)
 	}
 
@@ -719,10 +727,53 @@ func (at *AutoTrader) runCycle() error {
 			Success:    false,
 		}
 
+		// Enforce AI claim guard: block opens if the model cites evidence not present in this cycle.
+		enforceClaimGuard := true
+		if at.config.StrategyConfig != nil && at.config.StrategyConfig.RiskControl.EnforceAIClaimGuard != nil {
+			enforceClaimGuard = *at.config.StrategyConfig.RiskControl.EnforceAIClaimGuard
+		}
+		if enforceClaimGuard {
+			if d.Action == "open_long" || d.Action == "open_short" {
+				claimText := d.Reasoning
+				if aiDecision != nil && strings.TrimSpace(aiDecision.CoTTrace) != "" {
+					claimText = strings.TrimSpace(claimText + "\n" + aiDecision.CoTTrace)
+				}
+				allowed, why := at.allowAIOpen(ctx, &d, claimText)
+				if !allowed {
+					msg := fmt.Sprintf("%s %s skipped by claim guard: %s", d.Symbol, d.Action, why)
+					logger.Infof("  ⛔ %s", msg)
+					actionRecord.Error = msg
+					record.ExecutionLog = append(record.ExecutionLog, msg)
+					record.Decisions = append(record.Decisions, actionRecord)
+					continue
+				}
+			}
+		}
+
+		// Enforce AI close guard: do not allow AI to close positions unless hard exit conditions trigger.
+		enforceCloseGuard := true
+		if at.config.StrategyConfig != nil && at.config.StrategyConfig.RiskControl.EnforceAICloseGuard != nil {
+			enforceCloseGuard = *at.config.StrategyConfig.RiskControl.EnforceAICloseGuard
+		}
+		if enforceCloseGuard {
+			if d.Action == "close_long" || d.Action == "close_short" {
+				allowed, why := at.allowAIClose(ctx, &d)
+				if !allowed {
+					msg := fmt.Sprintf("%s %s skipped by exit guard: %s", d.Symbol, d.Action, why)
+					logger.Infof("  ⛔ %s", msg)
+					actionRecord.Error = msg
+					record.ExecutionLog = append(record.ExecutionLog, msg)
+					record.Decisions = append(record.Decisions, actionRecord)
+					continue
+				}
+			}
+		}
+
 		if err := at.executeDecisionWithRecord(&d, &actionRecord); err != nil {
 			logger.Infof("Failed to execute decision (%s %s): %v", d.Symbol, d.Action, err)
 			actionRecord.Error = err.Error()
 			record.ExecutionLog = append(record.ExecutionLog, fmt.Sprintf("%s %s failed: %v", d.Symbol, d.Action, err))
+			sendTelegramErrorNotification(at.store, at.userID, at.name, at.exchange, d.Action, d.Symbol, err)
 		} else {
 			actionRecord.Success = true
 			record.ExecutionLog = append(record.ExecutionLog, fmt.Sprintf("%s %s succeeded", d.Symbol, d.Action))
@@ -1428,6 +1479,45 @@ func (at *AutoTrader) executeCloseShortWithRecord(decision *decision.Decision, a
 
 	logger.Infof("  Position closed successfully")
 	return nil
+}
+
+func (at *AutoTrader) QueueStrategyConfigUpdate(cfg *store.StrategyConfig, source string) {
+	if at == nil || cfg == nil {
+		return
+	}
+	at.pendingStrategyConfigMu.Lock()
+	at.pendingStrategyConfig = cfg
+	at.pendingStrategyUpdateSource = source
+	at.pendingStrategyConfigMu.Unlock()
+	logger.Infof("🔄 [%s] Strategy config update queued (%s)", at.name, source)
+}
+
+func (at *AutoTrader) applyPendingStrategyConfigUpdate(record *store.DecisionRecord) {
+	if at == nil {
+		return
+	}
+	at.pendingStrategyConfigMu.Lock()
+	cfg := at.pendingStrategyConfig
+	source := at.pendingStrategyUpdateSource
+	at.pendingStrategyConfig = nil
+	at.pendingStrategyUpdateSource = ""
+	at.pendingStrategyConfigMu.Unlock()
+
+	if cfg == nil {
+		return
+	}
+
+	at.config.StrategyConfig = cfg
+	at.strategyEngine = decision.NewStrategyEngine(cfg)
+
+	msg := "strategy config reloaded"
+	if strings.TrimSpace(source) != "" {
+		msg = fmt.Sprintf("%s (%s)", msg, source)
+	}
+	logger.Infof("🔄 [%s] %s", at.name, msg)
+	if record != nil {
+		record.ExecutionLog = append(record.ExecutionLog, msg)
+	}
 }
 
 // GetID gets trader ID
@@ -2209,6 +2299,9 @@ func (at *AutoTrader) applyATRLeverageAndSize(dec *decision.Decision, entryPrice
 		return
 	}
 
+	oldLeverage := dec.Leverage
+	oldPositionSize := dec.PositionSizeUSD
+
 	cfg := decision.NormalizeLeverageConfig(decision.LeverageConfig{
 		ATRPeriod:       riskControl.ATRPeriod,
 		ATRTimeframe:    riskControl.ATRTimeframe,
@@ -2232,6 +2325,23 @@ func (at *AutoTrader) applyATRLeverageAndSize(dec *decision.Decision, entryPrice
 	}
 	if result.PositionSizeUSD > 0 {
 		dec.PositionSizeUSD = result.PositionSizeUSD
+	}
+
+	if dec.Leverage != oldLeverage || dec.PositionSizeUSD != oldPositionSize {
+		logger.Infof(
+			"  📐 [ATR] %s tf=%s period=%d equity=%.2f stopDist=%.2f%% atr=%.4f maxATR24h=%.4f: lev %dx->%dx size %.2f->%.2f",
+			dec.Symbol,
+			cfg.ATRTimeframe,
+			cfg.ATRPeriod,
+			equity,
+			result.StopDistancePct,
+			result.ATRValue,
+			result.MaxATR24h,
+			oldLeverage,
+			dec.Leverage,
+			oldPositionSize,
+			dec.PositionSizeUSD,
+		)
 	}
 }
 

@@ -346,6 +346,26 @@ func TestClient_IsRetryableError(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "API 500 is retryable",
+			err:      errors.New("API returned error (status 500): internal"),
+			expected: true,
+		},
+		{
+			name:     "API 503 is retryable",
+			err:      errors.New("API returned error (status 503): unavailable"),
+			expected: true,
+		},
+		{
+			name:     "API 429 is retryable",
+			err:      errors.New("API returned error (status 429): rate limited"),
+			expected: true,
+		},
+		{
+			name:     "API 400 is not retryable",
+			err:      errors.New("API returned error (status 400): bad request"),
+			expected: false,
+		},
+		{
 			name:     "normal error",
 			err:      errors.New("bad request"),
 			expected: false,

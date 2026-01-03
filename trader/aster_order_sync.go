@@ -132,6 +132,8 @@ func (t *AsterTrader) SyncOrdersFromAster(traderID string, exchangeID string, ex
 			logger.Infof("  📍 Position updated for trade: %s (action: %s, qty: %.6f)", trade.TradeID, orderAction, trade.Quantity)
 		}
 
+		sendTelegramTradeNotification(st, traderID, exchangeID, exchangeType, orderAction, symbol, side, trade.Quantity, trade.Price, trade.Fee, trade.RealizedPnL, trade.Time)
+
 		syncedCount++
 		logger.Infof("  ✅ Synced trade: %s %s %s qty=%.6f price=%.6f pnl=%.2f fee=%.6f action=%s",
 			trade.TradeID, symbol, side, trade.Quantity, trade.Price, trade.RealizedPnL, trade.Fee, orderAction)

@@ -287,6 +287,8 @@ func (t *BybitTrader) SyncOrdersFromBybit(traderID string, exchangeID string, ex
 			logger.Infof("  📍 Position updated for trade: %s (action: %s, qty: %.6f)", trade.ExecID, trade.OrderAction, trade.ExecQty)
 		}
 
+		sendTelegramTradeNotification(st, traderID, exchangeID, exchangeType, trade.OrderAction, symbol, side, trade.ExecQty, trade.ExecPrice, trade.ExecFee, trade.ClosedPnL, trade.ExecTime)
+
 		syncedCount++
 		logger.Infof("  ✅ Synced trade: %s %s %s qty=%.6f price=%.6f pnl=%.2f fee=%.6f action=%s",
 			trade.ExecID, symbol, side, trade.ExecQty, trade.ExecPrice, trade.ClosedPnL, trade.ExecFee, trade.OrderAction)

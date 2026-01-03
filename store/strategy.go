@@ -174,6 +174,16 @@ type RiskControlConfig struct {
 	// Max number of coins held simultaneously (CODE ENFORCED)
 	MaxPositions int `json:"max_positions"`
 
+	// EnforceAICloseGuard blocks AI-initiated close decisions unless hard exit conditions trigger.
+	// Hard conditions are evaluated in execution layer (trader), independent of prompt.
+	// nil = default true (opt-out)
+	EnforceAICloseGuard *bool `json:"enforce_ai_close_guard,omitempty"`
+
+	// EnforceAIClaimGuard blocks AI-initiated opens when the decision reasoning references
+	// data that is not present in the current prompt cycle (anti-hallucination guard).
+	// nil = default true (opt-out)
+	EnforceAIClaimGuard *bool `json:"enforce_ai_claim_guard,omitempty"`
+
 	// BTC/ETH exchange leverage for opening positions (AI guided)
 	BTCETHMaxLeverage int `json:"btc_eth_max_leverage"`
 	// Altcoin exchange leverage for opening positions (AI guided)
@@ -246,6 +256,8 @@ func (s *StrategyStore) initDefaultData() error {
 // GetDefaultStrategyConfig returns the default strategy configuration for the given language
 func GetDefaultStrategyConfig(lang string) StrategyConfig {
 	enforceMinPositionSize := true
+	enforceAICloseGuard := true
+	enforceAIClaimGuard := true
 
 	config := StrategyConfig{
 		CoinSource: CoinSourceConfig{
@@ -296,6 +308,8 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 		},
 		RiskControl: RiskControlConfig{
 			MaxPositions:                 3, // Max 3 coins simultaneously (CODE ENFORCED)
+			EnforceAICloseGuard:          &enforceAICloseGuard,
+			EnforceAIClaimGuard:          &enforceAIClaimGuard,
 			BTCETHMaxLeverage:            5, // BTC/ETH exchange leverage (AI guided)
 			AltcoinMaxLeverage:           5, // Altcoin exchange leverage (AI guided)
 			ATREnabled:                   true,

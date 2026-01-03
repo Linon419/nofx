@@ -74,21 +74,22 @@ func New() AIClient {
 // NewClient creates client (supports options pattern)
 //
 // Usage examples:
-//   // Basic usage (backward compatible)
-//   client := mcp.NewClient()
 //
-//   // Custom logger
-//   client := mcp.NewClient(mcp.WithLogger(customLogger))
+//	// Basic usage (backward compatible)
+//	client := mcp.NewClient()
 //
-//   // Custom timeout
-//   client := mcp.NewClient(mcp.WithTimeout(60*time.Second))
+//	// Custom logger
+//	client := mcp.NewClient(mcp.WithLogger(customLogger))
 //
-//   // Combine multiple options
-//   client := mcp.NewClient(
-//       mcp.WithDeepSeekConfig("sk-xxx"),
-//       mcp.WithLogger(customLogger),
-//       mcp.WithTimeout(60*time.Second),
-//   )
+//	// Custom timeout
+//	client := mcp.NewClient(mcp.WithTimeout(60*time.Second))
+//
+//	// Combine multiple options
+//	client := mcp.NewClient(
+//	    mcp.WithDeepSeekConfig("sk-xxx"),
+//	    mcp.WithLogger(customLogger),
+//	    mcp.WithTimeout(60*time.Second),
+//	)
 func NewClient(opts ...ClientOption) AIClient {
 	// 1. Create default config
 	cfg := DefaultConfig()
@@ -224,11 +225,78 @@ func (client *Client) buildMCPRequestBody(systemPrompt, userPrompt string) map[s
 
 // can be used to marshal the request body and can be overridden
 func (client *Client) marshalRequestBody(requestBody map[string]any) ([]byte, error) {
+	client.normalizeToolChoice(requestBody)
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to serialize request: %w", err)
 	}
 	return jsonData, nil
+}
+
+func (client *Client) normalizeToolChoice(requestBody map[string]any) {
+	raw, ok := requestBody["tool_choice"]
+	if !ok || raw == nil {
+		return
+	}
+
+	choiceStr, ok := raw.(string)
+	if !ok {
+		return
+	}
+
+	choiceStr = strings.TrimSpace(choiceStr)
+	if choiceStr == "" {
+		return
+	}
+
+	// If caller passed tool_choice as a JSON string, decode it into an object.
+	// This improves compatibility with OpenAI-compatible providers that require object form.
+	if strings.HasPrefix(choiceStr, "{") || strings.HasPrefix(choiceStr, "[") {
+		var decoded any
+		if err := json.Unmarshal([]byte(choiceStr), &decoded); err == nil {
+			requestBody["tool_choice"] = decoded
+			return
+		}
+	}
+
+	// DeepSeek/Gemini OpenAI-compatible endpoints may not accept "required".
+	// Convert it to explicit function selection using the first tool.
+	if choiceStr == "required" && (client.Provider == ProviderDeepSeek || client.Provider == ProviderGemini) {
+		if name := firstToolName(requestBody["tools"]); name != "" {
+			requestBody["tool_choice"] = map[string]any{
+				"type": "function",
+				"function": map[string]any{
+					"name": name,
+				},
+			}
+		}
+	}
+}
+
+func firstToolName(tools any) string {
+	switch t := tools.(type) {
+	case []Tool:
+		if len(t) == 0 {
+			return ""
+		}
+		return strings.TrimSpace(t[0].Function.Name)
+	case []any:
+		if len(t) == 0 {
+			return ""
+		}
+		first, ok := t[0].(map[string]any)
+		if !ok {
+			return ""
+		}
+		fnAny, ok := first["function"].(map[string]any)
+		if !ok {
+			return ""
+		}
+		name, _ := fnAny["name"].(string)
+		return strings.TrimSpace(name)
+	default:
+		return ""
+	}
 }
 
 func (client *Client) parseMCPResponse(body []byte) (string, error) {
@@ -243,6 +311,10 @@ func (client *Client) parseMCPResponse(body []byte) (string, error) {
 						Arguments string `json:"arguments"`
 					} `json:"function"`
 				} `json:"tool_calls,omitempty"`
+				FunctionCall struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function_call,omitempty"`
 			} `json:"message"`
 		} `json:"choices"`
 		Usage struct {
@@ -266,6 +338,11 @@ func (client *Client) parseMCPResponse(body []byte) (string, error) {
 		if args != "" {
 			return args, nil
 		}
+	}
+
+	// Backward-compatible function_call field (older providers / compat layers)
+	if args := strings.TrimSpace(result.Choices[0].Message.FunctionCall.Arguments); args != "" {
+		return args, nil
 	}
 
 	// Report token usage if callback is set
@@ -367,6 +444,17 @@ func (client *Client) String() string {
 // isRetryableError determines if error is retryable (network errors, timeouts, etc.)
 func (client *Client) isRetryableError(err error) bool {
 	errStr := err.Error()
+
+	// Retry on HTTP transient errors (5xx) and rate limiting (429).
+	// These errors are often returned as: "API returned error (status 500): ...".
+	if code, ok := extractHTTPStatusCode(errStr); ok {
+		if code == http.StatusTooManyRequests ||
+			code == http.StatusRequestTimeout ||
+			(code >= http.StatusInternalServerError && code <= 599) {
+			return true
+		}
+	}
+
 	// Network errors, timeouts, EOF, etc. can be retried
 	for _, retryable := range client.config.RetryableErrors {
 		if strings.Contains(errStr, retryable) {
@@ -374,6 +462,28 @@ func (client *Client) isRetryableError(err error) bool {
 		}
 	}
 	return false
+}
+
+func extractHTTPStatusCode(errStr string) (int, bool) {
+	const prefix = "API returned error (status "
+	idx := strings.Index(errStr, prefix)
+	if idx < 0 {
+		return 0, false
+	}
+	s := errStr[idx+len(prefix):]
+	end := strings.IndexByte(s, ')')
+	if end < 0 {
+		return 0, false
+	}
+	codePart := strings.TrimSpace(s[:end])
+	var code int
+	if _, err := fmt.Sscanf(codePart, "%d", &code); err != nil {
+		return 0, false
+	}
+	if code <= 0 {
+		return 0, false
+	}
+	return code, true
 }
 
 // ============================================================
@@ -389,12 +499,13 @@ func (client *Client) isRetryableError(err error) bool {
 // - Streaming response (future support)
 //
 // Usage example:
-//   request := NewRequestBuilder().
-//       WithSystemPrompt("You are helpful").
-//       WithUserPrompt("Hello").
-//       WithTemperature(0.8).
-//       Build()
-//   result, err := client.CallWithRequest(request)
+//
+//	request := NewRequestBuilder().
+//	    WithSystemPrompt("You are helpful").
+//	    WithUserPrompt("Hello").
+//	    WithTemperature(0.8).
+//	    Build()
+//	result, err := client.CallWithRequest(request)
 func (client *Client) CallWithRequest(req *Request) (string, error) {
 	if client.APIKey == "" {
 		return "", fmt.Errorf("AI API key not set, please call SetAPIKey first")

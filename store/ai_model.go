@@ -11,9 +11,9 @@ import (
 
 // AIModelStore AI model storage
 type AIModelStore struct {
-	db            *sql.DB
-	encryptFunc   func(string) string
-	decryptFunc   func(string) string
+	db          *sql.DB
+	encryptFunc func(string) string
+	decryptFunc func(string) string
 }
 
 // AIModel AI model configuration
@@ -85,6 +85,65 @@ func (s *AIModelStore) decrypt(encrypted string) string {
 		return s.decryptFunc(encrypted)
 	}
 	return encrypted
+}
+
+// UpsertDetailed creates or updates a model by ID, without collapsing by provider.
+// This enables multiple model configs under the same provider (e.g., multiple Claude configs).
+//
+// apiKey preservation: if apiKey is empty on update, the existing api_key is preserved.
+func (s *AIModelStore) UpsertDetailed(userID, id, provider, name string, enabled bool, apiKey, customAPIURL, customModelName string) error {
+	id = strings.TrimSpace(id)
+	userID = strings.TrimSpace(userID)
+	provider = strings.TrimSpace(provider)
+	name = strings.TrimSpace(name)
+
+	if id == "" {
+		return fmt.Errorf("model id cannot be empty")
+	}
+	if userID == "" {
+		userID = "default"
+	}
+	if provider == "" {
+		return fmt.Errorf("provider cannot be empty")
+	}
+	if name == "" {
+		name = provider + " AI"
+	}
+
+	// Update if exists (by exact id)
+	var existingID string
+	err := s.db.QueryRow(`SELECT id FROM ai_models WHERE user_id = ? AND id = ? LIMIT 1`, userID, id).Scan(&existingID)
+	if err == nil {
+		// Preserve apiKey when empty (matches legacy behavior)
+		if apiKey == "" {
+			_, err = s.db.Exec(`
+				UPDATE ai_models
+				SET enabled = ?, name = CASE WHEN ? <> '' THEN ? ELSE name END,
+				    custom_api_url = ?, custom_model_name = ?, updated_at = datetime('now')
+				WHERE id = ? AND user_id = ?
+			`, enabled, name, name, customAPIURL, customModelName, existingID, userID)
+			return err
+		}
+		encryptedAPIKey := s.encrypt(apiKey)
+		_, err = s.db.Exec(`
+			UPDATE ai_models
+			SET enabled = ?, name = CASE WHEN ? <> '' THEN ? ELSE name END,
+			    api_key = ?, custom_api_url = ?, custom_model_name = ?, updated_at = datetime('now')
+			WHERE id = ? AND user_id = ?
+		`, enabled, name, name, encryptedAPIKey, customAPIURL, customModelName, existingID, userID)
+		return err
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	// Create new record (explicit provider + name)
+	encryptedAPIKey := s.encrypt(apiKey)
+	_, err = s.db.Exec(`
+		INSERT INTO ai_models (id, user_id, name, provider, enabled, api_key, custom_api_url, custom_model_name, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+	`, id, userID, name, provider, enabled, encryptedAPIKey, customAPIURL, customModelName)
+	return err
 }
 
 // List retrieves user's AI model list

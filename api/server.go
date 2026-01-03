@@ -28,6 +28,15 @@ import (
 	"github.com/google/uuid"
 )
 
+func isKnownAIProvider(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "deepseek", "qwen", "openai", "claude", "gemini", "grok", "kimi", "custom":
+		return true
+	default:
+		return false
+	}
+}
+
 // Server HTTP API server
 type Server struct {
 	router          *gin.Engine
@@ -158,12 +167,18 @@ func (s *Server) setupRoutes() {
 			// AI model configuration
 			protected.GET("/models", s.handleGetModelConfigs)
 			protected.PUT("/models", s.handleUpdateModelConfigs)
+			protected.POST("/models/test", s.handleTestModelConfigToolCall)
+			protected.POST("/models/available-models", s.handleListRemoteModels)
 
 			// Exchange configuration
 			protected.GET("/exchanges", s.handleGetExchangeConfigs)
 			protected.POST("/exchanges", s.handleCreateExchange)
 			protected.PUT("/exchanges", s.handleUpdateExchangeConfigs)
 			protected.DELETE("/exchanges/:id", s.handleDeleteExchange)
+
+			// Notifications
+			protected.GET("/notifications/telegram", s.handleGetTelegramConfig)
+			protected.PUT("/notifications/telegram", s.handleUpdateTelegramConfig)
 
 			// Strategy management
 			protected.GET("/strategies", s.handleGetStrategies)
@@ -197,7 +212,7 @@ func (s *Server) setupRoutes() {
 			protected.GET("/positions", s.handlePositions)
 			protected.GET("/positions/history", s.handlePositionHistory)
 			protected.GET("/trades", s.handleTrades)
-			protected.GET("/orders", s.handleOrders)           // Order list (all orders)
+			protected.GET("/orders", s.handleOrders)               // Order list (all orders)
 			protected.GET("/orders/:id/fills", s.handleOrderFills) // Order fill details
 			protected.GET("/decisions", s.handleDecisions)
 			protected.GET("/decisions/latest", s.handleLatestDecisions)
@@ -454,6 +469,11 @@ type SafeExchangeConfig struct {
 
 type UpdateModelConfigRequest struct {
 	Models map[string]struct {
+		// New format (v2): allow multiple models per provider by keying map by model ID.
+		// Backward compatible: when Provider/Name are empty and key is a provider ("claude"),
+		// the server falls back to legacy update logic.
+		Name            string `json:"name,omitempty"`
+		Provider        string `json:"provider,omitempty"`
 		Enabled         bool   `json:"enabled"`
 		APIKey          string `json:"api_key"`
 		CustomAPIURL    string `json:"custom_api_url"`
@@ -477,6 +497,24 @@ type UpdateExchangeConfigRequest struct {
 		LighterAPIKeyPrivateKey string `json:"lighter_api_key_private_key"`
 		LighterAPIKeyIndex      int    `json:"lighter_api_key_index"`
 	} `json:"exchanges"`
+}
+
+type TelegramConfigRequest struct {
+	Enabled       bool   `json:"enabled"`
+	BotToken      string `json:"bot_token"`
+	ChatID        string `json:"chat_id"`
+	NotifyOnOpen  bool   `json:"notify_on_open"`
+	NotifyOnClose bool   `json:"notify_on_close"`
+	NotifyOnError bool   `json:"notify_on_error"`
+}
+
+type TelegramConfigResponse struct {
+	Enabled       bool   `json:"enabled"`
+	HasBotToken   bool   `json:"has_bot_token"`
+	ChatID        string `json:"chat_id"`
+	NotifyOnOpen  bool   `json:"notify_on_open"`
+	NotifyOnClose bool   `json:"notify_on_close"`
+	NotifyOnError bool   `json:"notify_on_error"`
 }
 
 // handleCreateTrader Create new AI trader
@@ -1678,7 +1716,40 @@ func (s *Server) handleUpdateModelConfigs(c *gin.Context) {
 
 	// Update each model's configuration
 	for modelID, modelData := range req.Models {
-		err := s.store.AIModel().Update(userID, modelID, modelData.Enabled, modelData.APIKey, modelData.CustomAPIURL, modelData.CustomModelName)
+		// Legacy format: map keyed by provider (e.g., {"claude": {...}}). This only supports 1 model per provider.
+		if modelData.Provider == "" && modelData.Name == "" && isKnownAIProvider(modelID) {
+			err := s.store.AIModel().Update(userID, modelID, modelData.Enabled, modelData.APIKey, modelData.CustomAPIURL, modelData.CustomModelName)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to update model %s: %v", modelID, err)})
+				return
+			}
+			continue
+		}
+
+		// New format: map keyed by model ID. Provider is required for new models; optional for existing.
+		provider := strings.TrimSpace(modelData.Provider)
+		name := strings.TrimSpace(modelData.Name)
+		if provider == "" {
+			if existing, err := s.store.AIModel().Get(userID, modelID); err == nil && existing != nil {
+				provider = existing.Provider
+				if name == "" {
+					name = existing.Name
+				}
+			} else {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("provider is required for model %s", modelID)})
+				return
+			}
+		}
+		err := s.store.AIModel().UpsertDetailed(
+			userID,
+			modelID,
+			provider,
+			name,
+			modelData.Enabled,
+			modelData.APIKey,
+			modelData.CustomAPIURL,
+			modelData.CustomModelName,
+		)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to update model %s: %v", modelID, err)})
 			return
@@ -1735,6 +1806,111 @@ func (s *Server) handleGetExchangeConfigs(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, safeExchanges)
+}
+
+func (s *Server) handleGetTelegramConfig(c *gin.Context) {
+	userID := c.GetString("user_id")
+	cfg, err := s.store.Telegram().Get(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to get telegram config: %v", err)})
+		return
+	}
+
+	// Default response (no config set yet)
+	if cfg == nil {
+		c.JSON(http.StatusOK, TelegramConfigResponse{
+			Enabled:       false,
+			HasBotToken:   false,
+			ChatID:        "",
+			NotifyOnOpen:  true,
+			NotifyOnClose: true,
+			NotifyOnError: true,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, TelegramConfigResponse{
+		Enabled:       cfg.Enabled,
+		HasBotToken:   strings.TrimSpace(cfg.BotToken) != "",
+		ChatID:        cfg.ChatID,
+		NotifyOnOpen:  cfg.NotifyOnOpen,
+		NotifyOnClose: cfg.NotifyOnClose,
+		NotifyOnError: cfg.NotifyOnError,
+	})
+}
+
+func (s *Server) handleUpdateTelegramConfig(c *gin.Context) {
+	userID := c.GetString("user_id")
+	cfg := config.Get()
+
+	bodyBytes, err := c.GetRawData()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+		return
+	}
+
+	var req TelegramConfigRequest
+	if !cfg.TransportEncryption {
+		if err := json.Unmarshal(bodyBytes, &req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+			return
+		}
+	} else {
+		var encryptedPayload crypto.EncryptedPayload
+		if err := json.Unmarshal(bodyBytes, &encryptedPayload); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format, encrypted transmission required"})
+			return
+		}
+		if encryptedPayload.WrappedKey == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "This endpoint only supports encrypted transmission, please use encrypted client",
+				"code":    "ENCRYPTION_REQUIRED",
+				"message": "Encrypted transmission is required for security reasons",
+			})
+			return
+		}
+		decrypted, err := s.cryptoHandler.cryptoService.DecryptSensitiveData(&encryptedPayload)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to decrypt data"})
+			return
+		}
+		if err := json.Unmarshal([]byte(decrypted), &req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse decrypted data"})
+			return
+		}
+	}
+
+	trimmedChatID := strings.TrimSpace(req.ChatID)
+	if req.Enabled && trimmedChatID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "chat_id is required when telegram notifications are enabled"})
+		return
+	}
+	if req.Enabled && strings.TrimSpace(req.BotToken) == "" {
+		existing, err := s.store.Telegram().Get(userID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to get telegram config: %v", err)})
+			return
+		}
+		if existing == nil || strings.TrimSpace(existing.BotToken) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "bot_token is required when telegram notifications are enabled"})
+			return
+		}
+	}
+
+	if err := s.store.Telegram().Upsert(
+		userID,
+		req.Enabled,
+		req.BotToken,
+		trimmedChatID,
+		req.NotifyOnOpen,
+		req.NotifyOnClose,
+		req.NotifyOnError,
+	); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to update telegram config: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Telegram configuration updated"})
 }
 
 // handleUpdateExchangeConfigs Update exchange configurations (supports both encrypted and plain text based on config)
@@ -2178,9 +2354,9 @@ func (s *Server) handlePositionHistory(c *gin.Context) {
 	directionStats, _ := store.Position().GetDirectionStats(trader.GetID())
 
 	c.JSON(http.StatusOK, gin.H{
-		"positions": positions,
-		"stats": stats,
-		"symbol_stats": symbolStats,
+		"positions":       positions,
+		"stats":           stats,
+		"symbol_stats":    symbolStats,
 		"direction_stats": directionStats,
 	})
 }
@@ -2559,8 +2735,8 @@ func (s *Server) getKlinesFromAlpaca(symbol, interval string, limit int) ([]mark
 			High:        bar.High,
 			Low:         bar.Low,
 			Close:       bar.Close,
-			Volume:      float64(bar.Volume),              // 股数
-			QuoteVolume: float64(bar.Volume) * bar.Close,  // 成交额 = 股数 * 收盘价 (USD)
+			Volume:      float64(bar.Volume),             // 股数
+			QuoteVolume: float64(bar.Volume) * bar.Close, // 成交额 = 股数 * 收盘价 (USD)
 			CloseTime:   bar.Timestamp.UnixMilli(),
 		}
 	}
@@ -2641,8 +2817,8 @@ func (s *Server) getKlinesFromHyperliquid(symbol, interval string, limit int) ([
 			High:        high,
 			Low:         low,
 			Close:       close,
-			Volume:      volume,            // 合约数量
-			QuoteVolume: volume * close,    // 成交额 (USD)
+			Volume:      volume,         // 合约数量
+			QuoteVolume: volume * close, // 成交额 (USD)
 			CloseTime:   candle.CloseTime,
 		}
 	}

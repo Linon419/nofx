@@ -204,6 +204,23 @@ func (s *Server) handleUpdateStrategy(c *gin.Context) {
 		return
 	}
 
+	// Hot-reload updated strategy config for in-memory traders using this strategy.
+	// This avoids requiring a trader restart for risk-control changes (e.g., atr_timeframe).
+	if s.traderManager != nil {
+		updatedCfg := req.Config
+		traders, listErr := s.store.Trader().List(userID)
+		if listErr == nil {
+			for _, tr := range traders {
+				if tr == nil || tr.StrategyID != strategyID {
+					continue
+				}
+				if at, err := s.traderManager.GetTrader(tr.ID); err == nil && at != nil {
+					at.QueueStrategyConfigUpdate(&updatedCfg, fmt.Sprintf("strategy %s updated", strategyID))
+				}
+			}
+		}
+	}
+
 	// Validate configuration and collect warnings
 	warnings := validateStrategyConfig(&req.Config)
 
@@ -334,9 +351,9 @@ func (s *Server) handlePreviewPrompt(c *gin.Context) {
 	}
 
 	var req struct {
-		Config          store.StrategyConfig `json:"config" binding:"required"`
-		AccountEquity   float64              `json:"account_equity"`
-		PromptVariant   string               `json:"prompt_variant"`
+		Config        store.StrategyConfig `json:"config" binding:"required"`
+		AccountEquity float64              `json:"account_equity"`
+		PromptVariant string               `json:"prompt_variant"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -585,4 +602,3 @@ func (s *Server) runRealAITest(userID, modelID, systemPrompt, userPrompt string)
 
 	return response, nil
 }
-

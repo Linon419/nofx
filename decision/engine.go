@@ -14,6 +14,7 @@ import (
 	"nofx/store"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -339,19 +340,28 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 		return decision, nil
 	}
 
-	toolDecision, toolErr := callAIWithDecisionTool(
-		ctx,
-		mcpClient,
-		systemPrompt,
-		userPrompt,
-		riskConfig,
-		exitPlanID,
-	)
-	if toolErr == nil && toolDecision != nil && len(toolDecision.Decisions) > 0 {
-		return toolDecision, nil
-	}
-	if toolErr != nil {
-		logger.Infof("AI tool-call decision failed, falling back to text decision parsing: %v", toolErr)
+	var toolDecision *FullDecision
+	var toolErr error
+	if isDecisionToolEnabled() {
+		toolDecision, toolErr = callAIWithDecisionTool(
+			ctx,
+			mcpClient,
+			systemPrompt,
+			userPrompt,
+			riskConfig,
+			exitPlanID,
+		)
+		if toolErr == nil && toolDecision != nil && len(toolDecision.Decisions) > 0 {
+			return toolDecision, nil
+		}
+		if toolErr != nil {
+			if shouldTemporarilyDisableDecisionTool(toolErr) {
+				disableDecisionToolFor(10*time.Minute, toolErr)
+			}
+			logger.Infof("AI tool-call decision failed, falling back to text decision parsing: %v", toolErr)
+		}
+	} else {
+		logger.Infof("AI tool-call decision temporarily disabled; using text decision parsing")
 	}
 
 	decision, err := callAIAndParse(userPrompt)
@@ -397,6 +407,32 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 var decisionFormatRetryBaseDelay = 300 * time.Millisecond
 
 const decisionToolName = "submit_decisions"
+
+var decisionToolDisabledUntilUnixNano atomic.Int64
+
+func isDecisionToolEnabled() bool {
+	return decisionToolDisabledUntilUnixNano.Load() <= time.Now().UnixNano()
+}
+
+func disableDecisionToolFor(d time.Duration, err error) {
+	until := time.Now().Add(d).UnixNano()
+	decisionToolDisabledUntilUnixNano.Store(until)
+	logger.Infof("AI decision tool disabled for %v due to: %v", d, err)
+}
+
+func shouldTemporarilyDisableDecisionTool(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	if strings.Contains(s, "API returned error (status 400)") && strings.Contains(s, "invalid_request_error") {
+		return true
+	}
+	if strings.Contains(s, "请求参数不合法") {
+		return true
+	}
+	return false
+}
 
 func callAIWithDecisionTool(
 	ctx *Context,
@@ -1236,6 +1272,30 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	sb.WriteString(fmt.Sprintf("- Risk-Reward Ratio: >=1:%.1f (take_profit / stop_loss)\n", riskControl.MinRiskRewardRatio))
 	sb.WriteString(fmt.Sprintf("- Min Confidence: >=%d to open position\n\n", riskControl.MinConfidence))
 
+	// Data integrity / anti-hallucination rules
+	sb.WriteString("# Data Integrity (Anti-Hallucination)\n\n")
+	if lang == LangChinese {
+		sb.WriteString("## 必须遵守\n")
+		sb.WriteString("- 如果某项数据在本周期输入中不存在/未展示，视为 unknown，禁止编造或推断。\n")
+		sb.WriteString("- 只有在出现 `=== <SYMBOL> Quantitative Data ===` 段落时，才允许讨论资金流(Netflow)或 OI 的 5m/15m/1h/4h/12h/24h 变化；否则一律当作 unknown。\n")
+		sb.WriteString("\n")
+		sb.WriteString("## 均线用法（趋势内偏好）\n")
+		sb.WriteString("- EMA21：强势趋势参考（多头趋势中更偏多，空头趋势中更偏空）。\n")
+		sb.WriteString("- EMA55：多空都可以做，但在多头趋势中仍偏多，在空头趋势中仍偏空。\n")
+		sb.WriteString("- EMA100：多空都可以做，但在多头趋势中更偏空（更像回撤/博弈区），在空头趋势中更偏空。\n")
+		sb.WriteString("- EMA200：趋势多空分界线；多头最后防守位/空头最后压制位。有效跌破/突破并确认后，视为趋势拐头信号。\n\n")
+	} else {
+		sb.WriteString("## MUST FOLLOW\n")
+		sb.WriteString("- If a data point is not present in this cycle's input, treat it as unknown. Do NOT fabricate or infer it.\n")
+		sb.WriteString("- Only discuss netflow or multi-timeframe OI deltas (5m/15m/1h/4h/12h/24h) when a `=== <SYMBOL> Quantitative Data ===` block is present for that symbol; otherwise treat them as unknown.\n")
+		sb.WriteString("\n")
+		sb.WriteString("## EMA Heuristics (Trend Bias)\n")
+		sb.WriteString("- EMA21: strong trend reference (bias with trend).\n")
+		sb.WriteString("- EMA55: tradable both ways, but keep bias with the higher-timeframe trend.\n")
+		sb.WriteString("- EMA100: tradable both ways, but in an uptrend it behaves more like a pullback/decision zone (more cautious for longs).\n")
+		sb.WriteString("- EMA200: regime boundary; a confirmed break implies trend reversal.\n\n")
+	}
+
 	// Position sizing guidance
 	sb.WriteString("## Position Sizing Guidance\n")
 	sb.WriteString("Calculate `position_size_usd` based on your confidence and the Position Value Limits above:\n")
@@ -1578,7 +1638,11 @@ func (e *StrategyEngine) BuildUserPrompt(ctx *Context) string {
 		if ctx.QuantDataMap != nil {
 			if quantData, hasQuant := ctx.QuantDataMap[coin.Symbol]; hasQuant {
 				sb.WriteString(e.formatQuantData(quantData))
+			} else if e.config.Indicators.EnableQuantData {
+				sb.WriteString("Quantitative Data: unavailable for this symbol in this cycle (treat fund flow / OI deltas as unknown).\n")
 			}
+		} else if e.config.Indicators.EnableQuantData {
+			sb.WriteString("Quantitative Data: unavailable for this symbol in this cycle (treat fund flow / OI deltas as unknown).\n")
 		}
 		sb.WriteString("\n")
 	}
@@ -1633,7 +1697,11 @@ func (e *StrategyEngine) formatPositionInfo(index int, pos PositionInfo, ctx *Co
 		if ctx.QuantDataMap != nil {
 			if quantData, hasQuant := ctx.QuantDataMap[pos.Symbol]; hasQuant {
 				sb.WriteString(e.formatQuantData(quantData))
+			} else if e.config.Indicators.EnableQuantData {
+				sb.WriteString("Quantitative Data: unavailable for this symbol in this cycle (treat fund flow / OI deltas as unknown).\n")
 			}
+		} else if e.config.Indicators.EnableQuantData {
+			sb.WriteString("Quantitative Data: unavailable for this symbol in this cycle (treat fund flow / OI deltas as unknown).\n")
 		}
 		sb.WriteString("\n")
 	}

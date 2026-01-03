@@ -261,6 +261,18 @@ func (t *OKXTrader) SyncOrdersFromOKX(traderID string, exchangeID string, exchan
 			logger.Infof("  📍 Position updated for trade: %s (action: %s, qty: %.6f)", trade.TradeID, trade.OrderAction, trade.FillQtyBase)
 		}
 
+		realizedPnLForNotify := 0.0
+		if strings.HasPrefix(strings.ToLower(trade.OrderAction), "close_") && st != nil {
+			if openPos, err := st.Position().GetOpenPositionBySymbol(traderID, symbol, positionSide); err == nil && openPos != nil && openPos.EntryPrice > 0 {
+				if positionSide == "LONG" {
+					realizedPnLForNotify = (trade.FillPrice - openPos.EntryPrice) * trade.FillQtyBase
+				} else if positionSide == "SHORT" {
+					realizedPnLForNotify = (openPos.EntryPrice - trade.FillPrice) * trade.FillQtyBase
+				}
+			}
+		}
+		sendTelegramTradeNotification(st, traderID, exchangeID, exchangeType, trade.OrderAction, symbol, side, trade.FillQtyBase, trade.FillPrice, trade.Fee, realizedPnLForNotify, trade.ExecTime)
+
 		syncedCount++
 		logger.Infof("  ✅ Synced trade: %s %s %s qty=%.6f price=%.6f fee=%.6f action=%s",
 			trade.TradeID, trade.Symbol, side, trade.FillQtyBase, trade.FillPrice, trade.Fee, trade.OrderAction)

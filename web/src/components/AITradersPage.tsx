@@ -30,6 +30,7 @@ import {
   ExternalLink,
   Copy,
   Check,
+  Send,
 } from 'lucide-react'
 import { confirmToast } from '../lib/notify'
 import { toast } from 'sonner'
@@ -153,6 +154,14 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
   const [allModels, setAllModels] = useState<AIModel[]>([])
   const [allExchanges, setAllExchanges] = useState<Exchange[]>([])
   const [supportedModels, setSupportedModels] = useState<AIModel[]>([])
+  const [telegramEnabled, setTelegramEnabled] = useState(false)
+  const [telegramHasBotToken, setTelegramHasBotToken] = useState(false)
+  const [telegramBotToken, setTelegramBotToken] = useState('')
+  const [telegramChatId, setTelegramChatId] = useState('')
+  const [telegramNotifyOnOpen, setTelegramNotifyOnOpen] = useState(true)
+  const [telegramNotifyOnClose, setTelegramNotifyOnClose] = useState(true)
+  const [telegramNotifyOnError, setTelegramNotifyOnError] = useState(true)
+  const [telegramSaving, setTelegramSaving] = useState(false)
   const [visibleTraderAddresses, setVisibleTraderAddresses] = useState<Set<string>>(new Set())
   const [visibleExchangeAddresses, setVisibleExchangeAddresses] = useState<Set<string>>(new Set())
   const [copiedId, setCopiedId] = useState<string | null>(null)
@@ -214,24 +223,33 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         return
       }
 
-      try {
-        const [
-          modelConfigs,
-          exchangeConfigs,
-          supportedModels,
-        ] = await Promise.all([
-          api.getModelConfigs(),
-          api.getExchangeConfigs(),
-          api.getSupportedModels(),
-        ])
-        setAllModels(modelConfigs)
-        setAllExchanges(exchangeConfigs)
-        setSupportedModels(supportedModels)
-      } catch (error) {
-        console.error('Failed to load configs:', error)
-      }
-    }
-    loadConfigs()
+       try {
+         const [
+           modelConfigs,
+           exchangeConfigs,
+           supportedModels,
+           tgConfig,
+         ] = await Promise.all([
+           api.getModelConfigs(),
+           api.getExchangeConfigs(),
+           api.getSupportedModels(),
+           api.getTelegramConfig(),
+         ])
+         setAllModels(modelConfigs)
+         setAllExchanges(exchangeConfigs)
+         setSupportedModels(supportedModels)
+
+         setTelegramEnabled(tgConfig.enabled)
+         setTelegramHasBotToken(tgConfig.has_bot_token)
+         setTelegramChatId(tgConfig.chat_id || '')
+         setTelegramNotifyOnOpen(tgConfig.notify_on_open)
+         setTelegramNotifyOnClose(tgConfig.notify_on_close)
+         setTelegramNotifyOnError(tgConfig.notify_on_error)
+       } catch (error) {
+         console.error('Failed to load configs:', error)
+       }
+     }
+     loadConfigs()
   }, [user, token])
 
   // 只显示已配置的模型和交易所
@@ -567,8 +585,10 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
       buildRequest: (models) => ({
         models: Object.fromEntries(
           models.map((model) => [
-            model.provider,
+            model.id,
             {
+              name: model.name,
+              provider: model.provider,
               enabled: model.enabled,
               api_key: model.apiKey || '',
               custom_api_url: model.customApiUrl || '',
@@ -593,6 +613,8 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
 
   const handleSaveModelConfig = async (
     modelId: string,
+    provider: string,
+    name: string,
     apiKey: string,
     customApiUrl?: string,
     customModelName?: string
@@ -617,6 +639,8 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
             m.id === modelId
               ? {
                   ...m,
+                  name: name || m.name,
+                  provider: provider || m.provider,
                   apiKey,
                   customApiUrl: customApiUrl || '',
                   customModelName: customModelName || '',
@@ -628,6 +652,9 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         // 添加新配置
         const newModel = {
           ...modelToUpdate,
+          id: modelId,
+          provider,
+          name: name || modelToUpdate.name,
           apiKey,
           customApiUrl: customApiUrl || '',
           customModelName: customModelName || '',
@@ -636,11 +663,13 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         updatedModels = [...(allModels || []), newModel]
       }
 
-      const request = {
+      const requestByID = {
         models: Object.fromEntries(
           updatedModels.map((model) => [
-            model.provider, // 使用 provider 而不是 id
+            model.id,
             {
+              name: model.name,
+              provider: model.provider,
               enabled: model.enabled,
               api_key: model.apiKey || '',
               custom_api_url: model.customApiUrl || '',
@@ -650,7 +679,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         ),
       }
 
-      await toast.promise(api.updateModelConfigs(request), {
+      await toast.promise(api.updateModelConfigs(requestByID), {
         loading: '正在更新模型配置…',
         success: '模型配置已更新',
         error: '更新模型配置失败',
@@ -801,6 +830,41 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
     setShowExchangeModal(true)
   }
 
+  const handleSaveTelegram = async () => {
+    if (!user || !token) return
+    setTelegramSaving(true)
+    try {
+      const req = {
+        enabled: telegramEnabled,
+        bot_token: telegramBotToken.trim(),
+        chat_id: telegramChatId.trim(),
+        notify_on_open: telegramNotifyOnOpen,
+        notify_on_close: telegramNotifyOnClose,
+        notify_on_error: telegramNotifyOnError,
+      }
+
+      await toast.promise(api.updateTelegramConfig(req), {
+        loading: language === 'zh' ? '正在更新 Telegram 配置…' : 'Updating Telegram config...',
+        success: language === 'zh' ? 'Telegram 配置已更新' : 'Telegram config updated',
+        error: language === 'zh' ? '更新 Telegram 配置失败' : 'Failed to update Telegram config',
+      })
+
+      const refreshed = await api.getTelegramConfig()
+      setTelegramEnabled(refreshed.enabled)
+      setTelegramHasBotToken(refreshed.has_bot_token)
+      setTelegramChatId(refreshed.chat_id || '')
+      setTelegramNotifyOnOpen(refreshed.notify_on_open)
+      setTelegramNotifyOnClose(refreshed.notify_on_close)
+      setTelegramNotifyOnError(refreshed.notify_on_error)
+      setTelegramBotToken('')
+    } catch (e) {
+      console.error('Failed to update telegram config:', e)
+      toast.error(language === 'zh' ? '更新 Telegram 配置失败' : 'Failed to update Telegram config')
+    } finally {
+      setTelegramSaving(false)
+    }
+  }
+
   return (
     <div className="space-y-4 md:space-y-6 animate-fade-in">
       {/* Header */}
@@ -887,8 +951,8 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         </div>
       </div>
 
-      {/* Configuration Status */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+       {/* Configuration Status */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         {/* AI Models */}
         <div className="binance-card p-3 md:p-4">
           <h3
@@ -986,6 +1050,105 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Telegram */}
+        <div className="binance-card p-3 md:p-4">
+          <h3
+            className="text-base md:text-lg font-semibold mb-3 flex items-center gap-2"
+            style={{ color: '#EAECEF' }}
+          >
+            <Send className="w-4 h-4 md:w-5 md:h-5" style={{ color: '#0088cc' }} />
+            {t('telegramNotifications', language)}
+          </h3>
+
+          <div className="space-y-3">
+            <label className="flex items-center justify-between gap-3 text-sm" style={{ color: '#EAECEF' }}>
+              <span>{t('telegramEnabled', language)}</span>
+              <input
+                type="checkbox"
+                checked={telegramEnabled}
+                onChange={(e) => setTelegramEnabled(e.target.checked)}
+              />
+            </label>
+
+            <div>
+              <label className="block text-sm font-semibold mb-2" style={{ color: '#EAECEF' }}>
+                {t('telegramBotToken', language)}
+              </label>
+              <input
+                type="password"
+                value={telegramBotToken}
+                onChange={(e) => setTelegramBotToken(e.target.value)}
+                placeholder={t('telegramBotTokenPlaceholder', language)}
+                className="w-full px-3 py-2 rounded"
+                style={{
+                  background: '#0B0E11',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
+              {telegramHasBotToken && (
+                <div className="mt-1 text-xs" style={{ color: '#848E9C' }}>
+                  {t('telegramBotTokenAlreadySet', language)}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold mb-2" style={{ color: '#EAECEF' }}>
+                {t('telegramChatId', language)}
+              </label>
+              <input
+                type="text"
+                value={telegramChatId}
+                onChange={(e) => setTelegramChatId(e.target.value)}
+                placeholder={t('telegramChatIdPlaceholder', language)}
+                className="w-full px-3 py-2 rounded"
+                style={{
+                  background: '#0B0E11',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
+            </div>
+
+            <div className="space-y-2 text-sm" style={{ color: '#EAECEF' }}>
+              <label className="flex items-center justify-between gap-3">
+                <span>{t('telegramNotifyOnOpen', language)}</span>
+                <input
+                  type="checkbox"
+                  checked={telegramNotifyOnOpen}
+                  onChange={(e) => setTelegramNotifyOnOpen(e.target.checked)}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-3">
+                <span>{t('telegramNotifyOnClose', language)}</span>
+                <input
+                  type="checkbox"
+                  checked={telegramNotifyOnClose}
+                  onChange={(e) => setTelegramNotifyOnClose(e.target.checked)}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-3">
+                <span>{t('telegramNotifyOnError', language)}</span>
+                <input
+                  type="checkbox"
+                  checked={telegramNotifyOnError}
+                  onChange={(e) => setTelegramNotifyOnError(e.target.checked)}
+                />
+              </label>
+            </div>
+
+            <button
+              onClick={handleSaveTelegram}
+              disabled={telegramSaving || !user || !token}
+              className="w-full px-3 py-2 rounded text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: '#2B3139', color: '#EAECEF', border: '1px solid #474D57' }}
+            >
+              {t('saveConfig', language)}
+            </button>
           </div>
         </div>
 
@@ -1506,6 +1669,8 @@ function ModelConfigModal({
   editingModelId: string | null
   onSave: (
     modelId: string,
+    provider: string,
+    name: string,
     apiKey: string,
     baseUrl?: string,
     modelName?: string
@@ -1515,9 +1680,15 @@ function ModelConfigModal({
   language: Language
 }) {
   const [selectedModelId, setSelectedModelId] = useState(editingModelId || '')
+  const [displayName, setDisplayName] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [modelName, setModelName] = useState('')
+  const [remoteModels, setRemoteModels] = useState<
+    Array<{ id: string; name?: string }>
+  >([])
+  const [fetchingRemoteModels, setFetchingRemoteModels] = useState(false)
+  const [testingModelConfig, setTestingModelConfig] = useState(false)
 
   // 获取当前编辑的模型信息 - 编辑时从已配置的模型中查找，新建时从所有支持的模型中查找
   const selectedModel = editingModelId
@@ -1527,18 +1698,87 @@ function ModelConfigModal({
   // 如果是编辑现有模型，初始化API Key、Base URL和Model Name
   useEffect(() => {
     if (editingModelId && selectedModel) {
+      setDisplayName(selectedModel.name || '')
       setApiKey(selectedModel.apiKey || '')
       setBaseUrl(selectedModel.customApiUrl || '')
       setModelName(selectedModel.customModelName || '')
+      setRemoteModels([])
     }
   }, [editingModelId, selectedModel])
 
+  useEffect(() => {
+    if (!editingModelId && selectedModel) {
+      setDisplayName(selectedModel.name || '')
+      setRemoteModels([])
+    }
+  }, [editingModelId, selectedModel])
+
+  const handleFetchRemoteModels = async () => {
+    if (!selectedModel || !apiKey.trim()) return
+    setFetchingRemoteModels(true)
+    try {
+      const models = await api.fetchRemoteModels({
+        provider: selectedModel.provider,
+        apiKey: apiKey.trim(),
+        customApiUrl: baseUrl.trim() || undefined,
+        customModelName: modelName.trim() || undefined,
+      })
+      const limited = models.slice(0, 200)
+      setRemoteModels(limited)
+      toast.success(
+        `${t('fetchModelListSuccess', language)} (${limited.length})`
+      )
+    } catch (err: any) {
+      toast.error(
+        `${t('fetchModelListFailed', language)}: ${err?.message || err}`
+      )
+    } finally {
+      setFetchingRemoteModels(false)
+    }
+  }
+
+  const handleTestModelConfig = async () => {
+    if (!selectedModel || !apiKey.trim()) return
+    setTestingModelConfig(true)
+    try {
+      const res = await api.testModelConfig({
+        provider: selectedModel.provider,
+        apiKey: apiKey.trim(),
+        customApiUrl: baseUrl.trim() || undefined,
+        customModelName: modelName.trim() || undefined,
+      })
+      toast.success(
+        `${t('testModelConfigSuccess', language)} (${res.latency_ms}ms)`
+      )
+    } catch (err: any) {
+      toast.error(
+        `${t('testModelConfigFailed', language)}: ${err?.message || err}`
+      )
+    } finally {
+      setTestingModelConfig(false)
+    }
+  }
+
+  const generateModelId = (provider: string) => {
+    const rand =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? (crypto as any).randomUUID()
+        : `${Date.now()}_${Math.random().toString(16).slice(2)}`
+    return `${provider}_${rand}`
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedModelId || !apiKey.trim()) return
+    if (!selectedModel || !apiKey.trim() || !displayName.trim()) return
+
+    const provider = selectedModel.provider
+    const name = displayName.trim()
+    const id = editingModelId ? selectedModelId : generateModelId(provider)
 
     onSave(
-      selectedModelId,
+      id,
+      provider,
+      name,
       apiKey.trim(),
       baseUrl.trim() || undefined,
       modelName.trim() || undefined
@@ -1618,6 +1858,28 @@ function ModelConfigModal({
                 className="p-4 rounded"
                 style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
               >
+                <div className="mb-4">
+                  <label
+                    className="block text-sm font-semibold mb-2"
+                    style={{ color: '#EAECEF' }}
+                  >
+                    {t('modelDisplayName', language)}
+                  </label>
+                  <input
+                    type="text"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    className="w-full px-3 py-2 rounded"
+                    style={{
+                      background: '#1E2329',
+                      border: '1px solid #2B3139',
+                      color: '#EAECEF',
+                    }}
+                    placeholder={t('modelDisplayNamePlaceholder', language)}
+                    required
+                  />
+                </div>
+
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-8 h-8 flex items-center justify-center">
                     {getModelIcon(selectedModel.provider || selectedModel.id, {
@@ -1743,6 +2005,57 @@ function ModelConfigModal({
                   <div className="text-xs mt-1" style={{ color: '#848E9C' }}>
                     {t('leaveBlankForDefaultModel', language)}
                   </div>
+                  {remoteModels.length > 0 && (
+                    <select
+                      className="w-full px-3 py-2 rounded mt-2"
+                      style={{
+                        background: '#0B0E11',
+                        border: '1px solid #2B3139',
+                        color: '#EAECEF',
+                      }}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        if (v) setModelName(v)
+                        e.target.value = ''
+                      }}
+                      defaultValue=""
+                    >
+                      <option value="">
+                        {t('selectFetchedModel', language)} ({remoteModels.length})
+                      </option>
+                      {remoteModels.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name ? `${m.id} (${m.name})` : m.id}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleFetchRemoteModels}
+                    disabled={!apiKey.trim() || fetchingRemoteModels}
+                    className="flex-1 px-4 py-2 rounded text-sm font-semibold disabled:opacity-50"
+                    style={{ background: '#2B3139', color: '#EAECEF' }}
+                  >
+                    {fetchingRemoteModels
+                      ? t('fetchingModelList', language)
+                      : t('fetchModelList', language)}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleTestModelConfig}
+                    disabled={!apiKey.trim() || testingModelConfig}
+                    className="flex-1 px-4 py-2 rounded text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                    style={{ background: '#F0B90B', color: '#000' }}
+                  >
+                    <Send className="w-4 h-4" />
+                    {testingModelConfig
+                      ? t('testingModelConfig', language)
+                      : t('testModelConfig', language)}
+                  </button>
                 </div>
 
                 <div
