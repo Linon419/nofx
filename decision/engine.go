@@ -157,6 +157,7 @@ func (d *Decision) UnmarshalJSON(data []byte) error {
 		PositionSizeUSD float64 `json:"position_size_usd,omitempty"`
 		StopLoss        float64 `json:"stop_loss,omitempty"`
 		TakeProfit      float64 `json:"take_profit,omitempty"`
+		ExitPlan        *ExitPlan `json:"exit_plan,omitempty"`
 		Confidence      int     `json:"confidence,omitempty"`
 		RiskUSD         float64 `json:"risk_usd,omitempty"`
 		Reasoning       string  `json:"reasoning,omitempty"`
@@ -174,6 +175,7 @@ func (d *Decision) UnmarshalJSON(data []byte) error {
 	d.PositionSizeUSD = wd.PositionSizeUSD
 	d.StopLoss = wd.StopLoss
 	d.TakeProfit = wd.TakeProfit
+	d.ExitPlan = wd.ExitPlan
 	d.Confidence = wd.Confidence
 	d.RiskUSD = wd.RiskUSD
 	if strings.TrimSpace(wd.Reasoning) != "" {

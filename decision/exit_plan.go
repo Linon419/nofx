@@ -94,7 +94,7 @@ func fillExitPlanFromLegacyFields(decision *Decision, expectedPlanID string) err
 	}
 
 	if decision.StopLoss <= 0 || decision.TakeProfit <= 0 {
-		return fmt.Errorf("exit_plan is required when action is %s", decision.Action)
+		return fmt.Errorf("exit_plan is required when action is %s (stop_loss and take_profit must be provided to auto-generate exit_plan)", decision.Action)
 	}
 
 	makeTierParams := func(tiers []exitPlanTier) (json.RawMessage, error) {
