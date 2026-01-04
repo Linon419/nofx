@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -87,12 +88,14 @@ func Init(cfg *Config) error {
 	// Setup log file output (write to both stdout and file)
 	logDir := "data"
 	if err := os.MkdirAll(logDir, 0755); err == nil {
-		logFileName := filepath.Join(logDir, fmt.Sprintf("nofx_%s.log", time.Now().Format("2006-01-02")))
+		logFileBase := fmt.Sprintf("nofx_%s.log", time.Now().Format("2006-01-02"))
+		logFileName := filepath.Join(logDir, logFileBase)
 		f, err := os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err == nil {
 			logFile = f
 			// Write to both stdout and file
 			Log.SetOutput(io.MultiWriter(os.Stdout, f))
+			_ = pruneNofxLogFiles(logDir, 4, logFileBase)
 		} else {
 			Log.SetOutput(os.Stdout)
 		}
@@ -102,6 +105,63 @@ func Init(cfg *Config) error {
 
 	Log.SetReportCaller(true)
 
+	return nil
+}
+
+func pruneNofxLogFiles(dir string, keep int, currentFile string) error {
+	dir = strings.TrimSpace(dir)
+	currentFile = strings.TrimSpace(currentFile)
+	if dir == "" || keep <= 0 {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+
+	type item struct {
+		name string
+		date time.Time
+	}
+	items := make([]item, 0, len(entries))
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := strings.TrimSpace(e.Name())
+		if !strings.HasPrefix(name, "nofx_") || !strings.HasSuffix(name, ".log") {
+			continue
+		}
+		dateStr := strings.TrimSuffix(strings.TrimPrefix(name, "nofx_"), ".log")
+		d, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			continue
+		}
+		items = append(items, item{name: name, date: d})
+	}
+
+	if len(items) <= keep {
+		return nil
+	}
+
+	sort.Slice(items, func(i, j int) bool { return items[i].date.After(items[j].date) })
+
+	// Keep the latest N, always including current file if present (should be today).
+	keepSet := make(map[string]bool, keep+1)
+	for i := 0; i < len(items) && len(keepSet) < keep; i++ {
+		keepSet[items[i].name] = true
+	}
+	if currentFile != "" {
+		keepSet[currentFile] = true
+	}
+
+	for _, it := range items {
+		if keepSet[it.name] {
+			continue
+		}
+		_ = os.Remove(filepath.Join(dir, it.name))
+	}
 	return nil
 }
 
