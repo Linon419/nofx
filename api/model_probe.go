@@ -12,7 +12,7 @@ import (
 
 	"nofx/config"
 	"nofx/crypto"
-	"nofx/decision"
+	decision "nofx/kernel"
 	"nofx/logger"
 	"nofx/mcp"
 )

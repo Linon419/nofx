@@ -730,26 +730,11 @@ func (t *BybitTrader) getQtyStep(symbol string) float64 {
 
 // FormatQuantity formats quantity
 func (t *BybitTrader) FormatQuantity(symbol string, quantity float64) (string, error) {
-	// Get qtyStep for this symbol
-	qtyStep := t.getQtyStep(symbol)
+	_ = symbol // Bybit linear defaults to 3 decimal places for quantity formatting
 
-	// Align quantity according to qtyStep (round down to nearest step)
-	alignedQty := math.Floor(quantity/qtyStep) * qtyStep
-
-	// Calculate required decimal places
-	decimals := 0
-	if qtyStep < 1 {
-		stepStr := strconv.FormatFloat(qtyStep, 'f', -1, 64)
-		if idx := strings.Index(stepStr, "."); idx >= 0 {
-			decimals = len(stepStr) - idx - 1
-		}
-	}
-
-	// Format
-	format := fmt.Sprintf("%%.%df", decimals)
-	formatted := fmt.Sprintf(format, alignedQty)
-
-	return formatted, nil
+	// Round down to 3 decimals (avoid exceeding allowed precision)
+	alignedQty := math.Floor(quantity*1000) / 1000
+	return fmt.Sprintf("%.3f", alignedQty), nil
 }
 
 // Helper methods
@@ -1032,8 +1017,8 @@ func (t *BybitTrader) parseClosedPnLResult(resultData interface{}) ([]ClosedPnLR
 			RealizedPnL: closedPnL,
 			Fee:         fee,
 			Leverage:    int(leverage),
-			EntryTime:   time.UnixMilli(createdTime),
-			ExitTime:    time.UnixMilli(updatedTime),
+			EntryTime:   time.UnixMilli(createdTime).UTC(),
+			ExitTime:    time.UnixMilli(updatedTime).UTC(),
 			OrderID:     orderId,
 			CloseType:   "unknown", // Bybit doesn't provide close type directly
 			ExchangeID:  orderId,   // Use orderId as exchange ID

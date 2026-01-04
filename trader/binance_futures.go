@@ -1163,7 +1163,7 @@ func (t *FuturesTrader) GetTrades(startTime time.Time, limit int) ([]TradeRecord
 			TradeID:     strconv.FormatInt(income.TranID, 10),
 			Symbol:      market.FromBinanceFuturesSymbol(income.Symbol),
 			RealizedPnL: pnl,
-			Time:        time.UnixMilli(income.Time),
+			Time:        time.UnixMilli(income.Time).UTC(),
 			// Note: Income API doesn't provide price, quantity, side, fee
 			// For accurate data, use GetTradesForSymbol with specific symbol
 		}
@@ -1214,7 +1214,7 @@ func (t *FuturesTrader) GetTradesForSymbol(symbol string, startTime time.Time, l
 			Quantity:     qty,
 			RealizedPnL:  pnl,
 			Fee:          fee,
-			Time:         time.UnixMilli(at.Time),
+			Time:         time.UnixMilli(at.Time).UTC(),
 		}
 		trades = append(trades, trade)
 	}
@@ -1263,7 +1263,7 @@ func (t *FuturesTrader) GetTradesForSymbolFromID(symbol string, fromID int64, li
 			Quantity:     qty,
 			RealizedPnL:  pnl,
 			Fee:          fee,
-			Time:         time.UnixMilli(at.Time),
+			Time:         time.UnixMilli(at.Time).UTC(),
 		}
 		trades = append(trades, trade)
 	}

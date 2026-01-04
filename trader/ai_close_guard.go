@@ -5,7 +5,7 @@ import (
 	"math"
 	"nofx/analysis"
 	atrend "nofx/analysis/trend"
-	"nofx/decision"
+	decision "nofx/kernel"
 	"nofx/market"
 	"nofx/store"
 	"strings"

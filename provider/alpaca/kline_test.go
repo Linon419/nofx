@@ -3,10 +3,15 @@ package alpaca
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 )
 
 func TestGetBars(t *testing.T) {
+	if os.Getenv("ALPACA_API_KEY") == "" || os.Getenv("ALPACA_SECRET_KEY") == "" {
+		t.Skip("set ALPACA_API_KEY and ALPACA_SECRET_KEY to run this integration test")
+	}
+
 	client := NewClient()
 
 	resp, err := client.GetBars(context.TODO(), "AAPL", "1Day", 5)

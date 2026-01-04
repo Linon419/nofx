@@ -1,13 +1,14 @@
 package trader
 
 import (
-	"database/sql"
 	"math"
 	"nofx/store"
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // TestHyperliquidOrderDirectionParsing tests Dir field parsing
@@ -75,11 +76,12 @@ func TestHyperliquidOrderDirectionParsing(t *testing.T) {
 // TestHyperliquidPositionBuilding tests the complete flow of position building
 func TestHyperliquidPositionBuilding(t *testing.T) {
 	// Setup in-memory database
-	db, err := sql.Open("sqlite3", ":memory:")
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
 	if err != nil {
 		t.Fatalf("Failed to create test database: %v", err)
 	}
-	defer db.Close()
 
 	// Initialize stores
 	positionStore := store.NewPositionStore(db)
@@ -304,11 +306,12 @@ func TestHyperliquidPositionBuilding(t *testing.T) {
 // TestHyperliquidBugScenario tests the exact bug we fixed
 func TestHyperliquidBugScenario(t *testing.T) {
 	// Setup database
-	db, err := sql.Open("sqlite3", ":memory:")
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
 	if err != nil {
 		t.Fatalf("Failed to create test database: %v", err)
 	}
-	defer db.Close()
 
 	positionStore := store.NewPositionStore(db)
 	if err := positionStore.InitTables(); err != nil {
@@ -325,13 +328,13 @@ func TestHyperliquidBugScenario(t *testing.T) {
 	// Account has 30 USDT, should not be able to hold 1.7 ETH
 
 	trades := []struct {
-		action   string
-		side     string
-		symbol   string
-		qty      float64
-		price    float64
-		fee      float64
-		pnl      float64
+		action string
+		side   string
+		symbol string
+		qty    float64
+		price  float64
+		fee    float64
+		pnl    float64
 	}{
 		// Order 853: Open Short
 		{"open_short", "SHORT", "ETHUSDT", 0.0472, 3500, 0.2, 0},

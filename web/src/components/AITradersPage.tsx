@@ -14,6 +14,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { getExchangeIcon } from './ExchangeIcons'
 import { getModelIcon } from './ModelIcons'
 import { TraderConfigModal } from './TraderConfigModal'
+import { DeepVoidBackground } from './DeepVoidBackground'
 import { ExchangeConfigModal } from './traders/ExchangeConfigModal'
 import { PunkAvatar, getTraderAvatar } from './PunkAvatar'
 import {
@@ -30,7 +31,6 @@ import {
   ExternalLink,
   Copy,
   Check,
-  Send,
 } from 'lucide-react'
 import { confirmToast } from '../lib/notify'
 import { toast } from 'sonner'
@@ -154,14 +154,6 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
   const [allModels, setAllModels] = useState<AIModel[]>([])
   const [allExchanges, setAllExchanges] = useState<Exchange[]>([])
   const [supportedModels, setSupportedModels] = useState<AIModel[]>([])
-  const [telegramEnabled, setTelegramEnabled] = useState(false)
-  const [telegramHasBotToken, setTelegramHasBotToken] = useState(false)
-  const [telegramBotToken, setTelegramBotToken] = useState('')
-  const [telegramChatId, setTelegramChatId] = useState('')
-  const [telegramNotifyOnOpen, setTelegramNotifyOnOpen] = useState(true)
-  const [telegramNotifyOnClose, setTelegramNotifyOnClose] = useState(true)
-  const [telegramNotifyOnError, setTelegramNotifyOnError] = useState(true)
-  const [telegramSaving, setTelegramSaving] = useState(false)
   const [visibleTraderAddresses, setVisibleTraderAddresses] = useState<Set<string>>(new Set())
   const [visibleExchangeAddresses, setVisibleExchangeAddresses] = useState<Set<string>>(new Set())
   const [copiedId, setCopiedId] = useState<string | null>(null)
@@ -223,33 +215,24 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         return
       }
 
-       try {
-         const [
-           modelConfigs,
-           exchangeConfigs,
-           supportedModels,
-           tgConfig,
-         ] = await Promise.all([
-           api.getModelConfigs(),
-           api.getExchangeConfigs(),
-           api.getSupportedModels(),
-           api.getTelegramConfig(),
-         ])
-         setAllModels(modelConfigs)
-         setAllExchanges(exchangeConfigs)
-         setSupportedModels(supportedModels)
-
-         setTelegramEnabled(tgConfig.enabled)
-         setTelegramHasBotToken(tgConfig.has_bot_token)
-         setTelegramChatId(tgConfig.chat_id || '')
-         setTelegramNotifyOnOpen(tgConfig.notify_on_open)
-         setTelegramNotifyOnClose(tgConfig.notify_on_close)
-         setTelegramNotifyOnError(tgConfig.notify_on_error)
-       } catch (error) {
-         console.error('Failed to load configs:', error)
-       }
-     }
-     loadConfigs()
+      try {
+        const [
+          modelConfigs,
+          exchangeConfigs,
+          supportedModels,
+        ] = await Promise.all([
+          api.getModelConfigs(),
+          api.getExchangeConfigs(),
+          api.getSupportedModels(),
+        ])
+        setAllModels(modelConfigs)
+        setAllExchanges(exchangeConfigs)
+        setSupportedModels(supportedModels)
+      } catch (error) {
+        console.error('Failed to load configs:', error)
+      }
+    }
+    loadConfigs()
   }, [user, token])
 
   // 只显示已配置的模型和交易所
@@ -585,10 +568,8 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
       buildRequest: (models) => ({
         models: Object.fromEntries(
           models.map((model) => [
-            model.id,
+            model.provider,
             {
-              name: model.name,
-              provider: model.provider,
               enabled: model.enabled,
               api_key: model.apiKey || '',
               custom_api_url: model.customApiUrl || '',
@@ -613,8 +594,6 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
 
   const handleSaveModelConfig = async (
     modelId: string,
-    provider: string,
-    name: string,
     apiKey: string,
     customApiUrl?: string,
     customModelName?: string
@@ -625,13 +604,8 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
       let updatedModels
 
       // 找到要配置的模型（优先从已配置列表，其次从支持列表）
-      // 注意：新增模型时 `modelId` 可能是 `provider_<uuid>`，不在 supportedModels 的 id 列表中；此时用 provider 匹配模板。
-      const modelTemplate =
-        supportedModels?.find((m) => m.id === modelId) ||
-        supportedModels?.find((m) => m.provider === provider) ||
-        supportedModels?.find((m) => m.id === provider)
-
-      const modelToUpdate = existingModel || modelTemplate
+      const modelToUpdate =
+        existingModel || supportedModels?.find((m) => m.id === modelId)
       if (!modelToUpdate) {
         toast.error(t('modelNotExist', language))
         return
@@ -643,23 +617,18 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
           allModels?.map((m) =>
             m.id === modelId
               ? {
-                  ...m,
-                  name: name || m.name,
-                  provider: provider || m.provider,
-                  apiKey,
-                  customApiUrl: customApiUrl || '',
-                  customModelName: customModelName || '',
-                  enabled: true,
-                }
+                ...m,
+                apiKey,
+                customApiUrl: customApiUrl || '',
+                customModelName: customModelName || '',
+                enabled: true,
+              }
               : m
           ) || []
       } else {
         // 添加新配置
         const newModel = {
           ...modelToUpdate,
-          id: modelId,
-          provider,
-          name: name || modelToUpdate.name,
           apiKey,
           customApiUrl: customApiUrl || '',
           customModelName: customModelName || '',
@@ -668,13 +637,11 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         updatedModels = [...(allModels || []), newModel]
       }
 
-      const requestByID = {
+      const request = {
         models: Object.fromEntries(
           updatedModels.map((model) => [
-            model.id,
+            model.provider, // 使用 provider 而不是 id
             {
-              name: model.name,
-              provider: model.provider,
               enabled: model.enabled,
               api_key: model.apiKey || '',
               custom_api_url: model.customApiUrl || '',
@@ -684,7 +651,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         ),
       }
 
-      await toast.promise(api.updateModelConfigs(requestByID), {
+      await toast.promise(api.updateModelConfigs(request), {
         loading: '正在更新模型配置…',
         success: '模型配置已更新',
         error: '更新模型配置失败',
@@ -835,423 +802,325 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
     setShowExchangeModal(true)
   }
 
-  const handleSaveTelegram = async () => {
-    if (!user || !token) return
-    if (telegramEnabled) {
-      if (!telegramChatId.trim()) {
-        toast.error(language === 'zh' ? '启用 Telegram 通知需要填写 Chat ID' : 'Chat ID is required when Telegram notifications are enabled')
-        return
-      }
-      if (!telegramHasBotToken && !telegramBotToken.trim()) {
-        toast.error(language === 'zh' ? '首次启用需要填写 Bot Token' : 'Bot token is required when enabling Telegram notifications for the first time')
-        return
-      }
-    }
-    setTelegramSaving(true)
-    try {
-      const req = {
-        enabled: telegramEnabled,
-        bot_token: telegramBotToken.trim(),
-        chat_id: telegramChatId.trim(),
-        notify_on_open: telegramNotifyOnOpen,
-        notify_on_close: telegramNotifyOnClose,
-        notify_on_error: telegramNotifyOnError,
-      }
-
-      await toast.promise(api.updateTelegramConfig(req), {
-        loading: language === 'zh' ? '正在更新 Telegram 配置…' : 'Updating Telegram config...',
-        success: language === 'zh' ? 'Telegram 配置已更新' : 'Telegram config updated',
-        error: language === 'zh' ? '更新 Telegram 配置失败' : 'Failed to update Telegram config',
-      })
-
-      const refreshed = await api.getTelegramConfig()
-      setTelegramEnabled(refreshed.enabled)
-      setTelegramHasBotToken(refreshed.has_bot_token)
-      setTelegramChatId(refreshed.chat_id || '')
-      setTelegramNotifyOnOpen(refreshed.notify_on_open)
-      setTelegramNotifyOnClose(refreshed.notify_on_close)
-      setTelegramNotifyOnError(refreshed.notify_on_error)
-      setTelegramBotToken('')
-    } catch (e) {
-      console.error('Failed to update telegram config:', e)
-      toast.error(language === 'zh' ? '更新 Telegram 配置失败' : 'Failed to update Telegram config')
-    } finally {
-      setTelegramSaving(false)
-    }
-  }
-
   return (
-    <div className="space-y-4 md:space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-0">
-        <div className="flex items-center gap-3 md:gap-4">
-          <div
-            className="w-10 h-10 md:w-12 md:h-12 rounded-xl flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(135deg, #F0B90B 0%, #FCD535 100%)',
-              boxShadow: '0 4px 14px rgba(240, 185, 11, 0.4)',
-            }}
-          >
-            <Bot className="w-5 h-5 md:w-6 md:h-6" style={{ color: '#000' }} />
-          </div>
-          <div>
-            <h1
-              className="text-xl md:text-2xl font-bold flex items-center gap-2"
-              style={{ color: '#EAECEF' }}
-            >
-              {t('aiTraders', language)}
-              <span
-                className="text-xs font-normal px-2 py-1 rounded"
-                style={{
-                  background: 'rgba(240, 185, 11, 0.15)',
-                  color: '#F0B90B',
-                }}
-              >
-                {traders?.length || 0} {t('active', language)}
-              </span>
-            </h1>
-            <p className="text-xs" style={{ color: '#848E9C' }}>
-              {t('manageAITraders', language)}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex gap-2 md:gap-3 w-full md:w-auto overflow-hidden flex-wrap md:flex-nowrap">
-          <button
-            onClick={handleAddModel}
-            className="px-3 md:px-4 py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 flex items-center gap-1 md:gap-2 whitespace-nowrap"
-            style={{
-              background: '#2B3139',
-              color: '#EAECEF',
-              border: '1px solid #474D57',
-            }}
-          >
-            <Plus className="w-3 h-3 md:w-4 md:h-4" />
-            {t('aiModels', language)}
-          </button>
-
-          <button
-            onClick={handleAddExchange}
-            className="px-3 md:px-4 py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 flex items-center gap-1 md:gap-2 whitespace-nowrap"
-            style={{
-              background: '#2B3139',
-              color: '#EAECEF',
-              border: '1px solid #474D57',
-            }}
-          >
-            <Plus className="w-3 h-3 md:w-4 md:h-4" />
-            {t('exchanges', language)}
-          </button>
-
-          <button
-            onClick={() => setShowCreateModal(true)}
-            disabled={
-              configuredModels.length === 0 || configuredExchanges.length === 0
-            }
-            className="px-3 md:px-4 py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 md:gap-2 whitespace-nowrap"
-            style={{
-              background:
-                configuredModels.length > 0 && configuredExchanges.length > 0
-                  ? '#F0B90B'
-                  : '#2B3139',
-              color:
-                configuredModels.length > 0 && configuredExchanges.length > 0
-                  ? '#000'
-                  : '#848E9C',
-            }}
-          >
-            <Plus className="w-4 h-4" />
-            {t('createTrader', language)}
-          </button>
-        </div>
-      </div>
-
-       {/* Configuration Status */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
-        {/* AI Models */}
-        <div className="binance-card p-3 md:p-4">
-          <h3
-            className="text-base md:text-lg font-semibold mb-3 flex items-center gap-2"
-            style={{ color: '#EAECEF' }}
-          >
-            <Brain
-              className="w-4 h-4 md:w-5 md:h-5"
-              style={{ color: '#60a5fa' }}
-            />
-            {t('aiModels', language)}
-          </h3>
-          <div className="space-y-2 md:space-y-3">
-            {configuredModels.map((model) => {
-              const inUse = isModelInUse(model.id)
-              const usageInfo = getModelUsageInfo(model.id)
-              return (
-                <div
-                  key={model.id}
-                  className={`flex items-center justify-between p-2 md:p-3 rounded transition-all ${
-                    inUse
-                      ? 'cursor-not-allowed'
-                      : 'cursor-pointer hover:bg-gray-700'
-                  }`}
-                  style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
-                  onClick={() => handleModelClick(model.id)}
-                >
-                  <div className="flex items-center gap-2 md:gap-3">
-                    <div className="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center flex-shrink-0">
-                      {getModelIcon(model.provider || model.id, {
-                        width: 28,
-                        height: 28,
-                      }) || (
-                        <div
-                          className="w-7 h-7 md:w-8 md:h-8 rounded-full flex items-center justify-center text-xs md:text-sm font-bold"
-                          style={{
-                            background:
-                              model.id === 'deepseek' ? '#60a5fa' : '#c084fc',
-                            color: '#fff',
-                          }}
-                        >
-                          {getShortName(model.name)[0]}
-                        </div>
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <div
-                        className="font-semibold text-sm md:text-base truncate"
-                        style={{ color: '#EAECEF' }}
-                      >
-                        {getShortName(model.name)}
-                      </div>
-                      <div className="text-xs" style={{ color: '#F0B90B' }}>
-                        {model.customModelName || AI_PROVIDER_CONFIG[model.provider]?.defaultModel || ''}
-                      </div>
-                      <div className="text-xs flex items-center gap-1.5" style={{ color: '#848E9C' }}>
-                        {usageInfo.totalCount > 0 ? (
-                          <span
-                            className="px-1.5 py-0.5 rounded text-[10px] font-medium"
-                            style={
-                              usageInfo.runningCount > 0
-                                ? { background: 'rgba(14, 203, 129, 0.15)', color: '#0ECB81' }
-                                : { background: 'rgba(240, 185, 11, 0.15)', color: '#F0B90B' }
-                            }
-                          >
-                            {usageInfo.runningCount > 0
-                              ? `${usageInfo.runningCount}/${usageInfo.totalCount} ${language === 'zh' ? '运行中' : 'Running'}`
-                              : `${usageInfo.totalCount} ${language === 'zh' ? '个交易员' : usageInfo.totalCount === 1 ? 'Trader' : 'Traders'}`
-                            }
-                          </span>
-                        ) : (
-                          <span style={{ color: '#848E9C' }}>
-                            {model.enabled
-                              ? (language === 'zh' ? '空闲' : 'Idle')
-                              : (language === 'zh' ? '已配置' : 'Configured')}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div
-                    className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full flex-shrink-0 ${model.enabled ? 'bg-green-400' : 'bg-gray-500'}`}
-                  />
-                </div>
-              )
-            })}
-            {configuredModels.length === 0 && (
-              <div
-                className="text-center py-6 md:py-8"
-                style={{ color: '#848E9C' }}
-              >
-                <Brain className="w-10 h-10 md:w-12 md:h-12 mx-auto mb-2 opacity-50" />
-                <div className="text-xs md:text-sm">
-                  {t('noModelsConfigured', language)}
-                </div>
+    <DeepVoidBackground className="py-8" disableAnimation>
+      <div className="w-full px-4 md:px-8 space-y-8 animate-fade-in">
+        {/* Header - Terminal Style */}
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-white/10 pb-6">
+          <div className="flex items-center gap-4">
+            <div className="relative group">
+              <div className="absolute -inset-1 bg-nofx-gold/20 rounded-xl blur opacity-0 group-hover:opacity-100 transition duration-500"></div>
+              <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl flex items-center justify-center bg-black border border-nofx-gold/30 text-nofx-gold relative z-10 shadow-[0_0_15px_rgba(240,185,11,0.1)]">
+                <Bot className="w-6 h-6 md:w-7 md:h-7" />
               </div>
-            )}
+            </div>
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold font-mono tracking-tight text-white flex items-center gap-3 uppercase">
+                {t('aiTraders', language)}
+                <span className="text-xs font-mono font-normal px-2 py-0.5 rounded bg-nofx-gold/10 text-nofx-gold border border-nofx-gold/20 tracking-wider">
+                  {traders?.length || 0} ACTIVE_NODES
+                </span>
+              </h1>
+              <p className="text-xs font-mono text-zinc-500 uppercase tracking-widest mt-1 ml-1 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                SYSTEM_READY
+              </p>
+            </div>
           </div>
-        </div>
 
-        {/* Telegram */}
-        <div className="binance-card p-3 md:p-4">
-          <h3
-            className="text-base md:text-lg font-semibold mb-3 flex items-center gap-2"
-            style={{ color: '#EAECEF' }}
-          >
-            <Send className="w-4 h-4 md:w-5 md:h-5" style={{ color: '#0088cc' }} />
-            {t('telegramNotifications', language)}
-          </h3>
-
-          <div className="space-y-3">
-            <label className="flex items-center justify-between gap-3 text-sm" style={{ color: '#EAECEF' }}>
-              <span>{t('telegramEnabled', language)}</span>
-              <input
-                type="checkbox"
-                checked={telegramEnabled}
-                onChange={(e) => setTelegramEnabled(e.target.checked)}
-              />
-            </label>
-
-            <div>
-              <label className="block text-sm font-semibold mb-2" style={{ color: '#EAECEF' }}>
-                {t('telegramBotToken', language)}
-              </label>
-              <input
-                type="password"
-                value={telegramBotToken}
-                onChange={(e) => setTelegramBotToken(e.target.value)}
-                placeholder={t('telegramBotTokenPlaceholder', language)}
-                className="w-full px-3 py-2 rounded"
-                style={{
-                  background: '#0B0E11',
-                  border: '1px solid #2B3139',
-                  color: '#EAECEF',
-                }}
-              />
-              {telegramHasBotToken && (
-                <div className="mt-1 text-xs" style={{ color: '#848E9C' }}>
-                  {t('telegramBotTokenAlreadySet', language)}
-                </div>
-              )}
-              {!telegramHasBotToken && (
-                <div className="mt-1 text-xs" style={{ color: '#848E9C' }}>
-                  {language === 'zh'
-                    ? '提示：保存后不会回显 Bot Token（已加密存储），刷新页面看到为空是正常的'
-                    : 'Note: Bot token is encrypted and will not be shown again after saving'}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold mb-2" style={{ color: '#EAECEF' }}>
-                {t('telegramChatId', language)}
-              </label>
-              <input
-                type="text"
-                value={telegramChatId}
-                onChange={(e) => setTelegramChatId(e.target.value)}
-                placeholder={t('telegramChatIdPlaceholder', language)}
-                className="w-full px-3 py-2 rounded"
-                style={{
-                  background: '#0B0E11',
-                  border: '1px solid #2B3139',
-                  color: '#EAECEF',
-                }}
-              />
-            </div>
-
-            <div className="space-y-2 text-sm" style={{ color: '#EAECEF' }}>
-              <label className="flex items-center justify-between gap-3">
-                <span>{t('telegramNotifyOnOpen', language)}</span>
-                <input
-                  type="checkbox"
-                  checked={telegramNotifyOnOpen}
-                  onChange={(e) => setTelegramNotifyOnOpen(e.target.checked)}
-                />
-              </label>
-              <label className="flex items-center justify-between gap-3">
-                <span>{t('telegramNotifyOnClose', language)}</span>
-                <input
-                  type="checkbox"
-                  checked={telegramNotifyOnClose}
-                  onChange={(e) => setTelegramNotifyOnClose(e.target.checked)}
-                />
-              </label>
-              <label className="flex items-center justify-between gap-3">
-                <span>{t('telegramNotifyOnError', language)}</span>
-                <input
-                  type="checkbox"
-                  checked={telegramNotifyOnError}
-                  onChange={(e) => setTelegramNotifyOnError(e.target.checked)}
-                />
-              </label>
-            </div>
+          <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 hide-scrollbar">
+            <button
+              onClick={handleAddModel}
+              className="px-4 py-2 rounded text-xs font-mono uppercase tracking-wider transition-all border border-zinc-700 bg-black/20 text-zinc-400 hover:text-white hover:border-zinc-500 whitespace-nowrap backdrop-blur-sm"
+            >
+              <div className="flex items-center gap-2">
+                <Plus className="w-3 h-3" />
+                <span>MODELS_CONFIG</span>
+              </div>
+            </button>
 
             <button
-              onClick={handleSaveTelegram}
-              disabled={telegramSaving || !user || !token}
-              className="w-full px-3 py-2 rounded text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ background: '#2B3139', color: '#EAECEF', border: '1px solid #474D57' }}
+              onClick={handleAddExchange}
+              className="px-4 py-2 rounded text-xs font-mono uppercase tracking-wider transition-all border border-zinc-700 bg-black/20 text-zinc-400 hover:text-white hover:border-zinc-500 whitespace-nowrap backdrop-blur-sm"
             >
-              {t('saveConfig', language)}
+              <div className="flex items-center gap-2">
+                <Plus className="w-3 h-3" />
+                <span>EXCHANGE_KEYS</span>
+              </div>
+            </button>
+
+            <button
+              onClick={() => setShowCreateModal(true)}
+              disabled={configuredModels.length === 0 || configuredExchanges.length === 0}
+              className="group relative px-6 py-2 rounded text-xs font-bold font-mono uppercase tracking-wider transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap overflow-hidden bg-nofx-gold text-black hover:bg-yellow-400 shadow-[0_0_20px_rgba(240,185,11,0.2)] hover:shadow-[0_0_30px_rgba(240,185,11,0.4)]"
+            >
+              <span className="relative z-10 flex items-center gap-2">
+                <Plus className="w-4 h-4" />
+                {t('createTrader', language)}
+              </span>
+              <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
             </button>
           </div>
         </div>
 
-        {/* Exchanges */}
-        <div className="binance-card p-3 md:p-4">
-          <h3
-            className="text-base md:text-lg font-semibold mb-3 flex items-center gap-2"
-            style={{ color: '#EAECEF' }}
-          >
-            <Landmark
-              className="w-4 h-4 md:w-5 md:h-5"
-              style={{ color: '#F0B90B' }}
-            />
-            {t('exchanges', language)}
-          </h3>
-          <div className="space-y-2 md:space-y-3">
-            {configuredExchanges.map((exchange) => {
-              const inUse = isExchangeInUse(exchange.id)
-              const usageInfo = getExchangeUsageInfo(exchange.id)
-              return (
+        {/* Configuration Status Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* AI Models Card */}
+          <div className="nofx-glass rounded-lg border border-white/5 overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/5 bg-black/20 flex items-center gap-2 backdrop-blur-sm">
+              <Brain className="w-4 h-4 text-nofx-gold" />
+              <h3 className="text-sm font-mono tracking-widest text-zinc-300 uppercase">
+                {t('aiModels', language)}
+              </h3>
+            </div>
+
+            <div className="p-4 space-y-3">
+              {configuredModels.map((model) => {
+                const inUse = isModelInUse(model.id)
+                const usageInfo = getModelUsageInfo(model.id)
+                return (
+                  <div
+                    key={model.id}
+                    className={`group relative flex items-center justify-between p-3 rounded-md transition-all border border-transparent ${inUse ? 'opacity-80' : 'hover:bg-white/5 hover:border-white/10 cursor-pointer'
+                      } bg-black/20`}
+                    onClick={() => handleModelClick(model.id)}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="relative">
+                        <div className="absolute inset-0 bg-indigo-500/20 rounded-full blur-sm group-hover:bg-indigo-500/30 transition-all"></div>
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center bg-black border border-white/10 relative z-10">
+                          {getModelIcon(model.provider || model.id, { width: 20, height: 20 }) || (
+                            <span className="text-xs font-bold text-indigo-400">{getShortName(model.name)[0]}</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="min-w-0">
+                        <div className="font-mono text-sm text-zinc-200 group-hover:text-nofx-gold transition-colors">
+                          {getShortName(model.name)}
+                        </div>
+                        <div className="text-[10px] text-zinc-500 font-mono flex items-center gap-2">
+                          {model.customModelName || AI_PROVIDER_CONFIG[model.provider]?.defaultModel || ''}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      {usageInfo.totalCount > 0 ? (
+                        <span className={`text-[10px] font-mono px-2 py-1 rounded border ${usageInfo.runningCount > 0
+                          ? 'bg-green-500/10 border-green-500/30 text-green-400'
+                          : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
+                          }`}>
+                          {usageInfo.runningCount}/{usageInfo.totalCount} ACTIVE
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono text-zinc-600 uppercase tracking-wider">
+                          {language === 'zh' ? '就绪' : 'STANDBY'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+
+              {configuredModels.length === 0 && (
+                <div className="text-center py-10 border border-dashed border-zinc-800 rounded-lg bg-black/20">
+                  <Brain className="w-8 h-8 mx-auto mb-3 text-zinc-700" />
+                  <div className="text-xs font-mono text-zinc-500 uppercase tracking-widest">{t('noModelsConfigured', language)}</div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Exchanges Card */}
+          <div className="nofx-glass rounded-lg border border-white/5 overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/5 bg-black/20 flex items-center gap-2 backdrop-blur-sm">
+              <Landmark className="w-4 h-4 text-nofx-gold" />
+              <h3 className="text-sm font-mono tracking-widest text-zinc-300 uppercase">
+                {t('exchanges', language)}
+              </h3>
+            </div>
+
+            <div className="p-4 space-y-3">
+              {configuredExchanges.map((exchange) => {
+                const inUse = isExchangeInUse(exchange.id)
+                const usageInfo = getExchangeUsageInfo(exchange.id)
+                return (
+                  <div
+                    key={exchange.id}
+                    className={`group relative flex items-center justify-between p-3 rounded-md transition-all border border-transparent ${inUse ? 'opacity-80' : 'hover:bg-white/5 hover:border-white/10 cursor-pointer'
+                      } bg-black/20`}
+                    onClick={() => handleExchangeClick(exchange.id)}
+                  >
+                    <div className="flex items-center gap-4 min-w-0">
+                      <div className="relative">
+                        <div className="absolute inset-0 bg-yellow-500/20 rounded-full blur-sm group-hover:bg-yellow-500/30 transition-all"></div>
+                        <div className="w-10 h-10 rounded-full flex items-center justify-center bg-black border border-white/10 relative z-10">
+                          {getExchangeIcon(exchange.exchange_type || exchange.id, { width: 20, height: 20 })}
+                        </div>
+                      </div>
+
+                      <div className="min-w-0">
+                        <div className="font-mono text-sm text-zinc-200 group-hover:text-nofx-gold transition-colors truncate">
+                          {exchange.exchange_type?.toUpperCase() || getShortName(exchange.name)}
+                          <span className="text-[10px] text-zinc-500 ml-2 border border-zinc-800 px-1 rounded">
+                            {exchange.account_name || 'DEFAULT'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-zinc-500 font-mono flex items-center gap-2">
+                          {exchange.type?.toUpperCase() || 'CEX'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-end gap-1">
+                      {/* Wallet Address Display Logic */}
+                      {(() => {
+                        const walletAddr = exchange.hyperliquidWalletAddr || exchange.asterUser || exchange.lighterWalletAddr
+                        if (exchange.type !== 'dex' || !walletAddr) return null
+                        const isVisible = visibleExchangeAddresses.has(exchange.id)
+                        const isCopied = copiedId === `exchange-${exchange.id}`
+
+                        return (
+                          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <span className="text-[10px] font-mono text-zinc-400 bg-black/40 px-1.5 py-0.5 rounded border border-zinc-800">
+                              {isVisible ? walletAddr : truncateAddress(walletAddr)}
+                            </span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); toggleExchangeAddressVisibility(exchange.id) }}
+                              className="text-zinc-600 hover:text-zinc-300"
+                            >
+                              {isVisible ? <EyeOff size={10} /> : <Eye size={10} />}
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleCopyAddress(`exchange-${exchange.id}`, walletAddr) }}
+                              className="text-zinc-600 hover:text-nofx-gold"
+                            >
+                              {isCopied ? <Check size={10} className="text-green-500" /> : <Copy size={10} />}
+                            </button>
+                          </div>
+                        )
+                      })()}
+
+                      {usageInfo.totalCount > 0 ? (
+                        <span className={`text-[10px] font-mono px-2 py-1 rounded border ${usageInfo.runningCount > 0
+                          ? 'bg-green-500/10 border-green-500/30 text-green-400'
+                          : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
+                          }`}>
+                          {usageInfo.runningCount}/{usageInfo.totalCount} ACTIVE
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-mono text-zinc-600 uppercase tracking-wider">
+                          {language === 'zh' ? '就绪' : 'STANDBY'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+              {configuredExchanges.length === 0 && (
+                <div className="text-center py-10 border border-dashed border-zinc-800 rounded-lg bg-black/20">
+                  <Landmark className="w-8 h-8 mx-auto mb-3 text-zinc-700" />
+                  <div className="text-xs font-mono text-zinc-500 uppercase tracking-widest">{t('noExchangesConfigured', language)}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Traders List */}
+        <div className="binance-card p-4 md:p-6">
+          <div className="flex items-center justify-between mb-4 md:mb-5">
+            <h2
+              className="text-lg md:text-xl font-bold flex items-center gap-2"
+              style={{ color: '#EAECEF' }}
+            >
+              <Users
+                className="w-5 h-5 md:w-6 md:h-6"
+                style={{ color: '#F0B90B' }}
+              />
+              {t('currentTraders', language)}
+            </h2>
+          </div>
+
+          {isTradersLoading ? (
+            /* Loading Skeleton */
+            <div className="space-y-3 md:space-y-4">
+              {[1, 2, 3].map((i) => (
                 <div
-                  key={exchange.id}
-                  className={`flex items-center justify-between p-2 md:p-3 rounded transition-all ${
-                    inUse
-                      ? 'cursor-not-allowed'
-                      : 'cursor-pointer hover:bg-gray-700'
-                  }`}
+                  key={i}
+                  className="flex flex-col md:flex-row md:items-center justify-between p-3 md:p-4 rounded gap-3 md:gap-4 animate-pulse"
                   style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
-                  onClick={() => handleExchangeClick(exchange.id)}
                 >
-                  {/* Left: Icon + Name + Type */}
-                  <div className="flex items-center gap-2 md:gap-3 min-w-0">
-                    <div className="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center flex-shrink-0">
-                      {getExchangeIcon(exchange.exchange_type || exchange.id, { width: 28, height: 28 })}
+                  <div className="flex items-center gap-3 md:gap-4">
+                    <div className="w-10 h-10 md:w-12 md:h-12 rounded-full skeleton"></div>
+                    <div className="min-w-0 space-y-2">
+                      <div className="skeleton h-5 w-32"></div>
+                      <div className="skeleton h-3 w-24"></div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 md:gap-4">
+                    <div className="skeleton h-6 w-16"></div>
+                    <div className="skeleton h-6 w-16"></div>
+                    <div className="skeleton h-8 w-20"></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : traders && traders.length > 0 ? (
+            <div className="space-y-3 md:space-y-4">
+              {traders.map((trader) => (
+                <div
+                  key={trader.trader_id}
+                  className="flex flex-col md:flex-row md:items-center justify-between p-3 md:p-4 rounded transition-all hover:translate-y-[-1px] gap-3 md:gap-4"
+                  style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+                >
+                  <div className="flex items-center gap-3 md:gap-4">
+                    <div className="flex-shrink-0">
+                      <PunkAvatar
+                        seed={getTraderAvatar(trader.trader_id, trader.trader_name)}
+                        size={48}
+                        className="rounded-lg hidden md:block"
+                      />
+                      <PunkAvatar
+                        seed={getTraderAvatar(trader.trader_id, trader.trader_name)}
+                        size={40}
+                        className="rounded-lg md:hidden"
+                      />
                     </div>
                     <div className="min-w-0">
                       <div
-                        className="font-semibold text-sm md:text-base truncate"
+                        className="font-bold text-base md:text-lg truncate"
                         style={{ color: '#EAECEF' }}
                       >
-                        {exchange.exchange_type?.toUpperCase() || getShortName(exchange.name)}
-                        <span className="text-xs font-normal ml-1.5" style={{ color: '#F0B90B' }}>
-                          - {exchange.account_name || 'Default'}
-                        </span>
+                        {trader.trader_name}
                       </div>
-                      <div className="text-xs flex items-center gap-1.5" style={{ color: '#848E9C' }}>
-                        <span>{exchange.type?.toUpperCase() || 'CEX'}</span>
-                        <span>•</span>
-                        {usageInfo.totalCount > 0 ? (
-                          <span
-                            className="px-1.5 py-0.5 rounded text-[10px] font-medium"
-                            style={
-                              usageInfo.runningCount > 0
-                                ? { background: 'rgba(14, 203, 129, 0.15)', color: '#0ECB81' }
-                                : { background: 'rgba(240, 185, 11, 0.15)', color: '#F0B90B' }
-                            }
-                          >
-                            {usageInfo.runningCount > 0
-                              ? `${usageInfo.runningCount}/${usageInfo.totalCount} ${language === 'zh' ? '运行中' : 'Running'}`
-                              : `${usageInfo.totalCount} ${language === 'zh' ? '个交易员' : usageInfo.totalCount === 1 ? 'Trader' : 'Traders'}`
-                            }
-                          </span>
-                        ) : (
-                          <span style={{ color: '#848E9C' }}>
-                            {exchange.enabled
-                              ? (language === 'zh' ? '空闲' : 'Idle')
-                              : (language === 'zh' ? '已配置' : 'Configured')}
-                          </span>
-                        )}
+                      <div
+                        className="text-xs md:text-sm truncate"
+                        style={{
+                          color: trader.ai_model.includes('deepseek')
+                            ? '#60a5fa'
+                            : '#c084fc',
+                        }}
+                      >
+                        {getModelDisplayName(
+                          trader.ai_model.split('_').pop() || trader.ai_model
+                        )}{' '}
+                        Model • {getExchangeDisplayName(trader.exchange_id, allExchanges)}
                       </div>
                     </div>
                   </div>
-                  {/* Right: Wallet Address + Status Dot */}
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {/* Wallet address for DEX exchanges */}
-                    {(() => {
-                      const walletAddr = exchange.hyperliquidWalletAddr || exchange.asterUser || exchange.lighterWalletAddr
-                      if (exchange.type !== 'dex' || !walletAddr) return null
 
-                      const isVisible = visibleExchangeAddresses.has(exchange.id)
-                      const isCopied = copiedId === `exchange-${exchange.id}`
+                  <div className="flex items-center gap-3 md:gap-4 flex-wrap md:flex-nowrap">
+                    {/* Wallet Address for Perp-DEX - placed before status for alignment */}
+                    {(() => {
+                      const exchange = allExchanges.find(e => e.id === trader.exchange_id)
+                      const walletAddr = getWalletAddress(exchange)
+                      const isPerpDex = isPerpDexExchange(exchange?.exchange_type)
+                      if (!isPerpDex || !walletAddr) return null
+
+                      const isVisible = visibleTraderAddresses.has(trader.trader_id)
+                      const isCopied = copiedId === trader.trader_id
 
                       return (
                         <div
@@ -1260,7 +1129,6 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                             background: 'rgba(240, 185, 11, 0.08)',
                             border: '1px solid rgba(240, 185, 11, 0.2)',
                           }}
-                          onClick={(e) => e.stopPropagation()}
                         >
                           <span className="text-xs font-mono" style={{ color: '#F0B90B' }}>
                             {isVisible ? walletAddr : truncateAddress(walletAddr)}
@@ -1269,7 +1137,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation()
-                              toggleExchangeAddressVisibility(exchange.id)
+                              toggleTraderAddressVisibility(trader.trader_id)
                             }}
                             className="p-0.5 rounded hover:bg-gray-700 transition-colors"
                             title={isVisible ? (language === 'zh' ? '隐藏' : 'Hide') : (language === 'zh' ? '显示' : 'Show')}
@@ -1284,7 +1152,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation()
-                              handleCopyAddress(`exchange-${exchange.id}`, walletAddr)
+                              handleCopyAddress(trader.trader_id, walletAddr)
                             }}
                             className="p-0.5 rounded hover:bg-gray-700 transition-colors"
                             title={language === 'zh' ? '复制' : 'Copy'}
@@ -1298,381 +1166,221 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
                         </div>
                       )
                     })()}
-                    <div
-                      className={`w-2.5 h-2.5 md:w-3 md:h-3 rounded-full flex-shrink-0 ${exchange.enabled ? 'bg-green-400' : 'bg-gray-500'}`}
-                    />
-                  </div>
-                </div>
-              )
-            })}
-            {configuredExchanges.length === 0 && (
-              <div
-                className="text-center py-6 md:py-8"
-                style={{ color: '#848E9C' }}
-              >
-                <Landmark className="w-10 h-10 md:w-12 md:h-12 mx-auto mb-2 opacity-50" />
-                <div className="text-xs md:text-sm">
-                  {t('noExchangesConfigured', language)}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Traders List */}
-      <div className="binance-card p-4 md:p-6">
-        <div className="flex items-center justify-between mb-4 md:mb-5">
-          <h2
-            className="text-lg md:text-xl font-bold flex items-center gap-2"
-            style={{ color: '#EAECEF' }}
-          >
-            <Users
-              className="w-5 h-5 md:w-6 md:h-6"
-              style={{ color: '#F0B90B' }}
-            />
-            {t('currentTraders', language)}
-          </h2>
-        </div>
-
-        {isTradersLoading ? (
-          /* Loading Skeleton */
-          <div className="space-y-3 md:space-y-4">
-            {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="flex flex-col md:flex-row md:items-center justify-between p-3 md:p-4 rounded gap-3 md:gap-4 animate-pulse"
-                style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
-              >
-                <div className="flex items-center gap-3 md:gap-4">
-                  <div className="w-10 h-10 md:w-12 md:h-12 rounded-full skeleton"></div>
-                  <div className="min-w-0 space-y-2">
-                    <div className="skeleton h-5 w-32"></div>
-                    <div className="skeleton h-3 w-24"></div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 md:gap-4">
-                  <div className="skeleton h-6 w-16"></div>
-                  <div className="skeleton h-6 w-16"></div>
-                  <div className="skeleton h-8 w-20"></div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : traders && traders.length > 0 ? (
-          <div className="space-y-3 md:space-y-4">
-            {traders.map((trader) => (
-              <div
-                key={trader.trader_id}
-                className="flex flex-col md:flex-row md:items-center justify-between p-3 md:p-4 rounded transition-all hover:translate-y-[-1px] gap-3 md:gap-4"
-                style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
-              >
-                <div className="flex items-center gap-3 md:gap-4">
-                  <div className="flex-shrink-0">
-                    <PunkAvatar
-                      seed={getTraderAvatar(trader.trader_id, trader.trader_name)}
-                      size={48}
-                      className="rounded-lg hidden md:block"
-                    />
-                    <PunkAvatar
-                      seed={getTraderAvatar(trader.trader_id, trader.trader_name)}
-                      size={40}
-                      className="rounded-lg md:hidden"
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <div
-                      className="font-bold text-base md:text-lg truncate"
-                      style={{ color: '#EAECEF' }}
-                    >
-                      {trader.trader_name}
-                    </div>
-                    <div
-                      className="text-xs md:text-sm truncate"
-                      style={{
-                        color: trader.ai_model.includes('deepseek')
-                          ? '#60a5fa'
-                          : '#c084fc',
-                      }}
-                    >
-                      {getModelDisplayName(
-                        trader.ai_model.split('_').pop() || trader.ai_model
-                      )}{' '}
-                      Model • {getExchangeDisplayName(trader.exchange_id, allExchanges)}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 md:gap-4 flex-wrap md:flex-nowrap">
-                  {/* Wallet Address for Perp-DEX - placed before status for alignment */}
-                  {(() => {
-                    const exchange = allExchanges.find(e => e.id === trader.exchange_id)
-                    const walletAddr = getWalletAddress(exchange)
-                    const isPerpDex = isPerpDexExchange(exchange?.exchange_type)
-                    if (!isPerpDex || !walletAddr) return null
-
-                    const isVisible = visibleTraderAddresses.has(trader.trader_id)
-                    const isCopied = copiedId === trader.trader_id
-
-                    return (
-                      <div
-                        className="flex items-center gap-1 px-2 py-1 rounded"
-                        style={{
-                          background: 'rgba(240, 185, 11, 0.08)',
-                          border: '1px solid rgba(240, 185, 11, 0.2)',
-                        }}
-                      >
-                        <span className="text-xs font-mono" style={{ color: '#F0B90B' }}>
-                          {isVisible ? walletAddr : truncateAddress(walletAddr)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            toggleTraderAddressVisibility(trader.trader_id)
-                          }}
-                          className="p-0.5 rounded hover:bg-gray-700 transition-colors"
-                          title={isVisible ? (language === 'zh' ? '隐藏' : 'Hide') : (language === 'zh' ? '显示' : 'Show')}
-                        >
-                          {isVisible ? (
-                            <EyeOff className="w-3 h-3" style={{ color: '#848E9C' }} />
-                          ) : (
-                            <Eye className="w-3 h-3" style={{ color: '#848E9C' }} />
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleCopyAddress(trader.trader_id, walletAddr)
-                          }}
-                          className="p-0.5 rounded hover:bg-gray-700 transition-colors"
-                          title={language === 'zh' ? '复制' : 'Copy'}
-                        >
-                          {isCopied ? (
-                            <Check className="w-3 h-3" style={{ color: '#0ECB81' }} />
-                          ) : (
-                            <Copy className="w-3 h-3" style={{ color: '#848E9C' }} />
-                          )}
-                        </button>
-                      </div>
-                    )
-                  })()}
-                  {/* Status */}
-                  <div className="text-center">
-                    {/* <div className="text-xs mb-1" style={{ color: '#848E9C' }}>
+                    {/* Status */}
+                    <div className="text-center">
+                      {/* <div className="text-xs mb-1" style={{ color: '#848E9C' }}>
                       {t('status', language)}
                     </div> */}
-                    <div
-                      className={`px-2 md:px-3 py-1 rounded text-xs font-bold ${
-                        trader.is_running
+                      <div
+                        className={`px-2 md:px-3 py-1 rounded text-xs font-bold ${trader.is_running
                           ? 'bg-green-100 text-green-800'
                           : 'bg-red-100 text-red-800'
-                      }`}
-                      style={
-                        trader.is_running
-                          ? {
+                          }`}
+                        style={
+                          trader.is_running
+                            ? {
                               background: 'rgba(14, 203, 129, 0.1)',
                               color: '#0ECB81',
                             }
-                          : {
+                            : {
                               background: 'rgba(246, 70, 93, 0.1)',
                               color: '#F6465D',
                             }
-                      }
-                    >
-                      {trader.is_running
-                        ? t('running', language)
-                        : t('stopped', language)}
-                    </div>
-                  </div>
-
-                  {/* Actions: 禁止换行，超出横向滚动 */}
-                  <div className="flex gap-1.5 md:gap-2 flex-nowrap overflow-x-auto items-center">
-                    <button
-                      onClick={() => {
-                        if (onTraderSelect) {
-                          onTraderSelect(trader.trader_id)
-                        } else {
-                          // 使用 slug 格式: name-id前4位
-                          const slug = `${trader.trader_name}-${trader.trader_id.slice(0, 4)}`
-                          navigate(`/dashboard?trader=${encodeURIComponent(slug)}`)
                         }
-                      }}
-                      className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 flex items-center gap-1 whitespace-nowrap"
-                      style={{
-                        background: 'rgba(99, 102, 241, 0.1)',
-                        color: '#6366F1',
-                      }}
-                    >
-                      <BarChart3 className="w-3 h-3 md:w-4 md:h-4" />
-                      {t('view', language)}
-                    </button>
+                      >
+                        {trader.is_running
+                          ? t('running', language)
+                          : t('stopped', language)}
+                      </div>
+                    </div>
 
-                    <button
-                      onClick={() => handleEditTrader(trader.trader_id)}
-                      disabled={trader.is_running}
-                      className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap flex items-center gap-1"
-                      style={{
-                        background: trader.is_running
-                          ? 'rgba(132, 142, 156, 0.1)'
-                          : 'rgba(255, 193, 7, 0.1)',
-                        color: trader.is_running ? '#848E9C' : '#FFC107',
-                      }}
-                    >
-                      <Pencil className="w-3 h-3 md:w-4 md:h-4" />
-                      {t('edit', language)}
-                    </button>
+                    {/* Actions: 禁止换行，超出横向滚动 */}
+                    <div className="flex gap-1.5 md:gap-2 flex-nowrap overflow-x-auto items-center">
+                      <button
+                        onClick={() => {
+                          if (onTraderSelect) {
+                            onTraderSelect(trader.trader_id)
+                          } else {
+                            // 使用 slug 格式: name-id前4位
+                            const slug = `${trader.trader_name}-${trader.trader_id.slice(0, 4)}`
+                            navigate(`/dashboard?trader=${encodeURIComponent(slug)}`)
+                          }
+                        }}
+                        className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 flex items-center gap-1 whitespace-nowrap"
+                        style={{
+                          background: 'rgba(99, 102, 241, 0.1)',
+                          color: '#6366F1',
+                        }}
+                      >
+                        <BarChart3 className="w-3 h-3 md:w-4 md:h-4" />
+                        {t('view', language)}
+                      </button>
 
-                    <button
-                      onClick={() =>
-                        handleToggleTrader(
-                          trader.trader_id,
-                          trader.is_running || false
-                        )
-                      }
-                      className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 whitespace-nowrap"
-                      style={
-                        trader.is_running
-                          ? {
+                      <button
+                        onClick={() => handleEditTrader(trader.trader_id)}
+                        disabled={trader.is_running}
+                        className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap flex items-center gap-1"
+                        style={{
+                          background: trader.is_running
+                            ? 'rgba(132, 142, 156, 0.1)'
+                            : 'rgba(255, 193, 7, 0.1)',
+                          color: trader.is_running ? '#848E9C' : '#FFC107',
+                        }}
+                      >
+                        <Pencil className="w-3 h-3 md:w-4 md:h-4" />
+                        {t('edit', language)}
+                      </button>
+
+                      <button
+                        onClick={() =>
+                          handleToggleTrader(
+                            trader.trader_id,
+                            trader.is_running || false
+                          )
+                        }
+                        className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 whitespace-nowrap"
+                        style={
+                          trader.is_running
+                            ? {
                               background: 'rgba(246, 70, 93, 0.1)',
                               color: '#F6465D',
                             }
-                          : {
+                            : {
                               background: 'rgba(14, 203, 129, 0.1)',
                               color: '#0ECB81',
                             }
-                      }
-                    >
-                      {trader.is_running
-                        ? t('stop', language)
-                        : t('start', language)}
-                    </button>
+                        }
+                      >
+                        {trader.is_running
+                          ? t('stop', language)
+                          : t('start', language)}
+                      </button>
 
-                    <button
-                      onClick={() => handleToggleCompetition(trader.trader_id, trader.show_in_competition ?? true)}
-                      className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 whitespace-nowrap flex items-center gap-1"
-                      style={
-                        trader.show_in_competition !== false
-                          ? {
+                      <button
+                        onClick={() => handleToggleCompetition(trader.trader_id, trader.show_in_competition ?? true)}
+                        className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105 whitespace-nowrap flex items-center gap-1"
+                        style={
+                          trader.show_in_competition !== false
+                            ? {
                               background: 'rgba(14, 203, 129, 0.1)',
                               color: '#0ECB81',
                             }
-                          : {
+                            : {
                               background: 'rgba(132, 142, 156, 0.1)',
                               color: '#848E9C',
                             }
-                      }
-                      title={trader.show_in_competition !== false ? '在竞技场显示' : '在竞技场隐藏'}
-                    >
-                      {trader.show_in_competition !== false ? (
-                        <Eye className="w-3 h-3 md:w-4 md:h-4" />
-                      ) : (
-                        <EyeOff className="w-3 h-3 md:w-4 md:h-4" />
-                      )}
-                    </button>
+                        }
+                        title={trader.show_in_competition !== false ? '在竞技场显示' : '在竞技场隐藏'}
+                      >
+                        {trader.show_in_competition !== false ? (
+                          <Eye className="w-3 h-3 md:w-4 md:h-4" />
+                        ) : (
+                          <EyeOff className="w-3 h-3 md:w-4 md:h-4" />
+                        )}
+                      </button>
 
-                    <button
-                      onClick={() => handleDeleteTrader(trader.trader_id)}
-                      className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105"
-                      style={{
-                        background: 'rgba(246, 70, 93, 0.1)',
-                        color: '#F6465D',
-                      }}
-                    >
-                      <Trash2 className="w-3 h-3 md:w-4 md:h-4" />
-                    </button>
+                      <button
+                        onClick={() => handleDeleteTrader(trader.trader_id)}
+                        className="px-2 md:px-3 py-1.5 md:py-2 rounded text-xs md:text-sm font-semibold transition-all hover:scale-105"
+                        style={{
+                          background: 'rgba(246, 70, 93, 0.1)',
+                          color: '#F6465D',
+                        }}
+                      >
+                        <Trash2 className="w-3 h-3 md:w-4 md:h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div
-            className="text-center py-12 md:py-16"
-            style={{ color: '#848E9C' }}
-          >
-            <Bot className="w-16 h-16 md:w-24 md:h-24 mx-auto mb-3 md:mb-4 opacity-50" />
-            <div className="text-base md:text-lg font-semibold mb-2">
-              {t('noTraders', language)}
+              ))}
             </div>
-            <div className="text-xs md:text-sm mb-3 md:mb-4">
-              {t('createFirstTrader', language)}
-            </div>
-            {(configuredModels.length === 0 ||
-              configuredExchanges.length === 0) && (
-              <div className="text-xs md:text-sm text-yellow-500">
-                {configuredModels.length === 0 &&
-                configuredExchanges.length === 0
-                  ? t('configureModelsAndExchangesFirst', language)
-                  : configuredModels.length === 0
-                    ? t('configureModelsFirst', language)
-                    : t('configureExchangesFirst', language)}
+          ) : (
+            <div
+              className="text-center py-12 md:py-16"
+              style={{ color: '#848E9C' }}
+            >
+              <Bot className="w-16 h-16 md:w-24 md:h-24 mx-auto mb-3 md:mb-4 opacity-50" />
+              <div className="text-base md:text-lg font-semibold mb-2">
+                {t('noTraders', language)}
               </div>
-            )}
-          </div>
+              <div className="text-xs md:text-sm mb-3 md:mb-4">
+                {t('createFirstTrader', language)}
+              </div>
+              {(configuredModels.length === 0 ||
+                configuredExchanges.length === 0) && (
+                  <div className="text-xs md:text-sm text-yellow-500">
+                    {configuredModels.length === 0 &&
+                      configuredExchanges.length === 0
+                      ? t('configureModelsAndExchangesFirst', language)
+                      : configuredModels.length === 0
+                        ? t('configureModelsFirst', language)
+                        : t('configureExchangesFirst', language)}
+                  </div>
+                )}
+            </div>
+          )}
+        </div>
+
+        {/* Create Trader Modal */}
+        {showCreateModal && (
+          <TraderConfigModal
+            isOpen={showCreateModal}
+            isEditMode={false}
+            availableModels={enabledModels}
+            availableExchanges={enabledExchanges}
+            onSave={handleCreateTrader}
+            onClose={() => setShowCreateModal(false)}
+          />
+        )}
+
+        {/* Edit Trader Modal */}
+        {showEditModal && editingTrader && (
+          <TraderConfigModal
+            isOpen={showEditModal}
+            isEditMode={true}
+            traderData={editingTrader}
+            availableModels={enabledModels}
+            availableExchanges={enabledExchanges}
+            onSave={handleSaveEditTrader}
+            onClose={() => {
+              setShowEditModal(false)
+              setEditingTrader(null)
+            }}
+          />
+        )}
+
+        {/* Model Configuration Modal */}
+        {showModelModal && (
+          <ModelConfigModal
+            allModels={supportedModels}
+            configuredModels={allModels}
+            editingModelId={editingModel}
+            onSave={handleSaveModelConfig}
+            onDelete={handleDeleteModelConfig}
+            onClose={() => {
+              setShowModelModal(false)
+              setEditingModel(null)
+            }}
+            language={language}
+          />
+        )}
+
+        {/* Exchange Configuration Modal */}
+        {showExchangeModal && (
+          <ExchangeConfigModal
+            allExchanges={allExchanges}
+            editingExchangeId={editingExchange}
+            onSave={handleSaveExchangeConfig}
+            onDelete={handleDeleteExchangeConfig}
+            onClose={() => {
+              setShowExchangeModal(false)
+              setEditingExchange(null)
+            }}
+            language={language}
+          />
         )}
       </div>
-
-      {/* Create Trader Modal */}
-      {showCreateModal && (
-        <TraderConfigModal
-          isOpen={showCreateModal}
-          isEditMode={false}
-          availableModels={enabledModels}
-          availableExchanges={enabledExchanges}
-          onSave={handleCreateTrader}
-          onClose={() => setShowCreateModal(false)}
-        />
-      )}
-
-      {/* Edit Trader Modal */}
-      {showEditModal && editingTrader && (
-        <TraderConfigModal
-          isOpen={showEditModal}
-          isEditMode={true}
-          traderData={editingTrader}
-          availableModels={enabledModels}
-          availableExchanges={enabledExchanges}
-          onSave={handleSaveEditTrader}
-          onClose={() => {
-            setShowEditModal(false)
-            setEditingTrader(null)
-          }}
-        />
-      )}
-
-      {/* Model Configuration Modal */}
-      {showModelModal && (
-        <ModelConfigModal
-          allModels={supportedModels}
-          configuredModels={allModels}
-          editingModelId={editingModel}
-          onSave={handleSaveModelConfig}
-          onDelete={handleDeleteModelConfig}
-          onClose={() => {
-            setShowModelModal(false)
-            setEditingModel(null)
-          }}
-          language={language}
-        />
-      )}
-
-      {/* Exchange Configuration Modal */}
-      {showExchangeModal && (
-        <ExchangeConfigModal
-          allExchanges={allExchanges}
-          editingExchangeId={editingExchange}
-          onSave={handleSaveExchangeConfig}
-          onDelete={handleDeleteExchangeConfig}
-          onClose={() => {
-            setShowExchangeModal(false)
-            setEditingExchange(null)
-          }}
-          language={language}
-        />
-      )}
-    </div>
+    </DeepVoidBackground>
   )
 }
 
@@ -1691,8 +1399,6 @@ function ModelConfigModal({
   editingModelId: string | null
   onSave: (
     modelId: string,
-    provider: string,
-    name: string,
     apiKey: string,
     baseUrl?: string,
     modelName?: string
@@ -1702,15 +1408,9 @@ function ModelConfigModal({
   language: Language
 }) {
   const [selectedModelId, setSelectedModelId] = useState(editingModelId || '')
-  const [displayName, setDisplayName] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [modelName, setModelName] = useState('')
-  const [remoteModels, setRemoteModels] = useState<
-    Array<{ id: string; name?: string }>
-  >([])
-  const [fetchingRemoteModels, setFetchingRemoteModels] = useState(false)
-  const [testingModelConfig, setTestingModelConfig] = useState(false)
 
   // 获取当前编辑的模型信息 - 编辑时从已配置的模型中查找，新建时从所有支持的模型中查找
   const selectedModel = editingModelId
@@ -1720,87 +1420,18 @@ function ModelConfigModal({
   // 如果是编辑现有模型，初始化API Key、Base URL和Model Name
   useEffect(() => {
     if (editingModelId && selectedModel) {
-      setDisplayName(selectedModel.name || '')
       setApiKey(selectedModel.apiKey || '')
       setBaseUrl(selectedModel.customApiUrl || '')
       setModelName(selectedModel.customModelName || '')
-      setRemoteModels([])
     }
   }, [editingModelId, selectedModel])
-
-  useEffect(() => {
-    if (!editingModelId && selectedModel) {
-      setDisplayName(selectedModel.name || '')
-      setRemoteModels([])
-    }
-  }, [editingModelId, selectedModel])
-
-  const handleFetchRemoteModels = async () => {
-    if (!selectedModel || !apiKey.trim()) return
-    setFetchingRemoteModels(true)
-    try {
-      const models = await api.fetchRemoteModels({
-        provider: selectedModel.provider,
-        apiKey: apiKey.trim(),
-        customApiUrl: baseUrl.trim() || undefined,
-        customModelName: modelName.trim() || undefined,
-      })
-      const limited = models.slice(0, 200)
-      setRemoteModels(limited)
-      toast.success(
-        `${t('fetchModelListSuccess', language)} (${limited.length})`
-      )
-    } catch (err: any) {
-      toast.error(
-        `${t('fetchModelListFailed', language)}: ${err?.message || err}`
-      )
-    } finally {
-      setFetchingRemoteModels(false)
-    }
-  }
-
-  const handleTestModelConfig = async () => {
-    if (!selectedModel || !apiKey.trim()) return
-    setTestingModelConfig(true)
-    try {
-      const res = await api.testModelConfig({
-        provider: selectedModel.provider,
-        apiKey: apiKey.trim(),
-        customApiUrl: baseUrl.trim() || undefined,
-        customModelName: modelName.trim() || undefined,
-      })
-      toast.success(
-        `${t('testModelConfigSuccess', language)} (${res.latency_ms}ms)`
-      )
-    } catch (err: any) {
-      toast.error(
-        `${t('testModelConfigFailed', language)}: ${err?.message || err}`
-      )
-    } finally {
-      setTestingModelConfig(false)
-    }
-  }
-
-  const generateModelId = (provider: string) => {
-    const rand =
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? (crypto as any).randomUUID()
-        : `${Date.now()}_${Math.random().toString(16).slice(2)}`
-    return `${provider}_${rand}`
-  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedModel || !apiKey.trim() || !displayName.trim()) return
-
-    const provider = selectedModel.provider
-    const name = displayName.trim()
-    const id = editingModelId ? selectedModelId : generateModelId(provider)
+    if (!selectedModelId || !apiKey.trim()) return
 
     onSave(
-      id,
-      provider,
-      name,
+      selectedModelId,
       apiKey.trim(),
       baseUrl.trim() || undefined,
       modelName.trim() || undefined
@@ -1880,47 +1511,25 @@ function ModelConfigModal({
                 className="p-4 rounded"
                 style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
               >
-                <div className="mb-4">
-                  <label
-                    className="block text-sm font-semibold mb-2"
-                    style={{ color: '#EAECEF' }}
-                  >
-                    {t('modelDisplayName', language)}
-                  </label>
-                  <input
-                    type="text"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    className="w-full px-3 py-2 rounded"
-                    style={{
-                      background: '#1E2329',
-                      border: '1px solid #2B3139',
-                      color: '#EAECEF',
-                    }}
-                    placeholder={t('modelDisplayNamePlaceholder', language)}
-                    required
-                  />
-                </div>
-
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-8 h-8 flex items-center justify-center">
                     {getModelIcon(selectedModel.provider || selectedModel.id, {
                       width: 32,
                       height: 32,
                     }) || (
-                      <div
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
-                        style={{
-                          background:
-                            selectedModel.id === 'deepseek'
-                              ? '#60a5fa'
-                              : '#c084fc',
-                          color: '#fff',
-                        }}
-                      >
-                        {selectedModel.name[0]}
-                      </div>
-                    )}
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+                          style={{
+                            background:
+                              selectedModel.id === 'deepseek'
+                                ? '#60a5fa'
+                                : '#c084fc',
+                            color: '#fff',
+                          }}
+                        >
+                          {selectedModel.name[0]}
+                        </div>
+                      )}
                   </div>
                   <div className="flex-1">
                     <div className="font-semibold" style={{ color: '#EAECEF' }}>
@@ -2027,57 +1636,6 @@ function ModelConfigModal({
                   <div className="text-xs mt-1" style={{ color: '#848E9C' }}>
                     {t('leaveBlankForDefaultModel', language)}
                   </div>
-                  {remoteModels.length > 0 && (
-                    <select
-                      className="w-full px-3 py-2 rounded mt-2"
-                      style={{
-                        background: '#0B0E11',
-                        border: '1px solid #2B3139',
-                        color: '#EAECEF',
-                      }}
-                      onChange={(e) => {
-                        const v = e.target.value
-                        if (v) setModelName(v)
-                        e.target.value = ''
-                      }}
-                      defaultValue=""
-                    >
-                      <option value="">
-                        {t('selectFetchedModel', language)} ({remoteModels.length})
-                      </option>
-                      {remoteModels.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name ? `${m.id} (${m.name})` : m.id}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handleFetchRemoteModels}
-                    disabled={!apiKey.trim() || fetchingRemoteModels}
-                    className="flex-1 px-4 py-2 rounded text-sm font-semibold disabled:opacity-50"
-                    style={{ background: '#2B3139', color: '#EAECEF' }}
-                  >
-                    {fetchingRemoteModels
-                      ? t('fetchingModelList', language)
-                      : t('fetchModelList', language)}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleTestModelConfig}
-                    disabled={!apiKey.trim() || testingModelConfig}
-                    className="flex-1 px-4 py-2 rounded text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2"
-                    style={{ background: '#F0B90B', color: '#000' }}
-                  >
-                    <Send className="w-4 h-4" />
-                    {testingModelConfig
-                      ? t('testingModelConfig', language)
-                      : t('testModelConfig', language)}
-                  </button>
                 </div>
 
                 <div

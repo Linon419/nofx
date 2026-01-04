@@ -1,3 +1,5 @@
 package coinank
 
-var TestApikey = "" //need fill the apikey before test
+import "os"
+
+var TestApikey = os.Getenv("COINANK_API_KEY") // integration tests require COINANK_API_KEY

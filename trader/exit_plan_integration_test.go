@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"nofx/decision"
+	decision "nofx/kernel"
 	"nofx/store"
 )
 

@@ -18,11 +18,11 @@ export const translations = {
     view: 'View',
 
     // Navigation
-    realtimeNav: 'Live',
+    realtimeNav: 'Leaderboard',
     configNav: 'Config',
     dashboardNav: 'Dashboard',
     strategyNav: 'Strategy',
-    debateNav: 'Debate Arena',
+    debateNav: 'Arena',
     faqNav: 'FAQ',
 
     // Footer
@@ -347,19 +347,17 @@ export const translations = {
     hyperliquidWalletAddressDesc:
       'Wallet address corresponding to the private key',
     // Hyperliquid Agent Wallet (New Security Model)
-    hyperliquidAgentWalletTitle: 'How to get Agent Wallet?',
+    hyperliquidAgentWalletTitle: 'Hyperliquid Agent Wallet Configuration',
     hyperliquidAgentWalletDesc:
-      'Go to Hyperliquid → More → API → Create Agent Wallet. The Agent Wallet can only trade, cannot withdraw funds.',
-    hyperliquidAgentWalletLink: 'https://app.hyperliquid.xyz/API',
-    hyperliquidAgentWalletLinkText: 'Go to Hyperliquid to create Agent Wallet →',
-    hyperliquidAgentPrivateKey: 'Agent Wallet Private Key',
-    enterHyperliquidAgentPrivateKey: '0x... (64 hex characters)',
+      'Use Agent Wallet for secure trading: Agent wallet signs transactions (balance ~0), Main wallet holds funds (never expose private key)',
+    hyperliquidAgentPrivateKey: 'Agent Private Key',
+    enterHyperliquidAgentPrivateKey: 'Enter Agent wallet private key',
     hyperliquidAgentPrivateKeyDesc:
-      'Private key shown when creating Agent Wallet. Only has trading permission, cannot withdraw.',
+      'Agent wallet private key for signing transactions (keep balance near 0 for security)',
     hyperliquidMainWalletAddress: 'Main Wallet Address',
-    enterHyperliquidMainWalletAddress: '0x... (your main wallet)',
+    enterHyperliquidMainWalletAddress: 'Enter Main wallet address',
     hyperliquidMainWalletAddressDesc:
-      'The wallet address you use to log in Hyperliquid (holds your funds)',
+      'Main wallet address that holds your trading funds (never expose its private key)',
     // Aster API Pro Configuration
     asterApiProTitle: 'Aster API Pro Wallet Configuration',
     asterApiProDesc:
@@ -506,7 +504,7 @@ export const translations = {
     noExchangesConfigured: 'No configured exchanges',
     signalSource: 'Signal Source',
     signalSourceConfig: 'Signal Source Configuration',
-    coinPoolDescription:
+    ai500Description:
       'API endpoint for AI500 data provider, leave blank to disable this signal source',
     oiTopDescription:
       'API endpoint for open interest rankings, leave blank to disable this signal source',
@@ -807,7 +805,7 @@ export const translations = {
     candidateCoins: 'Candidate Coins',
     candidateCoinsZeroWarning: 'Candidate Coins Count is 0',
     possibleReasons: 'Possible Reasons:',
-    coinPoolApiNotConfigured:
+    ai500ApiNotConfigured:
       'AI500 data provider API not configured or inaccessible (check signal source settings)',
     apiConnectionTimeout: 'API connection timeout or returned empty data',
     noCustomCoinsAndApiFailed:
@@ -817,6 +815,8 @@ export const translations = {
     orConfigureCorrectApiUrl: 'Or configure correct data provider API address',
     orDisableCoinPoolOptions:
       'Or disable "Use AI500 Data Provider", "Use OI Top", and "Use OTC Top" options',
+    orDisableAI500Options:
+      'Or disable "Use AI500 Data Provider" and "Use OI Top" options',
     signalSourceNotConfigured: 'Signal Source Not Configured',
     signalSourceWarningMessage:
       'You have traders that enabled "Use AI500 Data Provider", "Use OI Top", or "Use OTC Top", but signal source API address is not configured yet. This will cause candidate coins count to be 0, and traders cannot work properly.',
@@ -1260,11 +1260,11 @@ export const translations = {
     view: '查看',
 
     // Navigation
-    realtimeNav: '实时',
+    realtimeNav: '排行榜',
     configNav: '配置',
     dashboardNav: '看板',
     strategyNav: '策略',
-    debateNav: '行情辩论',
+    debateNav: '竞技场',
     faqNav: '常见问题',
 
     // Footer
@@ -1582,17 +1582,16 @@ export const translations = {
     hyperliquidPrivateKeyDesc: 'Hyperliquid 使用私钥进行交易认证',
     hyperliquidWalletAddressDesc: '与私钥对应的钱包地址',
     // Hyperliquid 代理钱包 (新安全模型)
-    hyperliquidAgentWalletTitle: '如何获取代理钱包？',
+    hyperliquidAgentWalletTitle: 'Hyperliquid 代理钱包配置',
     hyperliquidAgentWalletDesc:
-      '打开 Hyperliquid → 右上角 More → API → Create Agent Wallet 创建代理钱包。代理钱包只能交易，无法提现。',
-    hyperliquidAgentWalletLink: 'https://app.hyperliquid.xyz/API',
-    hyperliquidAgentWalletLinkText: '去 Hyperliquid 创建代理钱包 →',
-    hyperliquidAgentPrivateKey: '代理钱包私钥',
-    enterHyperliquidAgentPrivateKey: '0x... (64位十六进制)',
-    hyperliquidAgentPrivateKeyDesc: '创建代理钱包时显示的私钥，只能交易，无法提现',
+      '使用代理钱包安全交易：代理钱包用于签名（餘額~0），主钱包持有资金（永不暴露私钥）',
+    hyperliquidAgentPrivateKey: '代理私钥',
+    enterHyperliquidAgentPrivateKey: '输入代理钱包私钥',
+    hyperliquidAgentPrivateKeyDesc: '代理钱包仅有交易权限，无法提现',
     hyperliquidMainWalletAddress: '主钱包地址',
-    enterHyperliquidMainWalletAddress: '0x... (你的主钱包地址)',
-    hyperliquidMainWalletAddressDesc: '你登录 Hyperliquid 时使用的钱包地址（资金所在钱包）',
+    enterHyperliquidMainWalletAddress: '输入主钱包地址',
+    hyperliquidMainWalletAddressDesc:
+      '持有交易资金的主钱包地址（永不暴露其私钥）',
     // Aster API Pro 配置
     asterApiProTitle: 'Aster API Pro 代理钱包配置',
     asterApiProDesc:
@@ -1726,7 +1725,7 @@ export const translations = {
     noExchangesConfigured: '暂无已配置的交易所',
     signalSource: '信号源',
     signalSourceConfig: '信号源配置',
-    coinPoolDescription:
+    ai500Description:
       '用于获取 AI500 数据源的 API 地址，留空则不使用此数据源',
     oiTopDescription: '用于获取持仓量排行数据的API地址，留空则不使用此信号源',
     information: '说明',
@@ -1986,7 +1985,7 @@ export const translations = {
     candidateCoins: '候选币种',
     candidateCoinsZeroWarning: '候选币种数量为 0',
     possibleReasons: '可能原因：',
-    coinPoolApiNotConfigured:
+    ai500ApiNotConfigured:
       'AI500 数据源 API 未配置或无法访问（请检查信号源设置）',
     apiConnectionTimeout: 'API连接超时或返回数据为空',
     noCustomCoinsAndApiFailed: '未配置自定义币种且API获取失败',
@@ -1994,6 +1993,7 @@ export const translations = {
     setCustomCoinsInConfig: '在交易员配置中设置自定义币种列表',
     orConfigureCorrectApiUrl: '或者配置正确的数据源 API 地址',
     orDisableCoinPoolOptions: '或者禁用"使用 AI500 数据源"、"使用 OI Top"和"使用 OTC Top"选项',
+    orDisableAI500Options: '或者禁用"使用 AI500 数据源"和"使用 OI Top"选项',
     signalSourceNotConfigured: '信号源未配置',
     signalSourceWarningMessage:
       '您有交易员启用了"使用 AI500 数据源"、"使用 OI Top"或"使用 OTC Top"，但尚未配置信号源 API 地址。这将导致候选币种数量为 0，交易员无法正常工作。',

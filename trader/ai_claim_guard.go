@@ -3,7 +3,7 @@ package trader
 import (
 	"fmt"
 	"nofx/analysis"
-	"nofx/decision"
+	decision "nofx/kernel"
 	"nofx/market"
 	"sort"
 	"strings"

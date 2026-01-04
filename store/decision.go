@@ -3,24 +3,42 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // DecisionStore decision log storage
 type DecisionStore struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-type VisionImageMeta struct {
-	Name      string `json:"name"`
-	Symbol    string `json:"symbol"`
-	Timeframe string `json:"timeframe"`
-	Path      string `json:"path"`
-	SizeBytes int    `json:"size_bytes"`
+// DecisionRecordDB internal GORM model for decision_records table
+type DecisionRecordDB struct {
+	ID                  int64     `gorm:"primaryKey;autoIncrement"`
+	TraderID            string    `gorm:"column:trader_id;not null;index:idx_decision_records_trader_time"`
+	CycleNumber         int       `gorm:"column:cycle_number;not null"`
+	Timestamp           time.Time `gorm:"not null;index:idx_decision_records_trader_time,sort:desc;index:idx_decision_records_timestamp,sort:desc"`
+	SystemPrompt        string    `gorm:"column:system_prompt;default:''"`
+	InputPrompt         string    `gorm:"column:input_prompt;default:''"`
+	CoTTrace            string    `gorm:"column:cot_trace;default:''"`
+	DecisionJSON        string    `gorm:"column:decision_json;default:''"`
+	RawResponse         string    `gorm:"column:raw_response;default:''"`
+	CandidateCoins      string    `gorm:"column:candidate_coins;default:''"`
+	ExecutionLog        string    `gorm:"column:execution_log;default:''"`
+	Decisions           string    `gorm:"column:decisions;default:'[]'"`
+	VisionImages        string    `gorm:"column:vision_images;default:'[]'"`
+	Success             bool      `gorm:"default:false"`
+	ErrorMessage        string    `gorm:"column:error_message;default:''"`
+	AIRequestDurationMs int64     `gorm:"column:ai_request_duration_ms;default:0"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
-// DecisionRecord decision record
+func (DecisionRecordDB) TableName() string { return "decision_records" }
+
+// DecisionRecord decision record (external API struct)
 type DecisionRecord struct {
 	ID                  int64              `json:"id"`
 	TraderID            string             `json:"trader_id"`
@@ -33,13 +51,13 @@ type DecisionRecord struct {
 	RawResponse         string             `json:"raw_response"` // Raw AI response for debugging
 	CandidateCoins      []string           `json:"candidate_coins"`
 	ExecutionLog        []string           `json:"execution_log"`
-	VisionImages        []VisionImageMeta  `json:"vision_images,omitempty"`
 	Success             bool               `json:"success"`
 	ErrorMessage        string             `json:"error_message"`
 	AIRequestDurationMs int64              `json:"ai_request_duration_ms"`
 	AccountState        AccountSnapshot    `json:"account_state"`
 	Positions           []PositionSnapshot `json:"positions"`
 	Decisions           []DecisionAction   `json:"decisions"`
+	VisionImages        []VisionImageMeta  `json:"vision_images,omitempty"`
 }
 
 // AccountSnapshot account state snapshot
@@ -90,53 +108,48 @@ type Statistics struct {
 	TotalClosePositions int `json:"total_close_positions"`
 }
 
-// initTables initializes AI decision log tables
-// Note: Account equity curve data has been migrated to trader_equity_snapshots table (managed by EquityStore)
-func (s *DecisionStore) initTables() error {
-	queries := []string{
-		// AI decision log table (records AI input/output, chain of thought, etc.)
-		`CREATE TABLE IF NOT EXISTS decision_records (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			trader_id TEXT NOT NULL,
-			cycle_number INTEGER NOT NULL,
-			timestamp DATETIME NOT NULL,
-			system_prompt TEXT DEFAULT '',
-			input_prompt TEXT DEFAULT '',
-			cot_trace TEXT DEFAULT '',
-			decision_json TEXT DEFAULT '',
-			raw_response TEXT DEFAULT '',
-			candidate_coins TEXT DEFAULT '',
-			execution_log TEXT DEFAULT '',
-			vision_images TEXT DEFAULT '[]',
-			success BOOLEAN DEFAULT 0,
-			error_message TEXT DEFAULT '',
-			ai_request_duration_ms INTEGER DEFAULT 0,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)`,
-		// Indexes
-		`CREATE INDEX IF NOT EXISTS idx_decision_records_trader_time ON decision_records(trader_id, timestamp DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_decision_records_timestamp ON decision_records(timestamp DESC)`,
-	}
-
-	for _, query := range queries {
-		if _, err := s.db.Exec(query); err != nil {
-			return fmt.Errorf("failed to execute SQL: %w", err)
-		}
-	}
-
-	// Migration: add raw_response column if not exists
-	s.db.Exec(`ALTER TABLE decision_records ADD COLUMN raw_response TEXT DEFAULT ''`)
-
-	// Migration: add decisions column if not exists
-	s.db.Exec(`ALTER TABLE decision_records ADD COLUMN decisions TEXT DEFAULT '[]'`)
-
-	// Migration: add vision_images column if not exists
-	s.db.Exec(`ALTER TABLE decision_records ADD COLUMN vision_images TEXT DEFAULT '[]'`)
-
-	return nil
+// NewDecisionStore creates a new DecisionStore
+func NewDecisionStore(db *gorm.DB) *DecisionStore {
+	return &DecisionStore{db: db}
 }
 
-// LogDecision logs decision (only saves AI decision log, equity curve has been migrated to equity table)
+// initTables initializes AI decision log tables
+func (s *DecisionStore) initTables() error {
+	// For PostgreSQL with existing table, skip AutoMigrate
+	if s.db.Dialector.Name() == "postgres" {
+		var tableExists int64
+		s.db.Raw(`SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'decision_records'`).Scan(&tableExists)
+		if tableExists > 0 {
+			return nil
+		}
+	}
+	return s.db.AutoMigrate(&DecisionRecordDB{})
+}
+
+// toRecord converts DB model to API struct
+func (db *DecisionRecordDB) toRecord() *DecisionRecord {
+	record := &DecisionRecord{
+		ID:                  db.ID,
+		TraderID:            db.TraderID,
+		CycleNumber:         db.CycleNumber,
+		Timestamp:           db.Timestamp,
+		SystemPrompt:        db.SystemPrompt,
+		InputPrompt:         db.InputPrompt,
+		CoTTrace:            db.CoTTrace,
+		DecisionJSON:        db.DecisionJSON,
+		RawResponse:         db.RawResponse,
+		Success:             db.Success,
+		ErrorMessage:        db.ErrorMessage,
+		AIRequestDurationMs: db.AIRequestDurationMs,
+	}
+	json.Unmarshal([]byte(db.CandidateCoins), &record.CandidateCoins)
+	json.Unmarshal([]byte(db.ExecutionLog), &record.ExecutionLog)
+	json.Unmarshal([]byte(db.Decisions), &record.Decisions)
+	json.Unmarshal([]byte(db.VisionImages), &record.VisionImages)
+	return record
+}
+
+// LogDecision logs decision
 func (s *DecisionStore) LogDecision(record *DecisionRecord) error {
 	if record.Timestamp.IsZero() {
 		record.Timestamp = time.Now().UTC()
@@ -144,66 +157,65 @@ func (s *DecisionStore) LogDecision(record *DecisionRecord) error {
 		record.Timestamp = record.Timestamp.UTC()
 	}
 
-	// Serialize candidate coins, execution log and decisions to JSON
+	// Serialize arrays to JSON
 	candidateCoinsJSON, _ := json.Marshal(record.CandidateCoins)
 	executionLogJSON, _ := json.Marshal(record.ExecutionLog)
 	decisionsJSON, _ := json.Marshal(record.Decisions)
 	visionImagesJSON, _ := json.Marshal(record.VisionImages)
 
-	// Insert decision record main table (only save AI decision related content)
-	result, err := s.db.Exec(`
-		INSERT INTO decision_records (
-			trader_id, cycle_number, timestamp, system_prompt, input_prompt,
-			cot_trace, decision_json, raw_response, candidate_coins, execution_log,
-			decisions, vision_images, success, error_message, ai_request_duration_ms
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`,
-		record.TraderID, record.CycleNumber, record.Timestamp.Format(time.RFC3339),
-		record.SystemPrompt, record.InputPrompt, record.CoTTrace, record.DecisionJSON,
-		record.RawResponse, string(candidateCoinsJSON), string(executionLogJSON),
-		string(decisionsJSON), string(visionImagesJSON), record.Success, record.ErrorMessage, record.AIRequestDurationMs,
-	)
-	if err != nil {
+	dbRecord := &DecisionRecordDB{
+		TraderID:            record.TraderID,
+		CycleNumber:         record.CycleNumber,
+		Timestamp:           record.Timestamp,
+		SystemPrompt:        record.SystemPrompt,
+		InputPrompt:         record.InputPrompt,
+		CoTTrace:            record.CoTTrace,
+		DecisionJSON:        record.DecisionJSON,
+		RawResponse:         record.RawResponse,
+		CandidateCoins:      string(candidateCoinsJSON),
+		ExecutionLog:        string(executionLogJSON),
+		Decisions:           string(decisionsJSON),
+		VisionImages:        string(visionImagesJSON),
+		Success:             record.Success,
+		ErrorMessage:        record.ErrorMessage,
+		AIRequestDurationMs: record.AIRequestDurationMs,
+	}
+
+	if err := s.db.Create(dbRecord).Error; err != nil {
 		return fmt.Errorf("failed to insert decision record: %w", err)
 	}
-
-	decisionID, err := result.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("failed to get decision ID: %w", err)
-	}
-	record.ID = decisionID
-
+	record.ID = dbRecord.ID
 	return nil
+}
+
+// GetRecordByID returns a single decision record for a trader by record ID.
+// Returns sql.ErrNoRows when not found (for legacy compatibility).
+func (s *DecisionStore) GetRecordByID(traderID string, id int64) (*DecisionRecord, error) {
+	var dbRec DecisionRecordDB
+	err := s.db.Where("id = ? AND trader_id = ?", id, traderID).First(&dbRec).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, sql.ErrNoRows
+		}
+		return nil, err
+	}
+	return dbRec.toRecord(), nil
 }
 
 // GetLatestRecords gets the latest N records for specified trader (sorted by time in ascending order: old to new)
 func (s *DecisionStore) GetLatestRecords(traderID string, n int) ([]*DecisionRecord, error) {
-	rows, err := s.db.Query(`
-		SELECT id, trader_id, cycle_number, timestamp, system_prompt, input_prompt,
-			   cot_trace, decision_json, candidate_coins, execution_log,
-			   COALESCE(decisions, '[]'), COALESCE(vision_images, '[]'), success, error_message, ai_request_duration_ms
-		FROM decision_records
-		WHERE trader_id = ?
-		ORDER BY timestamp DESC
-		LIMIT ?
-	`, traderID, n)
+	var dbRecords []*DecisionRecordDB
+	err := s.db.Where("trader_id = ?", traderID).
+		Order("timestamp DESC").
+		Limit(n).
+		Find(&dbRecords).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to query decision records: %w", err)
 	}
-	defer rows.Close()
 
-	var records []*DecisionRecord
-	for rows.Next() {
-		record, err := s.scanDecisionRecord(rows)
-		if err != nil {
-			continue
-		}
-		records = append(records, record)
-	}
-
-	// Fill associated data
-	for _, record := range records {
-		s.fillRecordDetails(record)
+	records := make([]*DecisionRecord, len(dbRecords))
+	for i, db := range dbRecords {
+		records[i] = db.toRecord()
 	}
 
 	// Reverse array to sort time from old to new
@@ -216,26 +228,15 @@ func (s *DecisionStore) GetLatestRecords(traderID string, n int) ([]*DecisionRec
 
 // GetAllLatestRecords gets the latest N records for all traders
 func (s *DecisionStore) GetAllLatestRecords(n int) ([]*DecisionRecord, error) {
-	rows, err := s.db.Query(`
-		SELECT id, trader_id, cycle_number, timestamp, system_prompt, input_prompt,
-			   cot_trace, decision_json, candidate_coins, execution_log,
-			   COALESCE(decisions, '[]'), COALESCE(vision_images, '[]'), success, error_message, ai_request_duration_ms
-		FROM decision_records
-		ORDER BY timestamp DESC
-		LIMIT ?
-	`, n)
+	var dbRecords []*DecisionRecordDB
+	err := s.db.Order("timestamp DESC").Limit(n).Find(&dbRecords).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to query decision records: %w", err)
 	}
-	defer rows.Close()
 
-	var records []*DecisionRecord
-	for rows.Next() {
-		record, err := s.scanDecisionRecord(rows)
-		if err != nil {
-			continue
-		}
-		records = append(records, record)
+	records := make([]*DecisionRecord, len(dbRecords))
+	for i, db := range dbRecords {
+		records[i] = db.toRecord()
 	}
 
 	// Reverse array
@@ -250,26 +251,17 @@ func (s *DecisionStore) GetAllLatestRecords(n int) ([]*DecisionRecord, error) {
 func (s *DecisionStore) GetRecordsByDate(traderID string, date time.Time) ([]*DecisionRecord, error) {
 	dateStr := date.Format("2006-01-02")
 
-	rows, err := s.db.Query(`
-		SELECT id, trader_id, cycle_number, timestamp, system_prompt, input_prompt,
-			   cot_trace, decision_json, candidate_coins, execution_log,
-			   COALESCE(decisions, '[]'), COALESCE(vision_images, '[]'), success, error_message, ai_request_duration_ms
-		FROM decision_records
-		WHERE trader_id = ? AND DATE(timestamp) = ?
-		ORDER BY timestamp ASC
-	`, traderID, dateStr)
+	var dbRecords []*DecisionRecordDB
+	err := s.db.Where("trader_id = ? AND DATE(timestamp) = ?", traderID, dateStr).
+		Order("timestamp ASC").
+		Find(&dbRecords).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to query decision records: %w", err)
 	}
-	defer rows.Close()
 
-	var records []*DecisionRecord
-	for rows.Next() {
-		record, err := s.scanDecisionRecord(rows)
-		if err != nil {
-			continue
-		}
-		records = append(records, record)
+	records := make([]*DecisionRecord, len(dbRecords))
+	for i, db := range dbRecords {
+		records[i] = db.toRecord()
 	}
 
 	return records, nil
@@ -277,48 +269,31 @@ func (s *DecisionStore) GetRecordsByDate(traderID string, date time.Time) ([]*De
 
 // CleanOldRecords cleans old records from N days ago
 func (s *DecisionStore) CleanOldRecords(traderID string, days int) (int64, error) {
-	cutoffTime := time.Now().AddDate(0, 0, -days).Format(time.RFC3339)
+	cutoffTime := time.Now().AddDate(0, 0, -days)
 
-	result, err := s.db.Exec(`
-		DELETE FROM decision_records
-		WHERE trader_id = ? AND timestamp < ?
-	`, traderID, cutoffTime)
-	if err != nil {
-		return 0, fmt.Errorf("failed to clean old records: %w", err)
+	result := s.db.Where("trader_id = ? AND timestamp < ?", traderID, cutoffTime).
+		Delete(&DecisionRecordDB{})
+	if result.Error != nil {
+		return 0, fmt.Errorf("failed to clean old records: %w", result.Error)
 	}
-
-	return result.RowsAffected()
+	return result.RowsAffected, nil
 }
 
 // GetStatistics gets statistics information for specified trader
 func (s *DecisionStore) GetStatistics(traderID string) (*Statistics, error) {
 	stats := &Statistics{}
 
-	err := s.db.QueryRow(`
-		SELECT COUNT(*) FROM decision_records WHERE trader_id = ?
-	`, traderID).Scan(&stats.TotalCycles)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query total cycles: %w", err)
-	}
+	var totalCount, successCount int64
+	s.db.Model(&DecisionRecordDB{}).Where("trader_id = ?", traderID).Count(&totalCount)
+	s.db.Model(&DecisionRecordDB{}).Where("trader_id = ? AND success = ?", traderID, true).Count(&successCount)
 
-	err = s.db.QueryRow(`
-		SELECT COUNT(*) FROM decision_records WHERE trader_id = ? AND success = 1
-	`, traderID).Scan(&stats.SuccessfulCycles)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query successful cycles: %w", err)
-	}
+	stats.TotalCycles = int(totalCount)
+	stats.SuccessfulCycles = int(successCount)
 	stats.FailedCycles = stats.TotalCycles - stats.SuccessfulCycles
 
-	// Count from trader_positions table
-	s.db.QueryRow(`
-		SELECT COUNT(*) FROM trader_positions
-		WHERE trader_id = ?
-	`, traderID).Scan(&stats.TotalOpenPositions)
-
-	s.db.QueryRow(`
-		SELECT COUNT(*) FROM trader_positions
-		WHERE trader_id = ? AND status = 'CLOSED'
-	`, traderID).Scan(&stats.TotalClosePositions)
+	// Count from trader_positions table using raw query for cross-table
+	s.db.Raw("SELECT COUNT(*) FROM trader_positions WHERE trader_id = ?", traderID).Scan(&stats.TotalOpenPositions)
+	s.db.Raw("SELECT COUNT(*) FROM trader_positions WHERE trader_id = ? AND status = 'CLOSED'", traderID).Scan(&stats.TotalClosePositions)
 
 	return stats, nil
 }
@@ -327,86 +302,33 @@ func (s *DecisionStore) GetStatistics(traderID string) (*Statistics, error) {
 func (s *DecisionStore) GetAllStatistics() (*Statistics, error) {
 	stats := &Statistics{}
 
-	s.db.QueryRow(`SELECT COUNT(*) FROM decision_records`).Scan(&stats.TotalCycles)
-	s.db.QueryRow(`SELECT COUNT(*) FROM decision_records WHERE success = 1`).Scan(&stats.SuccessfulCycles)
+	var totalCount, successCount int64
+	s.db.Model(&DecisionRecordDB{}).Count(&totalCount)
+	s.db.Model(&DecisionRecordDB{}).Where("success = ?", true).Count(&successCount)
+
+	stats.TotalCycles = int(totalCount)
+	stats.SuccessfulCycles = int(successCount)
 	stats.FailedCycles = stats.TotalCycles - stats.SuccessfulCycles
 
 	// Count from trader_positions table
-	s.db.QueryRow(`
-		SELECT COUNT(*) FROM trader_positions
-	`).Scan(&stats.TotalOpenPositions)
-
-	s.db.QueryRow(`
-		SELECT COUNT(*) FROM trader_positions
-		WHERE status = 'CLOSED'
-	`).Scan(&stats.TotalClosePositions)
+	s.db.Raw("SELECT COUNT(*) FROM trader_positions").Scan(&stats.TotalOpenPositions)
+	s.db.Raw("SELECT COUNT(*) FROM trader_positions WHERE status = 'CLOSED'").Scan(&stats.TotalClosePositions)
 
 	return stats, nil
 }
 
 // GetLastCycleNumber gets the last cycle number for specified trader
 func (s *DecisionStore) GetLastCycleNumber(traderID string) (int, error) {
-	var cycleNumber int
-	err := s.db.QueryRow(`
-		SELECT COALESCE(MAX(cycle_number), 0) FROM decision_records WHERE trader_id = ?
-	`, traderID).Scan(&cycleNumber)
+	var cycleNumber *int
+	err := s.db.Model(&DecisionRecordDB{}).
+		Where("trader_id = ?", traderID).
+		Select("MAX(cycle_number)").
+		Scan(&cycleNumber).Error
 	if err != nil {
 		return 0, err
 	}
-	return cycleNumber, nil
-}
-
-func (s *DecisionStore) GetRecordByID(traderID string, id int64) (*DecisionRecord, error) {
-	rows, err := s.db.Query(`
-		SELECT id, trader_id, cycle_number, timestamp, system_prompt, input_prompt,
-			   cot_trace, decision_json, candidate_coins, execution_log,
-			   COALESCE(decisions, '[]'), COALESCE(vision_images, '[]'),
-			   success, error_message, ai_request_duration_ms
-		FROM decision_records
-		WHERE trader_id = ? AND id = ?
-		LIMIT 1
-	`, traderID, id)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query decision record by id: %w", err)
+	if cycleNumber == nil {
+		return 0, nil
 	}
-	defer rows.Close()
-
-	if !rows.Next() {
-		return nil, sql.ErrNoRows
-	}
-	return s.scanDecisionRecord(rows)
-}
-
-// scanDecisionRecord scans decision record from row
-func (s *DecisionStore) scanDecisionRecord(rows *sql.Rows) (*DecisionRecord, error) {
-	var record DecisionRecord
-	var timestampStr string
-	var candidateCoinsJSON, executionLogJSON, decisionsJSON, visionImagesJSON string
-
-	err := rows.Scan(
-		&record.ID, &record.TraderID, &record.CycleNumber, &timestampStr,
-		&record.SystemPrompt, &record.InputPrompt, &record.CoTTrace,
-		&record.DecisionJSON, &candidateCoinsJSON, &executionLogJSON,
-		&decisionsJSON, &visionImagesJSON, &record.Success, &record.ErrorMessage, &record.AIRequestDurationMs,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	record.Timestamp, _ = time.Parse(time.RFC3339, timestampStr)
-	json.Unmarshal([]byte(candidateCoinsJSON), &record.CandidateCoins)
-	json.Unmarshal([]byte(executionLogJSON), &record.ExecutionLog)
-	json.Unmarshal([]byte(decisionsJSON), &record.Decisions)
-	json.Unmarshal([]byte(visionImagesJSON), &record.VisionImages)
-
-	return &record, nil
-}
-
-// fillRecordDetails fills associated data for decision record (old associated tables removed, this function kept for compatibility)
-// Note: Account snapshot, position snapshot, decision action data are no longer stored in decision related tables
-// - For equity data use EquityStore.GetLatest()
-// - For order data use OrderStore
-func (s *DecisionStore) fillRecordDetails(record *DecisionRecord) {
-	// Old associated tables removed, no longer need to fill
-	// AccountState, Positions, Decisions fields will remain at zero values
+	return *cycleNumber, nil
 }

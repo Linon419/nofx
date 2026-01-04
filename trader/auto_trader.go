@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"nofx/decision"
 	"nofx/experience"
+	decision "nofx/kernel"
 	"nofx/logger"
 	"nofx/market"
 	"nofx/mcp"
@@ -1039,7 +1039,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 	}
 
 	// 8. Get quantitative data (if enabled in strategy config)
-	if strategyConfig.Indicators.EnableQuantData && strategyConfig.Indicators.QuantDataAPIURL != "" {
+	if strategyConfig.Indicators.EnableQuantData {
 		// Collect symbols to query (candidate coins + position coins)
 		symbolsToQuery := make(map[string]bool)
 		for _, coin := range candidateCoins {
@@ -2216,8 +2216,8 @@ func (at *AutoTrader) createOrderRecord(orderID, symbol, action, positionSide st
 		ReduceOnly:      reduceOnly,
 		ClosePosition:   reduceOnly,
 		OrderAction:     orderAction,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+		CreatedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
 	}
 }
 
@@ -2258,7 +2258,7 @@ func (at *AutoTrader) recordOrderFill(orderRecordID int64, exchangeOrderID, symb
 		CommissionAsset: "USDT",
 		RealizedPnL:     0,     // Will be calculated for close orders
 		IsMaker:         false, // Market orders are usually taker
-		CreatedAt:       time.Now(),
+		CreatedAt:       time.Now().UTC(),
 	}
 
 	// Calculate realized PnL for close orders

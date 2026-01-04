@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"nofx/decision"
+	decision "nofx/kernel"
 	"nofx/logger"
 	"nofx/market"
 	"nofx/store"
