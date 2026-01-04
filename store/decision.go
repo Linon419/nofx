@@ -12,6 +12,14 @@ type DecisionStore struct {
 	db *sql.DB
 }
 
+type VisionImageMeta struct {
+	Name      string `json:"name"`
+	Symbol    string `json:"symbol"`
+	Timeframe string `json:"timeframe"`
+	Path      string `json:"path"`
+	SizeBytes int    `json:"size_bytes"`
+}
+
 // DecisionRecord decision record
 type DecisionRecord struct {
 	ID                  int64              `json:"id"`
@@ -25,6 +33,7 @@ type DecisionRecord struct {
 	RawResponse         string             `json:"raw_response"` // Raw AI response for debugging
 	CandidateCoins      []string           `json:"candidate_coins"`
 	ExecutionLog        []string           `json:"execution_log"`
+	VisionImages        []VisionImageMeta  `json:"vision_images,omitempty"`
 	Success             bool               `json:"success"`
 	ErrorMessage        string             `json:"error_message"`
 	AIRequestDurationMs int64              `json:"ai_request_duration_ms"`
@@ -98,6 +107,7 @@ func (s *DecisionStore) initTables() error {
 			raw_response TEXT DEFAULT '',
 			candidate_coins TEXT DEFAULT '',
 			execution_log TEXT DEFAULT '',
+			vision_images TEXT DEFAULT '[]',
 			success BOOLEAN DEFAULT 0,
 			error_message TEXT DEFAULT '',
 			ai_request_duration_ms INTEGER DEFAULT 0,
@@ -120,6 +130,9 @@ func (s *DecisionStore) initTables() error {
 	// Migration: add decisions column if not exists
 	s.db.Exec(`ALTER TABLE decision_records ADD COLUMN decisions TEXT DEFAULT '[]'`)
 
+	// Migration: add vision_images column if not exists
+	s.db.Exec(`ALTER TABLE decision_records ADD COLUMN vision_images TEXT DEFAULT '[]'`)
+
 	return nil
 }
 
@@ -135,19 +148,20 @@ func (s *DecisionStore) LogDecision(record *DecisionRecord) error {
 	candidateCoinsJSON, _ := json.Marshal(record.CandidateCoins)
 	executionLogJSON, _ := json.Marshal(record.ExecutionLog)
 	decisionsJSON, _ := json.Marshal(record.Decisions)
+	visionImagesJSON, _ := json.Marshal(record.VisionImages)
 
 	// Insert decision record main table (only save AI decision related content)
 	result, err := s.db.Exec(`
 		INSERT INTO decision_records (
 			trader_id, cycle_number, timestamp, system_prompt, input_prompt,
 			cot_trace, decision_json, raw_response, candidate_coins, execution_log,
-			decisions, success, error_message, ai_request_duration_ms
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			decisions, vision_images, success, error_message, ai_request_duration_ms
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		record.TraderID, record.CycleNumber, record.Timestamp.Format(time.RFC3339),
 		record.SystemPrompt, record.InputPrompt, record.CoTTrace, record.DecisionJSON,
 		record.RawResponse, string(candidateCoinsJSON), string(executionLogJSON),
-		string(decisionsJSON), record.Success, record.ErrorMessage, record.AIRequestDurationMs,
+		string(decisionsJSON), string(visionImagesJSON), record.Success, record.ErrorMessage, record.AIRequestDurationMs,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert decision record: %w", err)
@@ -167,7 +181,7 @@ func (s *DecisionStore) GetLatestRecords(traderID string, n int) ([]*DecisionRec
 	rows, err := s.db.Query(`
 		SELECT id, trader_id, cycle_number, timestamp, system_prompt, input_prompt,
 			   cot_trace, decision_json, candidate_coins, execution_log,
-			   COALESCE(decisions, '[]'), success, error_message, ai_request_duration_ms
+			   COALESCE(decisions, '[]'), COALESCE(vision_images, '[]'), success, error_message, ai_request_duration_ms
 		FROM decision_records
 		WHERE trader_id = ?
 		ORDER BY timestamp DESC
@@ -205,7 +219,7 @@ func (s *DecisionStore) GetAllLatestRecords(n int) ([]*DecisionRecord, error) {
 	rows, err := s.db.Query(`
 		SELECT id, trader_id, cycle_number, timestamp, system_prompt, input_prompt,
 			   cot_trace, decision_json, candidate_coins, execution_log,
-			   COALESCE(decisions, '[]'), success, error_message, ai_request_duration_ms
+			   COALESCE(decisions, '[]'), COALESCE(vision_images, '[]'), success, error_message, ai_request_duration_ms
 		FROM decision_records
 		ORDER BY timestamp DESC
 		LIMIT ?
@@ -239,7 +253,7 @@ func (s *DecisionStore) GetRecordsByDate(traderID string, date time.Time) ([]*De
 	rows, err := s.db.Query(`
 		SELECT id, trader_id, cycle_number, timestamp, system_prompt, input_prompt,
 			   cot_trace, decision_json, candidate_coins, execution_log,
-			   COALESCE(decisions, '[]'), success, error_message, ai_request_duration_ms
+			   COALESCE(decisions, '[]'), COALESCE(vision_images, '[]'), success, error_message, ai_request_duration_ms
 		FROM decision_records
 		WHERE trader_id = ? AND DATE(timestamp) = ?
 		ORDER BY timestamp ASC
@@ -342,17 +356,38 @@ func (s *DecisionStore) GetLastCycleNumber(traderID string) (int, error) {
 	return cycleNumber, nil
 }
 
+func (s *DecisionStore) GetRecordByID(traderID string, id int64) (*DecisionRecord, error) {
+	rows, err := s.db.Query(`
+		SELECT id, trader_id, cycle_number, timestamp, system_prompt, input_prompt,
+			   cot_trace, decision_json, candidate_coins, execution_log,
+			   COALESCE(decisions, '[]'), COALESCE(vision_images, '[]'),
+			   success, error_message, ai_request_duration_ms
+		FROM decision_records
+		WHERE trader_id = ? AND id = ?
+		LIMIT 1
+	`, traderID, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query decision record by id: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return nil, sql.ErrNoRows
+	}
+	return s.scanDecisionRecord(rows)
+}
+
 // scanDecisionRecord scans decision record from row
 func (s *DecisionStore) scanDecisionRecord(rows *sql.Rows) (*DecisionRecord, error) {
 	var record DecisionRecord
 	var timestampStr string
-	var candidateCoinsJSON, executionLogJSON, decisionsJSON string
+	var candidateCoinsJSON, executionLogJSON, decisionsJSON, visionImagesJSON string
 
 	err := rows.Scan(
 		&record.ID, &record.TraderID, &record.CycleNumber, &timestampStr,
 		&record.SystemPrompt, &record.InputPrompt, &record.CoTTrace,
 		&record.DecisionJSON, &candidateCoinsJSON, &executionLogJSON,
-		&decisionsJSON, &record.Success, &record.ErrorMessage, &record.AIRequestDurationMs,
+		&decisionsJSON, &visionImagesJSON, &record.Success, &record.ErrorMessage, &record.AIRequestDurationMs,
 	)
 	if err != nil {
 		return nil, err
@@ -362,6 +397,7 @@ func (s *DecisionStore) scanDecisionRecord(rows *sql.Rows) (*DecisionRecord, err
 	json.Unmarshal([]byte(candidateCoinsJSON), &record.CandidateCoins)
 	json.Unmarshal([]byte(executionLogJSON), &record.ExecutionLog)
 	json.Unmarshal([]byte(decisionsJSON), &record.Decisions)
+	json.Unmarshal([]byte(visionImagesJSON), &record.VisionImages)
 
 	return &record, nil
 }

@@ -103,6 +103,14 @@ type DivergenceEvent struct {
 	BarsAgo   int            `json:"bars_ago"`
 }
 
+// DivergenceChartEvent represents a divergence signal located at a specific bar index.
+// It is intended for chart annotation (multiple historical markers).
+type DivergenceChartEvent struct {
+	Indicator string         `json:"indicator"`
+	Type      DivergenceType `json:"type"`
+	Index     int            `json:"index"`
+}
+
 type DivergenceResult struct {
 	Total             int  `json:"total"`
 	MinRequired       int  `json:"min_required,omitempty"`
@@ -225,6 +233,99 @@ func CalculateDivergence(klines []market.Kline, cfg DivergenceConfig) *Divergenc
 		Indicators:           indicators,
 		Events:               events,
 	}
+}
+
+// CalculateDivergenceChartEventsInRange computes divergence events for multiple bar indices
+// and returns chart events located at the bar where divergence is detected (Index=barIndex).
+// This is heavier than CalculateDivergence (which only evaluates the latest bar), so callers
+// should keep the range small (e.g. plotted window).
+func CalculateDivergenceChartEventsInRange(klines []market.Kline, cfg DivergenceConfig, startIdx, endIdx int) []DivergenceChartEvent {
+	if len(klines) == 0 {
+		return nil
+	}
+
+	cfg = normalizeDivergenceConfig(cfg)
+
+	n := len(klines)
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if endIdx <= 0 || endIdx > n {
+		endIdx = n
+	}
+	if endIdx-startIdx < 2 {
+		return nil
+	}
+
+	highs := make([]float64, n)
+	lows := make([]float64, n)
+	closes := make([]float64, n)
+	volumes := make([]float64, n)
+	for i, k := range klines {
+		highs[i] = k.High
+		lows[i] = k.Low
+		closes[i] = k.Close
+		volumes[i] = k.Volume
+	}
+
+	seriesByIndicator := buildDivergenceIndicatorSeries(highs, lows, closes, volumes, cfg)
+	if len(seriesByIndicator) == 0 {
+		return nil
+	}
+
+	pivotHighSource, pivotLowSource := pivotSources(highs, lows, closes, cfg.Source)
+	// Keep a bit more pivots for window rendering (still tiny arrays).
+	phPositions, phValues, plPositions, plValues := buildPivotArrays(pivotHighSource, pivotLowSource, cfg.PivotPeriod, 60)
+
+	filterPivots := func(barIndex int, positions []int, values []float64) ([]int, []float64) {
+		if len(positions) == 0 || len(values) == 0 {
+			return nil, nil
+		}
+		outPos := make([]int, 0, len(positions))
+		outVal := make([]float64, 0, len(values))
+		for i := 0; i < len(positions) && i < len(values); i++ {
+			if positions[i] <= barIndex {
+				outPos = append(outPos, positions[i])
+				outVal = append(outVal, values[i])
+			}
+		}
+		return outPos, outVal
+	}
+
+	out := make([]DivergenceChartEvent, 0, 32)
+	for barIndex := startIdx; barIndex < endIdx; barIndex++ {
+		phP, phV := filterPivots(barIndex, phPositions, phValues)
+		plP, plV := filterPivots(barIndex, plPositions, plValues)
+		if len(phP) == 0 && len(plP) == 0 {
+			continue
+		}
+
+		for name, series := range seriesByIndicator {
+			divs := calculateDivergencesAt(
+				barIndex,
+				series,
+				closes,
+				pivotHighSource,
+				pivotLowSource,
+				phP, phV,
+				plP, plV,
+				cfg,
+			)
+			if divs.PositiveRegular > 0 {
+				out = append(out, DivergenceChartEvent{Indicator: name, Type: DivergencePositiveRegular, Index: barIndex})
+			}
+			if divs.NegativeRegular > 0 {
+				out = append(out, DivergenceChartEvent{Indicator: name, Type: DivergenceNegativeRegular, Index: barIndex})
+			}
+			if divs.PositiveHidden > 0 {
+				out = append(out, DivergenceChartEvent{Indicator: name, Type: DivergencePositiveHidden, Index: barIndex})
+			}
+			if divs.NegativeHidden > 0 {
+				out = append(out, DivergenceChartEvent{Indicator: name, Type: DivergenceNegativeHidden, Index: barIndex})
+			}
+		}
+	}
+	return out
 }
 
 func normalizeDivergenceConfig(cfg DivergenceConfig) DivergenceConfig {

@@ -69,7 +69,7 @@ func TestGetFullDecisionWithStrategy_RetryWhenMissingJSONDecisionArray(t *testin
 		},
 	}
 
-	fd, err := GetFullDecisionWithStrategy(ctx, client, engine, "")
+	fd, err := GetFullDecisionWithStrategy(ctx, client, engine, "", "", 0)
 	if err != nil {
 		t.Fatalf("GetFullDecisionWithStrategy() error = %v", err)
 	}
@@ -121,7 +121,7 @@ func TestGetFullDecisionWithStrategy_ReturnsSafeWaitAfterRetriesExhausted(t *tes
 		},
 	}
 
-	fd, err := GetFullDecisionWithStrategy(ctx, client, engine, "")
+	fd, err := GetFullDecisionWithStrategy(ctx, client, engine, "", "", 0)
 	if err != nil {
 		t.Fatalf("GetFullDecisionWithStrategy() error = %v", err)
 	}

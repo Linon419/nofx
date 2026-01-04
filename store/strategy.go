@@ -12,6 +12,105 @@ type StrategyStore struct {
 	db *sql.DB
 }
 
+// MigrateVisionConfigDefaults upgrades legacy vision config stored in strategies.config JSON.
+// It is intentionally conservative and only adjusts obviously legacy/default values
+// to keep backward compatibility for users who explicitly customized sizes/flags.
+func (s *StrategyStore) MigrateVisionConfigDefaults() (int, error) {
+	type row struct {
+		id     string
+		userID string
+		cfgStr string
+	}
+
+	rows, err := s.db.Query(`SELECT id, user_id, config FROM strategies`)
+	if err != nil {
+		return 0, err
+	}
+	all := make([]row, 0, 32)
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.userID, &r.cfgStr); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		all = append(all, r)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	updated := 0
+	for _, r := range all {
+		var cfg StrategyConfig
+		if err := json.Unmarshal([]byte(r.cfgStr), &cfg); err != nil {
+			continue
+		}
+
+		changed := false
+		if cfg.Vision.Enabled {
+			// Keep strategy semantics stable, only patch legacy defaults.
+			if cfg.Vision.MaxSymbols <= 0 {
+				cfg.Vision.MaxSymbols = 5
+				changed = true
+			}
+			if len(cfg.Vision.Timeframes) == 0 {
+				cfg.Vision.Timeframes = []string{"1h", "15m"}
+				changed = true
+			}
+
+			// Legacy NOFX UI default was 1024x640. BRALE-aligned default is 1600x1396.
+			if cfg.Vision.ImageWidth <= 0 || cfg.Vision.ImageHeight <= 0 || (cfg.Vision.ImageWidth == 1024 && cfg.Vision.ImageHeight == 640) {
+				cfg.Vision.ImageWidth = 1600
+				cfg.Vision.ImageHeight = 1396
+				changed = true
+			}
+			if cfg.Vision.RenderConcurrency <= 0 {
+				cfg.Vision.RenderConcurrency = 1
+				changed = true
+			}
+
+			// Backfill indicator flags when older configs had no indicators field.
+			if cfg.Vision.Indicators.ShowEMA == nil {
+				cfg.Vision.Indicators.ShowEMA = &boolTrue
+				changed = true
+			}
+			if cfg.Vision.Indicators.ShowMACD == nil {
+				cfg.Vision.Indicators.ShowMACD = &boolTrue
+				changed = true
+			}
+			if cfg.Vision.Indicators.ShowWaveTrend == nil {
+				cfg.Vision.Indicators.ShowWaveTrend = &boolTrue
+				changed = true
+			}
+			if cfg.Vision.Indicators.ShowSqueeze == nil {
+				cfg.Vision.Indicators.ShowSqueeze = &boolFalse
+				changed = true
+			}
+			if cfg.Vision.Indicators.ShowDivergence == nil {
+				cfg.Vision.Indicators.ShowDivergence = &boolTrue
+				changed = true
+			}
+		}
+
+		if !changed {
+			continue
+		}
+
+		b, err := json.Marshal(&cfg)
+		if err != nil {
+			continue
+		}
+		if _, err := s.db.Exec(`UPDATE strategies SET config = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, string(b), r.id); err != nil {
+			return updated, err
+		}
+		updated++
+	}
+	return updated, nil
+}
+
 // Strategy strategy configuration
 type Strategy struct {
 	ID          string    `json:"id"`
@@ -31,12 +130,51 @@ type StrategyConfig struct {
 	CoinSource CoinSourceConfig `json:"coin_source"`
 	// quantitative data configuration
 	Indicators IndicatorConfig `json:"indicators"`
+	// vision configuration (optional, v1: per-symbol chart reading)
+	Vision VisionConfig `json:"vision,omitempty"`
 	// custom prompt (appended at the end)
 	CustomPrompt string `json:"custom_prompt,omitempty"`
 	// risk control configuration
 	RiskControl RiskControlConfig `json:"risk_control"`
 	// editable sections of System Prompt
 	PromptSections PromptSectionsConfig `json:"prompt_sections,omitempty"`
+}
+
+// VisionConfig controls chart rendering + multimodal sending for vision-capable models.
+// Default is disabled for backward compatibility.
+type VisionIndicatorsConfig struct {
+	// ShowEMA controls whether EMA overlays are drawn on the price chart.
+	ShowEMA *bool `json:"show_ema,omitempty"`
+	// ShowMACD controls whether a MACD panel is rendered.
+	ShowMACD *bool `json:"show_macd,omitempty"`
+	// ShowWaveTrend controls whether a WaveTrend panel is rendered.
+	ShowWaveTrend *bool `json:"show_wavetrend,omitempty"`
+	// ShowSqueeze controls whether squeeze state is annotated.
+	ShowSqueeze *bool `json:"show_squeeze,omitempty"`
+	// ShowDivergence controls whether divergence summary is annotated.
+	ShowDivergence *bool `json:"show_divergence,omitempty"`
+}
+
+var (
+	boolTrue  = true
+	boolFalse = false
+)
+
+type VisionConfig struct {
+	Enabled bool `json:"enabled"`
+	// MaxSymbols limits how many candidate symbols will be analyzed with charts per cycle.
+	// Defaults to 5 when Enabled.
+	MaxSymbols int `json:"max_symbols,omitempty"`
+	// Timeframes are the chart timeframes to render per symbol.
+	// Defaults to ["1h","15m"] when Enabled.
+	Timeframes []string `json:"timeframes,omitempty"`
+	// ImageSize controls chart PNG size. Defaults to 1024x640 when Enabled.
+	ImageWidth  int `json:"image_width,omitempty"`
+	ImageHeight int `json:"image_height,omitempty"`
+	// RenderConcurrency limits concurrent chart rendering jobs. Defaults to 1 when Enabled.
+	RenderConcurrency int `json:"render_concurrency,omitempty"`
+	// Indicators controls which overlays/panels are included in vision PNGs.
+	Indicators VisionIndicatorsConfig `json:"indicators,omitempty"`
 }
 
 // PromptSectionsConfig editable sections of System Prompt
@@ -181,7 +319,7 @@ type RiskControlConfig struct {
 
 	// EnforceAIClaimGuard blocks AI-initiated opens when the decision reasoning references
 	// data that is not present in the current prompt cycle (anti-hallucination guard).
-	// nil = default true (opt-out)
+	// nil = default false (opt-in)
 	EnforceAIClaimGuard *bool `json:"enforce_ai_claim_guard,omitempty"`
 
 	// BTC/ETH exchange leverage for opening positions (AI guided)
@@ -257,7 +395,7 @@ func (s *StrategyStore) initDefaultData() error {
 func GetDefaultStrategyConfig(lang string) StrategyConfig {
 	enforceMinPositionSize := true
 	enforceAICloseGuard := true
-	enforceAIClaimGuard := true
+	enforceAIClaimGuard := false
 
 	config := StrategyConfig{
 		CoinSource: CoinSourceConfig{
@@ -305,6 +443,21 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			OIRankingAPIURL:   "http://nofxaios.com:30006",
 			OIRankingDuration: "1h",
 			OIRankingLimit:    10,
+		},
+		Vision: VisionConfig{
+			Enabled:           false,
+			MaxSymbols:        5,
+			Timeframes:        []string{"1h", "15m"},
+			ImageWidth:        1600,
+			ImageHeight:       1396,
+			RenderConcurrency: 1,
+			Indicators: VisionIndicatorsConfig{
+				ShowEMA:        &boolTrue,
+				ShowMACD:       &boolTrue,
+				ShowWaveTrend:  &boolTrue,
+				ShowSqueeze:    &boolFalse,
+				ShowDivergence: &boolTrue,
+			},
 		},
 		RiskControl: RiskControlConfig{
 			MaxPositions:                 3, // Max 3 coins simultaneously (CODE ENFORCED)

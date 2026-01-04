@@ -32,6 +32,9 @@ var (
 
 // getKlinesFromCoinAnk fetches kline data from CoinAnk API (replacement for WSMonitorCli)
 func getKlinesFromCoinAnk(symbol, interval string, limit int) ([]Kline, error) {
+	// CoinAnk uses Binance contract symbols (e.g. 1000PEPEUSDT).
+	symbol = ToBinanceFuturesSymbol(symbol)
+
 	// Map interval string to coinank enum
 	var coinankInterval coinank_enum.Interval
 	switch interval {
@@ -806,6 +809,7 @@ func calculateLongerTermData(klines []Kline) *LongerTermData {
 
 // getOpenInterestData retrieves OI data
 func getOpenInterestData(symbol string) (*OIData, error) {
+	symbol = ToBinanceFuturesSymbol(symbol)
 	url := fmt.Sprintf("https://fapi.binance.com/fapi/v1/openInterest?symbol=%s", symbol)
 
 	apiClient := NewAPIClient()
@@ -851,6 +855,7 @@ func getFundingRate(symbol string) (float64, error) {
 	}
 
 	// Cache expired or doesn't exist, call API
+	symbol = ToBinanceFuturesSymbol(symbol)
 	url := fmt.Sprintf("https://fapi.binance.com/fapi/v1/premiumIndex?symbol=%s", symbol)
 
 	apiClient := NewAPIClient()

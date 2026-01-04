@@ -3,7 +3,20 @@ package mcp
 // Message represents a conversation message
 type Message struct {
 	Role    string `json:"role"`    // "system", "user", "assistant"
-	Content string `json:"content"` // Message content
+	Content string `json:"content,omitempty"` // Message content (text-only)
+	Parts   []ContentPart `json:"parts,omitempty"` // Optional multimodal content parts (internal)
+}
+
+// ContentPart is a provider-agnostic multimodal content part.
+// It is converted to provider-specific request payloads by client implementations.
+//
+// Supported types:
+// - "text": uses Text
+// - "image": uses DataURI (data:image/...;base64,...) for vision models
+type ContentPart struct {
+	Type    string `json:"type"`
+	Text    string `json:"text,omitempty"`
+	DataURI string `json:"data_uri,omitempty"`
 }
 
 // Tool represents a tool/function that AI can call
@@ -69,4 +82,12 @@ func NewAssistantMessage(content string) Message {
 		Role:    "assistant",
 		Content: content,
 	}
+}
+
+func NewTextPart(text string) ContentPart {
+	return ContentPart{Type: "text", Text: text}
+}
+
+func NewImagePartDataURI(dataURI string) ContentPart {
+	return ContentPart{Type: "image", DataURI: dataURI}
 }

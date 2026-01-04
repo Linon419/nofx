@@ -417,29 +417,29 @@ var OIInterpretation = OIInterpretationType{
 		ZH string
 		EN string
 	}{
-		ZH: "强多头趋势（新多单开仓，资金流入做多）",
-		EN: "Strong bullish trend (new longs opening, capital flowing into long positions)",
+		ZH: "偏多头增仓（趋势延续可能性↑，也可能是对冲/套保）；仅作辅助证据，不得单独触发开仓",
+		EN: "Bias: longs building (continuation more likely, but can be hedging); supporting evidence only, never a sole trigger",
 	},
 	OIUp_PriceDown: struct {
 		ZH string
 		EN string
 	}{
-		ZH: "强空头趋势（新空单开仓，资金流入做空）",
-		EN: "Strong bearish trend (new shorts opening, capital flowing into short positions)",
+		ZH: "偏空头增仓/下行压力（也可能是对冲/套保）；仅作辅助证据，不得单独触发开仓",
+		EN: "Bias: shorts building / downside pressure (can be hedging); supporting evidence only, never a sole trigger",
 	},
 	OIDown_PriceUp: struct {
 		ZH string
 		EN string
 	}{
-		ZH: "空头平仓（空头止损离场，可能出现反转）",
-		EN: "Shorts covering (shorts stopped out, potential reversal)",
+		ZH: "偏空头回补/减仓（可能反弹/挤压）；不等于必然反转，仅作辅助证据",
+		EN: "Bias: shorts covering / reducing (rebound or squeeze possible); not a guaranteed reversal; supporting evidence only",
 	},
 	OIDown_PriceDown: struct {
 		ZH string
 		EN string
 	}{
-		ZH: "多头平仓（多头止损离场，可能出现反转）",
-		EN: "Longs closing (longs stopped out, potential reversal)",
+		ZH: "偏多头去杠杆/平仓（下跌由减仓驱动可能性↑）；不等于必然反转，仅作辅助证据",
+		EN: "Bias: longs unwinding / deleveraging (sell-off may be position reduction driven); not a guaranteed reversal; supporting evidence only",
 	},
 }
 
@@ -537,6 +537,7 @@ func getSchemaPromptZH() string {
 
 	// OI解读
 	prompt += "\n## 💹 持仓量(OI)变化解读\n\n"
+	prompt += "⚠️ 仅当本周期输入明确给出 OI delta（例如 Quantitative Data 的 15m/1h/4h/12h/24h Open Interest 变化）且口径一致时，才允许引用；不得单独作为开/平仓触发。\n\n"
 	prompt += "- **OI增加 + 价格上涨**: " + OIInterpretation.OIUp_PriceUp.ZH + "\n"
 	prompt += "- **OI增加 + 价格下跌**: " + OIInterpretation.OIUp_PriceDown.ZH + "\n"
 	prompt += "- **OI减少 + 价格上涨**: " + OIInterpretation.OIDown_PriceUp.ZH + "\n"
@@ -590,6 +591,7 @@ func getSchemaPromptEN() string {
 
 	// OI Interpretation
 	prompt += "\n## 💹 Open Interest (OI) Change Interpretation\n\n"
+	prompt += "⚠️ Use this only when the current cycle explicitly provides OI deltas (e.g., Quantitative Data 15m/1h/4h/12h/24h). Treat as supporting evidence; never as the sole trigger.\n\n"
 	prompt += "- **OI Up + Price Up**: " + OIInterpretation.OIUp_PriceUp.EN + "\n"
 	prompt += "- **OI Up + Price Down**: " + OIInterpretation.OIUp_PriceDown.EN + "\n"
 	prompt += "- **OI Down + Price Up**: " + OIInterpretation.OIDown_PriceUp.EN + "\n"

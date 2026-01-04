@@ -179,6 +179,12 @@ func (s *Store) initDefaultData() error {
 	if err := s.Strategy().initDefaultData(); err != nil {
 		return err
 	}
+	// Migrate legacy strategy vision config defaults (e.g. 1024x640 -> 1600x1396).
+	if migrated, err := s.Strategy().MigrateVisionConfigDefaults(); err != nil {
+		logger.Warnf("failed to migrate strategy vision config: %v", err)
+	} else if migrated > 0 {
+		logger.Infof("✅ Migrated %d strategy vision configs", migrated)
+	}
 	// Migrate old decision_account_snapshots data to new trader_equity_snapshots table
 	if migrated, err := s.Equity().MigrateFromDecision(); err != nil {
 		logger.Warnf("failed to migrate equity data: %v", err)

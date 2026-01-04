@@ -148,6 +148,8 @@ type Decision struct {
 	Reasoning  string  `json:"reasoning"`
 }
 
+type priceLookupFunc func(symbol string) (float64, bool)
+
 // UnmarshalJSON accepts both "reasoning" (preferred) and legacy/incorrect "reason".
 func (d *Decision) UnmarshalJSON(data []byte) error {
 	type wireDecision struct {
@@ -195,6 +197,7 @@ type FullDecision struct {
 	RawResponse         string     `json:"raw_response"`
 	Timestamp           time.Time  `json:"timestamp"`
 	AIRequestDurationMs int64      `json:"ai_request_duration_ms,omitempty"`
+	VisionImages        []store.VisionImageMeta `json:"vision_images,omitempty"`
 }
 
 // QuantData quantitative data structure (fund flow, position changes, price changes)
@@ -260,11 +263,11 @@ func (e *StrategyEngine) GetConfig() *store.StrategyConfig {
 func GetFullDecision(ctx *Context, mcpClient mcp.AIClient) (*FullDecision, error) {
 	defaultConfig := store.GetDefaultStrategyConfig("en")
 	engine := NewStrategyEngine(&defaultConfig)
-	return GetFullDecisionWithStrategy(ctx, mcpClient, engine, "")
+	return GetFullDecisionWithStrategy(ctx, mcpClient, engine, "", "", 0)
 }
 
 // GetFullDecisionWithStrategy uses StrategyEngine to get AI decision (unified prompt generation)
-func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *StrategyEngine, variant string) (*FullDecision, error) {
+func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *StrategyEngine, variant string, traderID string, cycleNumber int) (*FullDecision, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("context is nil")
 	}
@@ -302,22 +305,44 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 	systemPrompt := engine.BuildSystemPrompt(ctx.Account.TotalEquity, variant)
 
 	// 3. Build User Prompt using strategy engine
-	userPrompt := engine.BuildUserPrompt(ctx)
+	userPromptOpts := UserPromptOptions{}
+	var visionImages []store.VisionImageMeta
+	if engine.config.Vision.Enabled {
+		notes, selected, images := engine.collectVisionNotes(ctx, mcpClient, traderID, cycleNumber)
+		if len(selected) > 0 {
+			userPromptOpts.CandidateSymbols = selected
+		}
+		if len(notes) > 0 {
+			userPromptOpts.VisionNotes = notes
+		}
+		if len(images) > 0 {
+			visionImages = images
+		}
+	}
+	userPrompt := engine.BuildUserPromptWithOptions(ctx, userPromptOpts)
 
 	callAIAndParse := func(prompt string) (*FullDecision, error) {
 		aiCallStart := time.Now()
 		aiResponse, err := mcpClient.CallWithMessages(systemPrompt, prompt)
 		aiCallDuration := time.Since(aiCallStart)
 		if err != nil {
-			return nil, fmt.Errorf("AI API call failed: %w", err)
+			return &FullDecision{
+				SystemPrompt:        systemPrompt,
+				UserPrompt:          prompt,
+				Timestamp:           time.Now(),
+				AIRequestDurationMs: aiCallDuration.Milliseconds(),
+				VisionImages:        visionImages,
+			}, fmt.Errorf("AI API call failed: %w", err)
 		}
 
 		enforceMinPosSize := true
 		if riskConfig.EnforceMinPositionSize != nil {
 			enforceMinPosSize = *riskConfig.EnforceMinPositionSize
 		}
+		priceLookup := makePriceLookup(ctx)
 		decision, parseErr := parseFullDecisionResponse(
 			aiResponse,
+			priceLookup,
 			ctx.Account.TotalEquity,
 			riskConfig.BTCETHMaxLeverage,
 			riskConfig.AltcoinMaxLeverage,
@@ -325,6 +350,7 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 			riskConfig.AltcoinMaxPositionValueRatio,
 			riskConfig.MinPositionSize,
 			enforceMinPosSize,
+			riskConfig.MinRiskRewardRatio,
 			exitPlanID,
 		)
 
@@ -334,9 +360,20 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 			decision.UserPrompt = prompt
 			decision.AIRequestDurationMs = aiCallDuration.Milliseconds()
 			decision.RawResponse = aiResponse
+			decision.VisionImages = visionImages
 		}
 
 		if parseErr != nil {
+			if decision == nil {
+				return &FullDecision{
+					SystemPrompt:        systemPrompt,
+					UserPrompt:          prompt,
+					Timestamp:           time.Now(),
+					AIRequestDurationMs: aiCallDuration.Milliseconds(),
+					RawResponse:         aiResponse,
+					VisionImages:        visionImages,
+				}, fmt.Errorf("failed to parse AI response: %w", parseErr)
+			}
 			return decision, fmt.Errorf("failed to parse AI response: %w", parseErr)
 		}
 		return decision, nil
@@ -353,6 +390,9 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 			riskConfig,
 			exitPlanID,
 		)
+		if toolDecision != nil {
+			toolDecision.VisionImages = visionImages
+		}
 		if toolErr == nil && toolDecision != nil && len(toolDecision.Decisions) > 0 {
 			return toolDecision, nil
 		}
@@ -474,8 +514,10 @@ func callAIWithDecisionTool(
 	if riskConfig.EnforceMinPositionSize != nil {
 		enforceMinPosSize = *riskConfig.EnforceMinPositionSize
 	}
+	priceLookup := makePriceLookup(ctx)
 	if err := validateDecisions(
 		decisions,
+		priceLookup,
 		ctx.Account.TotalEquity,
 		riskConfig.BTCETHMaxLeverage,
 		riskConfig.AltcoinMaxLeverage,
@@ -483,6 +525,7 @@ func callAIWithDecisionTool(
 		riskConfig.AltcoinMaxPositionValueRatio,
 		riskConfig.MinPositionSize,
 		enforceMinPosSize,
+		riskConfig.MinRiskRewardRatio,
 		exitPlanID,
 	); err != nil {
 		return &FullDecision{
@@ -731,6 +774,26 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 			timeframes = append(timeframes, config.Indicators.Klines.LongerTimeframe)
 		}
 	}
+
+	// Vision mode may require additional timeframes for chart rendering
+	if config.Vision.Enabled {
+		visionTFs := config.Vision.Timeframes
+		if len(visionTFs) == 0 {
+			visionTFs = []string{"1h", "15m"}
+		}
+		seen := make(map[string]bool, len(timeframes)+len(visionTFs))
+		for _, tf := range timeframes {
+			seen[tf] = true
+		}
+		for _, tf := range visionTFs {
+			tf = strings.TrimSpace(tf)
+			if tf == "" || seen[tf] {
+				continue
+			}
+			seen[tf] = true
+			timeframes = append(timeframes, tf)
+		}
+	}
 	if primaryTimeframe == "" {
 		primaryTimeframe = timeframes[0]
 	}
@@ -967,7 +1030,7 @@ func (e *StrategyEngine) getOITopCoins(limit int) ([]CandidateCoin, error) {
 		if i >= limit {
 			break
 		}
-		symbol := market.Normalize(pos.Symbol)
+		symbol := market.FromBinanceFuturesSymbol(pos.Symbol)
 		candidates = append(candidates, CandidateCoin{
 			Symbol:  symbol,
 			Sources: []string{"oi_top"},
@@ -985,7 +1048,7 @@ func (e *StrategyEngine) getOTCTopCoins() ([]CandidateCoin, error) {
 	var candidates []CandidateCoin
 	now := time.Now().UTC()
 	for _, item := range items {
-		symbol := market.Normalize(item.Symbol)
+		symbol := market.FromBinanceFuturesSymbol(item.Symbol)
 		meta := buildOTCPeriodQualityMeta(item, now)
 		candidates = append(candidates, CandidateCoin{
 			Symbol:               symbol,
@@ -1495,9 +1558,32 @@ func (e *StrategyEngine) writeAvailableIndicators(sb *strings.Builder) {
 // Prompt Building - User Prompt
 // ============================================================================
 
+type UserPromptOptions struct {
+	// CandidateSymbols optionally limits which candidate coins are shown in the prompt.
+	// Positions are always shown in full.
+	CandidateSymbols []string
+	// VisionNotes are optional per-symbol notes produced by vision mode (image reading).
+	VisionNotes []VisionNote
+}
+
 // BuildUserPrompt builds User Prompt based on strategy configuration
 func (e *StrategyEngine) BuildUserPrompt(ctx *Context) string {
+	return e.BuildUserPromptWithOptions(ctx, UserPromptOptions{})
+}
+
+// BuildUserPromptWithOptions builds User Prompt with optional candidate filtering and vision notes.
+func (e *StrategyEngine) BuildUserPromptWithOptions(ctx *Context, opts UserPromptOptions) string {
 	var sb strings.Builder
+
+	allowedCandidates := map[string]bool{}
+	if len(opts.CandidateSymbols) > 0 {
+		for _, s := range opts.CandidateSymbols {
+			ns := market.Normalize(s)
+			if ns != "" {
+				allowedCandidates[ns] = true
+			}
+		}
+	}
 
 	// System status
 	sb.WriteString(fmt.Sprintf("Time: %s | Period: #%d | Runtime: %d minutes\n\n",
@@ -1615,12 +1701,19 @@ func (e *StrategyEngine) BuildUserPrompt(ctx *Context) string {
 		positionSymbols[normalizedSymbol] = true
 	}
 
-	sb.WriteString(fmt.Sprintf("## Candidate Coins (%d coins)\n\n", len(ctx.MarketDataMap)))
+	candidateCount := len(ctx.MarketDataMap)
+	if len(allowedCandidates) > 0 {
+		candidateCount = len(allowedCandidates)
+	}
+	sb.WriteString(fmt.Sprintf("## Candidate Coins (%d coins)\n\n", candidateCount))
 	displayedCount := 0
 	for _, coin := range ctx.CandidateCoins {
 		// Skip if this coin is already a position (data already shown in positions section)
 		normalizedCoinSymbol := market.Normalize(coin.Symbol)
 		if positionSymbols[normalizedCoinSymbol] {
+			continue
+		}
+		if len(allowedCandidates) > 0 && !allowedCandidates[normalizedCoinSymbol] {
 			continue
 		}
 
@@ -1649,6 +1742,18 @@ func (e *StrategyEngine) BuildUserPrompt(ctx *Context) string {
 		sb.WriteString("\n")
 	}
 	sb.WriteString("\n")
+
+	if len(opts.VisionNotes) > 0 {
+		sb.WriteString("## Chart Vision Notes (from images)\n\n")
+		for _, n := range opts.VisionNotes {
+			sym := strings.TrimSpace(n.Symbol)
+			note := strings.TrimSpace(n.Note)
+			if sym == "" || note == "" {
+				continue
+			}
+			sb.WriteString(fmt.Sprintf("### %s\n%s\n\n", sym, note))
+		}
+	}
 
 	// OI Ranking data (market-wide open interest changes)
 	if ctx.OIRankingData != nil {
@@ -2251,11 +2356,13 @@ func formatAnalysisResult(result *analysis.AnalysisResult) string {
 
 func parseFullDecisionResponse(
 	aiResponse string,
+	priceLookup priceLookupFunc,
 	accountEquity float64,
 	btcEthLeverage, altcoinLeverage int,
 	btcEthPosRatio, altcoinPosRatio float64,
 	minPositionSize float64,
 	enforceMinPositionSize bool,
+	minRiskRewardRatio float64,
 	exitPlanID string,
 ) (*FullDecision, error) {
 	cotTrace := extractCoTTrace(aiResponse)
@@ -2270,6 +2377,7 @@ func parseFullDecisionResponse(
 
 	if err := validateDecisions(
 		decisions,
+		priceLookup,
 		accountEquity,
 		btcEthLeverage,
 		altcoinLeverage,
@@ -2277,6 +2385,7 @@ func parseFullDecisionResponse(
 		altcoinPosRatio,
 		minPositionSize,
 		enforceMinPositionSize,
+		minRiskRewardRatio,
 		exitPlanID,
 	); err != nil {
 		return &FullDecision{
@@ -2430,18 +2539,52 @@ func compactArrayOpen(s string) string {
 // Decision Validation
 // ============================================================================
 
+func makePriceLookup(ctx *Context) priceLookupFunc {
+	prices := make(map[string]float64)
+	if ctx == nil {
+		return func(string) (float64, bool) { return 0, false }
+	}
+
+	for symbol, data := range ctx.MarketDataMap {
+		if data == nil || data.CurrentPrice <= 0 {
+			continue
+		}
+		norm := market.Normalize(symbol)
+		prices[norm] = data.CurrentPrice
+		if !strings.HasPrefix(strings.ToLower(norm), "xyz:") {
+			prices[market.ToBinanceFuturesSymbol(norm)] = data.CurrentPrice
+		}
+	}
+
+	return func(symbol string) (float64, bool) {
+		norm := market.Normalize(symbol)
+		if price, ok := prices[norm]; ok && price > 0 {
+			return price, true
+		}
+		if !strings.HasPrefix(strings.ToLower(norm), "xyz:") {
+			if price, ok := prices[market.ToBinanceFuturesSymbol(norm)]; ok && price > 0 {
+				return price, true
+			}
+		}
+		return 0, false
+	}
+}
+
 func validateDecisions(
 	decisions []Decision,
+	priceLookup priceLookupFunc,
 	accountEquity float64,
 	btcEthLeverage, altcoinLeverage int,
 	btcEthPosRatio, altcoinPosRatio float64,
 	minPositionSize float64,
 	enforceMinPositionSize bool,
+	minRiskRewardRatio float64,
 	exitPlanID string,
 ) error {
 	for i := range decisions {
 		if err := validateDecision(
 			&decisions[i],
+			priceLookup,
 			accountEquity,
 			btcEthLeverage,
 			altcoinLeverage,
@@ -2449,6 +2592,7 @@ func validateDecisions(
 			altcoinPosRatio,
 			minPositionSize,
 			enforceMinPositionSize,
+			minRiskRewardRatio,
 			exitPlanID,
 		); err != nil {
 			return fmt.Errorf("decision #%d validation failed: %w", i+1, err)
@@ -2459,11 +2603,13 @@ func validateDecisions(
 
 func validateDecision(
 	d *Decision,
+	priceLookup priceLookupFunc,
 	accountEquity float64,
 	btcEthLeverage, altcoinLeverage int,
 	btcEthPosRatio, altcoinPosRatio float64,
 	minPositionSize float64,
 	enforceMinPositionSize bool,
+	minRiskRewardRatio float64,
 	exitPlanID string,
 ) error {
 	validActions := map[string]bool{
@@ -2573,11 +2719,31 @@ func validateDecision(
 			}
 		}
 
-		var entryPrice float64
+		if minRiskRewardRatio <= 0 {
+			minRiskRewardRatio = 3.0
+		}
+		if priceLookup == nil {
+			return fmt.Errorf("internal error: price lookup unavailable (cannot validate risk/reward)")
+		}
+		entryPrice, ok := priceLookup(d.Symbol)
+		if !ok || entryPrice <= 0 {
+			return fmt.Errorf("missing current price for %s (cannot validate risk/reward)", d.Symbol)
+		}
+
 		if d.Action == "open_long" {
-			entryPrice = d.StopLoss + (d.TakeProfit-d.StopLoss)*0.2
+			if entryPrice <= d.StopLoss {
+				return fmt.Errorf("current price %.6f is below/at stop_loss %.6f for %s", entryPrice, d.StopLoss, d.Symbol)
+			}
+			if entryPrice >= d.TakeProfit {
+				return fmt.Errorf("current price %.6f is above/at take_profit %.6f for %s", entryPrice, d.TakeProfit, d.Symbol)
+			}
 		} else {
-			entryPrice = d.StopLoss - (d.StopLoss-d.TakeProfit)*0.2
+			if entryPrice >= d.StopLoss {
+				return fmt.Errorf("current price %.6f is above/at stop_loss %.6f for %s", entryPrice, d.StopLoss, d.Symbol)
+			}
+			if entryPrice <= d.TakeProfit {
+				return fmt.Errorf("current price %.6f is below/at take_profit %.6f for %s", entryPrice, d.TakeProfit, d.Symbol)
+			}
 		}
 
 		var riskPercent, rewardPercent, riskRewardRatio float64
@@ -2595,9 +2761,34 @@ func validateDecision(
 			}
 		}
 
-		if riskRewardRatio < 3.0 {
-			return fmt.Errorf("risk/reward ratio too low (%.2f:1), must be >=3.0:1 [risk: %.2f%% reward: %.2f%%] [stop loss: %.2f take profit: %.2f]",
-				riskRewardRatio, riskPercent, rewardPercent, d.StopLoss, d.TakeProfit)
+		if riskRewardRatio < minRiskRewardRatio {
+			requiredEntry := (d.TakeProfit + minRiskRewardRatio*d.StopLoss) / (1.0 + minRiskRewardRatio)
+			originalAction := d.Action
+
+			d.Action = "wait"
+			d.Leverage = 0
+			d.PositionSizeUSD = 0
+			d.StopLoss = 0
+			d.TakeProfit = 0
+			d.ExitPlan = nil
+			d.Confidence = 0
+			d.RiskUSD = 0
+
+			if strings.TrimSpace(d.Reasoning) == "" {
+				if originalAction == "open_long" {
+					d.Reasoning = fmt.Sprintf("auto-wait: RR %.2f < %.2f at %.6f; need entry <= %.6f", riskRewardRatio, minRiskRewardRatio, entryPrice, requiredEntry)
+				} else {
+					d.Reasoning = fmt.Sprintf("auto-wait: RR %.2f < %.2f at %.6f; need entry >= %.6f", riskRewardRatio, minRiskRewardRatio, entryPrice, requiredEntry)
+				}
+			} else {
+				if originalAction == "open_long" {
+					d.Reasoning = fmt.Sprintf("%s | auto-wait: RR %.2f < %.2f at %.6f; need entry <= %.6f", strings.TrimSpace(d.Reasoning), riskRewardRatio, minRiskRewardRatio, entryPrice, requiredEntry)
+				} else {
+					d.Reasoning = fmt.Sprintf("%s | auto-wait: RR %.2f < %.2f at %.6f; need entry >= %.6f", strings.TrimSpace(d.Reasoning), riskRewardRatio, minRiskRewardRatio, entryPrice, requiredEntry)
+				}
+			}
+
+			return nil
 		}
 
 		if err := validateExitPlan(d, exitPlanID); err != nil {

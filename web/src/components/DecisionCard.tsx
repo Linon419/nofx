@@ -1,6 +1,7 @@
-import { useState } from 'react'
-import type { DecisionRecord, DecisionAction } from '../types'
+import { useEffect, useRef, useState } from 'react'
+import type { DecisionRecord, DecisionAction, VisionImageMeta } from '../types'
 import { t, type Language } from '../i18n/translations'
+import { api } from '../lib/api'
 
 interface DecisionCardProps {
   decision: DecisionRecord
@@ -221,6 +222,48 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
   const [showSystemPrompt, setShowSystemPrompt] = useState(false)
   const [showInputPrompt, setShowInputPrompt] = useState(false)
   const [showCoT, setShowCoT] = useState(false)
+  const [showVisionCharts, setShowVisionCharts] = useState(false)
+  const [visionThumbs, setVisionThumbs] = useState<Record<string, string>>({})
+  const [visionLoading, setVisionLoading] = useState(false)
+  const [visionError, setVisionError] = useState<string | null>(null)
+  const [imagePreview, setImagePreview] = useState<{ visible: boolean; src: string; title?: string }>({
+    visible: false,
+    src: '',
+  })
+  const visionThumbsRef = useRef<Record<string, string>>({})
+  const visionLoadAbortRef = useRef({ aborted: false })
+
+  const visionImages: VisionImageMeta[] = decision.vision_images || []
+  const decisionId = decision.id
+
+  useEffect(() => {
+    visionLoadAbortRef.current.aborted = false
+    setVisionThumbs({})
+    visionThumbsRef.current = {}
+    setVisionError(null)
+    setVisionLoading(false)
+    setShowVisionCharts(false)
+    setImagePreview({ visible: false, src: '' })
+
+    return () => {
+      visionLoadAbortRef.current.aborted = true
+      for (const url of Object.values(visionThumbsRef.current)) {
+        URL.revokeObjectURL(url)
+      }
+      visionThumbsRef.current = {}
+    }
+  }, [decisionId])
+
+  useEffect(() => {
+    if (!imagePreview.visible) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setImagePreview({ visible: false, src: '' })
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [imagePreview.visible])
 
   // Copy text to clipboard
   const copyToClipboard = async (text: string, label: string) => {
@@ -243,6 +286,35 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
     link.click()
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
+  }
+
+  const loadVisionImages = async () => {
+    if (!decisionId) return
+    if (!visionImages.length) return
+    if (Object.keys(visionThumbsRef.current).length > 0) return
+
+    setVisionLoading(true)
+    setVisionError(null)
+    try {
+      const entries = await Promise.all(
+        visionImages.map(async (img) => {
+          const blob = await api.getDecisionVisionImageBlob(decisionId, img.name, decision.trader_id)
+          const url = URL.createObjectURL(blob)
+          return [img.name, url] as const
+        })
+      )
+      if (visionLoadAbortRef.current.aborted) return
+      const map = Object.fromEntries(entries)
+      visionThumbsRef.current = map
+      setVisionThumbs(map)
+    } catch (err) {
+      if (visionLoadAbortRef.current.aborted) return
+      setVisionError(err instanceof Error ? err.message : 'Failed to load charts')
+    } finally {
+      if (!visionLoadAbortRef.current.aborted) {
+        setVisionLoading(false)
+      }
+    }
   }
 
   return (
@@ -295,6 +367,86 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
 
       {/* Collapsible Sections */}
       <div className="space-y-2">
+        {/* Vision Charts */}
+        {visionImages.length > 0 && (
+          <div>
+            <button
+              onClick={() => {
+                const next = !showVisionCharts
+                setShowVisionCharts(next)
+                if (next) {
+                  void loadVisionImages()
+                }
+              }}
+              className="flex items-center gap-2 text-sm transition-colors w-full justify-between p-2 rounded hover:bg-white/5"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-base">📷</span>
+                <span className="font-semibold" style={{ color: '#34d399' }}>
+                  Vision Charts
+                </span>
+              </div>
+              <span
+                className="text-xs px-2 py-0.5 rounded"
+                style={{ background: 'rgba(52, 211, 153, 0.15)', color: '#34d399' }}
+              >
+                {showVisionCharts ? t('collapse', language) : t('expand', language)}
+              </span>
+            </button>
+
+            {showVisionCharts && (
+              <div
+                className="mt-2 rounded-lg p-4"
+                style={{
+                  background: '#0B0E11',
+                  border: '1px solid #2B3139',
+                }}
+              >
+                {visionLoading && (
+                  <div className="text-sm" style={{ color: '#848E9C' }}>
+                    Loading charts...
+                  </div>
+                )}
+                {visionError && (
+                  <div className="text-sm" style={{ color: '#F6465D' }}>
+                    ❌ {visionError}
+                  </div>
+                )}
+                {!visionLoading && !visionError && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {visionImages.map((img) => {
+                      const src = visionThumbs[img.name]
+                      const title = `${img.symbol} ${img.timeframe}`
+                      return (
+                        <div key={img.name} className="space-y-1">
+                          {src ? (
+                            <img
+                              src={src}
+                              alt={title}
+                              className="w-full h-24 object-cover rounded cursor-pointer border border-white/10 hover:border-white/20 transition-colors"
+                              onClick={() => setImagePreview({ visible: true, src, title })}
+                            />
+                          ) : (
+                            <div
+                              className="w-full h-24 rounded flex items-center justify-center text-xs"
+                              style={{ background: '#111318', color: '#848E9C', border: '1px solid #2B3139' }}
+                            >
+                              (not loaded)
+                            </div>
+                          )}
+                          <div className="text-[10px] font-mono" style={{ color: '#848E9C' }}>
+                            {title}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* System Prompt */}
         {decision.system_prompt && (
           <div>
@@ -474,6 +626,49 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
           }}
         >
           ❌ {decision.error_message}
+        </div>
+      )}
+
+      {imagePreview.visible && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+          onClick={() => setImagePreview({ visible: false, src: '' })}
+        >
+          <div
+            className="rounded-lg p-3 max-w-[92vw] max-h-[92vh]"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={imagePreview.src}
+              alt={imagePreview.title || 'Vision Chart'}
+              className="max-w-[86vw] max-h-[75vh] object-contain rounded"
+              style={{ background: '#000' }}
+            />
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <div className="text-xs font-mono" style={{ color: '#848E9C' }}>
+                {imagePreview.title || ''}
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  className="text-xs px-2.5 py-1 rounded hover:bg-white/10"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: '#EAECEF', border: '1px solid rgba(255,255,255,0.08)' }}
+                  href={imagePreview.src}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Open
+                </a>
+                <button
+                  className="text-xs px-2.5 py-1 rounded hover:bg-white/10"
+                  style={{ background: 'rgba(255,255,255,0.06)', color: '#EAECEF', border: '1px solid rgba(255,255,255,0.08)' }}
+                  onClick={() => setImagePreview({ visible: false, src: '' })}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

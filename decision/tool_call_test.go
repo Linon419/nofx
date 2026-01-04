@@ -72,7 +72,7 @@ func TestGetFullDecisionWithStrategy_ToolCallingPreferred(t *testing.T) {
 }`,
 	}
 
-	fd, err := GetFullDecisionWithStrategy(ctx, client, engine, "")
+	fd, err := GetFullDecisionWithStrategy(ctx, client, engine, "", "", 0)
 	if err != nil {
 		t.Fatalf("GetFullDecisionWithStrategy() error = %v", err)
 	}

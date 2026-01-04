@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"nofx/hook"
 	"nofx/logger"
+	"nofx/market"
 	"strconv"
 	"strings"
 	"sync"
@@ -188,7 +189,7 @@ func (t *FuturesTrader) GetPositions() ([]map[string]interface{}, error) {
 		}
 
 		posMap := make(map[string]interface{})
-		posMap["symbol"] = pos.Symbol
+		posMap["symbol"] = market.FromBinanceFuturesSymbol(pos.Symbol)
 		posMap["positionAmt"], _ = strconv.ParseFloat(pos.PositionAmt, 64)
 		posMap["entryPrice"], _ = strconv.ParseFloat(pos.EntryPrice, 64)
 		posMap["markPrice"], _ = strconv.ParseFloat(pos.MarkPrice, 64)
@@ -218,6 +219,7 @@ func (t *FuturesTrader) GetPositions() ([]map[string]interface{}, error) {
 
 // SetMarginMode sets margin mode
 func (t *FuturesTrader) SetMarginMode(symbol string, isCrossMargin bool) error {
+	symbol = market.ToBinanceFuturesSymbol(symbol)
 	var marginType futures.MarginType
 	if isCrossMargin {
 		marginType = futures.MarginTypeCrossed
@@ -269,6 +271,14 @@ func (t *FuturesTrader) SetMarginMode(symbol string, isCrossMargin bool) error {
 
 // SetLeverage sets leverage (with smart detection and cooldown period)
 func (t *FuturesTrader) SetLeverage(symbol string, leverage int) error {
+	// Keep internal symbol for comparisons/logs, but use Binance contract symbol for API calls.
+	internalSymbol := market.FromBinanceFuturesSymbol(symbol)
+	if internalSymbol == "" {
+		internalSymbol = market.Normalize(symbol)
+	}
+	binanceSymbol := market.ToBinanceFuturesSymbol(symbol)
+	symbol = internalSymbol
+
 	// First try to get current leverage (from position information)
 	currentLeverage := 0
 	positions, err := t.GetPositions()
@@ -291,7 +301,7 @@ func (t *FuturesTrader) SetLeverage(symbol string, leverage int) error {
 
 	// Change leverage
 	_, err = t.client.NewChangeLeverageService().
-		Symbol(symbol).
+		Symbol(binanceSymbol).
 		Leverage(leverage).
 		Do(context.Background())
 
@@ -315,20 +325,26 @@ func (t *FuturesTrader) SetLeverage(symbol string, leverage int) error {
 
 // OpenLong opens a long position
 func (t *FuturesTrader) OpenLong(symbol string, quantity float64, leverage int) (map[string]interface{}, error) {
+	internalSymbol := market.FromBinanceFuturesSymbol(symbol)
+	if internalSymbol == "" {
+		internalSymbol = market.Normalize(symbol)
+	}
+	binanceSymbol := market.ToBinanceFuturesSymbol(symbol)
+
 	// First cancel all pending orders for this symbol (clean up old stop-loss and take-profit orders)
-	if err := t.CancelAllOrders(symbol); err != nil {
+	if err := t.CancelAllOrders(binanceSymbol); err != nil {
 		logger.Infof("  ⚠ Failed to cancel old pending orders (may not have any): %v", err)
 	}
 
 	// Set leverage
-	if err := t.SetLeverage(symbol, leverage); err != nil {
+	if err := t.SetLeverage(binanceSymbol, leverage); err != nil {
 		return nil, err
 	}
 
 	// Note: Margin mode should be set by the caller (AutoTrader) before opening position via SetMarginMode
 
 	// Format quantity to correct precision
-	quantityStr, err := t.FormatQuantity(symbol, quantity)
+	quantityStr, err := t.FormatQuantity(binanceSymbol, quantity)
 	if err != nil {
 		return nil, err
 	}
@@ -340,13 +356,13 @@ func (t *FuturesTrader) OpenLong(symbol string, quantity float64, leverage int) 
 	}
 
 	// Check minimum notional value (Binance requires at least 10 USDT)
-	if err := t.CheckMinNotional(symbol, quantityFloat); err != nil {
+	if err := t.CheckMinNotional(binanceSymbol, quantityFloat); err != nil {
 		return nil, err
 	}
 
 	// Create market buy order (using br ID)
 	order, err := t.client.NewCreateOrderService().
-		Symbol(symbol).
+		Symbol(binanceSymbol).
 		Side(futures.SideTypeBuy).
 		PositionSide(futures.PositionSideTypeLong).
 		Type(futures.OrderTypeMarket).
@@ -358,32 +374,38 @@ func (t *FuturesTrader) OpenLong(symbol string, quantity float64, leverage int) 
 		return nil, fmt.Errorf("failed to open long position: %w", err)
 	}
 
-	logger.Infof("✓ Opened long position successfully: %s quantity: %s", symbol, quantityStr)
+	logger.Infof("✓ Opened long position successfully: %s quantity: %s", internalSymbol, quantityStr)
 	logger.Infof("  Order ID: %d", order.OrderID)
 
 	result := make(map[string]interface{})
 	result["orderId"] = order.OrderID
-	result["symbol"] = order.Symbol
+	result["symbol"] = internalSymbol
 	result["status"] = order.Status
 	return result, nil
 }
 
 // OpenShort opens a short position
 func (t *FuturesTrader) OpenShort(symbol string, quantity float64, leverage int) (map[string]interface{}, error) {
+	internalSymbol := market.FromBinanceFuturesSymbol(symbol)
+	if internalSymbol == "" {
+		internalSymbol = market.Normalize(symbol)
+	}
+	binanceSymbol := market.ToBinanceFuturesSymbol(symbol)
+
 	// First cancel all pending orders for this symbol (clean up old stop-loss and take-profit orders)
-	if err := t.CancelAllOrders(symbol); err != nil {
+	if err := t.CancelAllOrders(binanceSymbol); err != nil {
 		logger.Infof("  ⚠ Failed to cancel old pending orders (may not have any): %v", err)
 	}
 
 	// Set leverage
-	if err := t.SetLeverage(symbol, leverage); err != nil {
+	if err := t.SetLeverage(binanceSymbol, leverage); err != nil {
 		return nil, err
 	}
 
 	// Note: Margin mode should be set by the caller (AutoTrader) before opening position via SetMarginMode
 
 	// Format quantity to correct precision
-	quantityStr, err := t.FormatQuantity(symbol, quantity)
+	quantityStr, err := t.FormatQuantity(binanceSymbol, quantity)
 	if err != nil {
 		return nil, err
 	}
@@ -395,13 +417,13 @@ func (t *FuturesTrader) OpenShort(symbol string, quantity float64, leverage int)
 	}
 
 	// Check minimum notional value (Binance requires at least 10 USDT)
-	if err := t.CheckMinNotional(symbol, quantityFloat); err != nil {
+	if err := t.CheckMinNotional(binanceSymbol, quantityFloat); err != nil {
 		return nil, err
 	}
 
 	// Create market sell order (using br ID)
 	order, err := t.client.NewCreateOrderService().
-		Symbol(symbol).
+		Symbol(binanceSymbol).
 		Side(futures.SideTypeSell).
 		PositionSide(futures.PositionSideTypeShort).
 		Type(futures.OrderTypeMarket).
@@ -413,18 +435,20 @@ func (t *FuturesTrader) OpenShort(symbol string, quantity float64, leverage int)
 		return nil, fmt.Errorf("failed to open short position: %w", err)
 	}
 
-	logger.Infof("✓ Opened short position successfully: %s quantity: %s", symbol, quantityStr)
+	logger.Infof("✓ Opened short position successfully: %s quantity: %s", internalSymbol, quantityStr)
 	logger.Infof("  Order ID: %d", order.OrderID)
 
 	result := make(map[string]interface{})
 	result["orderId"] = order.OrderID
-	result["symbol"] = order.Symbol
+	result["symbol"] = internalSymbol
 	result["status"] = order.Status
 	return result, nil
 }
 
 // CloseLong closes a long position
 func (t *FuturesTrader) CloseLong(symbol string, quantity float64) (map[string]interface{}, error) {
+	binanceSymbol := market.ToBinanceFuturesSymbol(symbol)
+
 	// If quantity is 0, get current position quantity
 	if quantity == 0 {
 		positions, err := t.GetPositions()
@@ -445,14 +469,14 @@ func (t *FuturesTrader) CloseLong(symbol string, quantity float64) (map[string]i
 	}
 
 	// Format quantity
-	quantityStr, err := t.FormatQuantity(symbol, quantity)
+	quantityStr, err := t.FormatQuantity(binanceSymbol, quantity)
 	if err != nil {
 		return nil, err
 	}
 
 	// Create market sell order (close long, using br ID)
 	order, err := t.client.NewCreateOrderService().
-		Symbol(symbol).
+		Symbol(binanceSymbol).
 		Side(futures.SideTypeSell).
 		PositionSide(futures.PositionSideTypeLong).
 		Type(futures.OrderTypeMarket).
@@ -467,19 +491,21 @@ func (t *FuturesTrader) CloseLong(symbol string, quantity float64) (map[string]i
 	logger.Infof("✓ Closed long position successfully: %s quantity: %s", symbol, quantityStr)
 
 	// After closing position, cancel all pending orders for this symbol (stop-loss and take-profit orders)
-	if err := t.CancelAllOrders(symbol); err != nil {
+	if err := t.CancelAllOrders(binanceSymbol); err != nil {
 		logger.Infof("  ⚠ Failed to cancel pending orders: %v", err)
 	}
 
 	result := make(map[string]interface{})
 	result["orderId"] = order.OrderID
-	result["symbol"] = order.Symbol
+	result["symbol"] = symbol
 	result["status"] = order.Status
 	return result, nil
 }
 
 // CloseShort closes a short position
 func (t *FuturesTrader) CloseShort(symbol string, quantity float64) (map[string]interface{}, error) {
+	binanceSymbol := market.ToBinanceFuturesSymbol(symbol)
+
 	// If quantity is 0, get current position quantity
 	if quantity == 0 {
 		positions, err := t.GetPositions()
@@ -500,14 +526,14 @@ func (t *FuturesTrader) CloseShort(symbol string, quantity float64) (map[string]
 	}
 
 	// Format quantity
-	quantityStr, err := t.FormatQuantity(symbol, quantity)
+	quantityStr, err := t.FormatQuantity(binanceSymbol, quantity)
 	if err != nil {
 		return nil, err
 	}
 
 	// Create market buy order (close short, using br ID)
 	order, err := t.client.NewCreateOrderService().
-		Symbol(symbol).
+		Symbol(binanceSymbol).
 		Side(futures.SideTypeBuy).
 		PositionSide(futures.PositionSideTypeShort).
 		Type(futures.OrderTypeMarket).
@@ -522,13 +548,13 @@ func (t *FuturesTrader) CloseShort(symbol string, quantity float64) (map[string]
 	logger.Infof("✓ Closed short position successfully: %s quantity: %s", symbol, quantityStr)
 
 	// After closing position, cancel all pending orders for this symbol (stop-loss and take-profit orders)
-	if err := t.CancelAllOrders(symbol); err != nil {
+	if err := t.CancelAllOrders(binanceSymbol); err != nil {
 		logger.Infof("  ⚠ Failed to cancel pending orders: %v", err)
 	}
 
 	result := make(map[string]interface{})
 	result["orderId"] = order.OrderID
-	result["symbol"] = order.Symbol
+	result["symbol"] = symbol
 	result["status"] = order.Status
 	return result, nil
 }
@@ -536,6 +562,7 @@ func (t *FuturesTrader) CloseShort(symbol string, quantity float64) (map[string]
 // CancelStopLossOrders cancels only stop-loss orders (doesn't affect take-profit orders)
 // Now uses both legacy API and new Algo Order API
 func (t *FuturesTrader) CancelStopLossOrders(symbol string) error {
+	symbol = market.ToBinanceFuturesSymbol(symbol)
 	canceledCount := 0
 	var cancelErrors []error
 
@@ -612,6 +639,7 @@ func (t *FuturesTrader) CancelStopLossOrders(symbol string) error {
 // CancelTakeProfitOrders cancels only take-profit orders (doesn't affect stop-loss orders)
 // Now uses both legacy API and new Algo Order API
 func (t *FuturesTrader) CancelTakeProfitOrders(symbol string) error {
+	symbol = market.ToBinanceFuturesSymbol(symbol)
 	canceledCount := 0
 	var cancelErrors []error
 
@@ -688,6 +716,7 @@ func (t *FuturesTrader) CancelTakeProfitOrders(symbol string) error {
 // CancelAllOrders cancels all pending orders for this symbol
 // Now uses both legacy API and new Algo Order API
 func (t *FuturesTrader) CancelAllOrders(symbol string) error {
+	symbol = market.ToBinanceFuturesSymbol(symbol)
 	// 1. Cancel all legacy orders
 	err := t.client.NewCancelAllOpenOrdersService().
 		Symbol(symbol).
@@ -719,6 +748,7 @@ func (t *FuturesTrader) CancelAllOrders(symbol string) error {
 // CancelStopOrders cancels take-profit/stop-loss orders for this symbol (used to adjust TP/SL positions)
 // Now uses both legacy API and new Algo Order API (Binance migrated stop orders to Algo system)
 func (t *FuturesTrader) CancelStopOrders(symbol string) error {
+	symbol = market.ToBinanceFuturesSymbol(symbol)
 	canceledCount := 0
 
 	// 1. Cancel legacy stop orders (for backward compatibility)
@@ -778,6 +808,7 @@ func (t *FuturesTrader) CancelStopOrders(symbol string) error {
 
 // GetMarketPrice gets market price
 func (t *FuturesTrader) GetMarketPrice(symbol string) (float64, error) {
+	symbol = market.ToBinanceFuturesSymbol(symbol)
 	prices, err := t.client.NewListPricesService().Symbol(symbol).Do(context.Background())
 	if err != nil {
 		return 0, fmt.Errorf("failed to get price: %w", err)
@@ -806,6 +837,7 @@ func (t *FuturesTrader) CalculatePositionSize(balance, riskPercent, price float6
 // SetStopLoss sets stop-loss order using new Algo Order API
 // Binance has migrated stop orders to Algo Order system (error -4120 STOP_ORDER_SWITCH_ALGO)
 func (t *FuturesTrader) SetStopLoss(symbol string, positionSide string, quantity, stopPrice float64) error {
+	symbol = market.ToBinanceFuturesSymbol(symbol)
 	var side futures.SideType
 	var posSide futures.PositionSideType
 
@@ -840,6 +872,7 @@ func (t *FuturesTrader) SetStopLoss(symbol string, positionSide string, quantity
 // SetTakeProfit sets take-profit order using new Algo Order API
 // Binance has migrated stop orders to Algo Order system (error -4120 STOP_ORDER_SWITCH_ALGO)
 func (t *FuturesTrader) SetTakeProfit(symbol string, positionSide string, quantity, takeProfitPrice float64) error {
+	symbol = market.ToBinanceFuturesSymbol(symbol)
 	var side futures.SideType
 	var posSide futures.PositionSideType
 
@@ -899,6 +932,7 @@ func (t *FuturesTrader) CheckMinNotional(symbol string, quantity float64) error 
 
 // GetSymbolPrecision gets the quantity precision for a trading pair
 func (t *FuturesTrader) GetSymbolPrecision(symbol string) (int, error) {
+	symbol = market.ToBinanceFuturesSymbol(symbol)
 	exchangeInfo, err := t.client.NewExchangeInfoService().Do(context.Background())
 	if err != nil {
 		return 0, fmt.Errorf("failed to get trading rules: %w", err)
@@ -967,6 +1001,7 @@ func trimTrailingZeros(s string) string {
 
 // FormatQuantity formats quantity to correct precision
 func (t *FuturesTrader) FormatQuantity(symbol string, quantity float64) (string, error) {
+	symbol = market.ToBinanceFuturesSymbol(symbol)
 	precision, err := t.GetSymbolPrecision(symbol)
 	if err != nil {
 		// If retrieval fails, use default format
@@ -993,6 +1028,12 @@ func stringContains(s, substr string) bool {
 
 // GetOrderStatus gets order status
 func (t *FuturesTrader) GetOrderStatus(symbol string, orderID string) (map[string]interface{}, error) {
+	internalSymbol := market.FromBinanceFuturesSymbol(symbol)
+	if internalSymbol == "" {
+		internalSymbol = market.Normalize(symbol)
+	}
+	binanceSymbol := market.ToBinanceFuturesSymbol(symbol)
+
 	// Convert orderID to int64
 	orderIDInt, err := strconv.ParseInt(orderID, 10, 64)
 	if err != nil {
@@ -1000,11 +1041,11 @@ func (t *FuturesTrader) GetOrderStatus(symbol string, orderID string) (map[strin
 	}
 
 	order, err := t.client.NewGetOrderService().
-		Symbol(symbol).
+		Symbol(binanceSymbol).
 		OrderID(orderIDInt).
 		Do(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get order status: %w", err)
+		return nil, fmt.Errorf("failed to get order status for %s: %w", internalSymbol, err)
 	}
 
 	// Parse execution price
@@ -1013,7 +1054,7 @@ func (t *FuturesTrader) GetOrderStatus(symbol string, orderID string) (map[strin
 
 	result := map[string]interface{}{
 		"orderId":     order.OrderID,
-		"symbol":      order.Symbol,
+		"symbol":      internalSymbol,
 		"status":      string(order.Status),
 		"avgPrice":    avgPrice,
 		"executedQty": executedQty,
@@ -1071,7 +1112,7 @@ func (t *FuturesTrader) GetClosedPnL(startTime time.Time, limit int) ([]ClosedPn
 		}
 
 		records = append(records, ClosedPnLRecord{
-			Symbol:      trade.Symbol,
+			Symbol:      market.FromBinanceFuturesSymbol(trade.Symbol),
 			Side:        side,
 			EntryPrice:  entryPrice,
 			ExitPrice:   trade.Price,
@@ -1120,7 +1161,7 @@ func (t *FuturesTrader) GetTrades(startTime time.Time, limit int) ([]TradeRecord
 		// This is mainly used for detecting recent closures, not historical reconstruction
 		trade := TradeRecord{
 			TradeID:     strconv.FormatInt(income.TranID, 10),
-			Symbol:      income.Symbol,
+			Symbol:      market.FromBinanceFuturesSymbol(income.Symbol),
 			RealizedPnL: pnl,
 			Time:        time.UnixMilli(income.Time),
 			// Note: Income API doesn't provide price, quantity, side, fee
@@ -1135,6 +1176,12 @@ func (t *FuturesTrader) GetTrades(startTime time.Time, limit int) ([]TradeRecord
 // GetTradesForSymbol retrieves trade history for a specific symbol
 // This is more reliable than using Income API which may have delays
 func (t *FuturesTrader) GetTradesForSymbol(symbol string, startTime time.Time, limit int) ([]TradeRecord, error) {
+	internalSymbol := market.FromBinanceFuturesSymbol(symbol)
+	if internalSymbol == "" {
+		internalSymbol = market.Normalize(symbol)
+	}
+	binanceSymbol := market.ToBinanceFuturesSymbol(symbol)
+
 	if limit <= 0 {
 		limit = 100
 	}
@@ -1143,12 +1190,12 @@ func (t *FuturesTrader) GetTradesForSymbol(symbol string, startTime time.Time, l
 	}
 
 	accountTrades, err := t.client.NewListAccountTradeService().
-		Symbol(symbol).
+		Symbol(binanceSymbol).
 		StartTime(startTime.UnixMilli()).
 		Limit(limit).
 		Do(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get trade history for %s: %w", symbol, err)
+		return nil, fmt.Errorf("failed to get trade history for %s: %w", internalSymbol, err)
 	}
 
 	var trades []TradeRecord
@@ -1160,7 +1207,7 @@ func (t *FuturesTrader) GetTradesForSymbol(symbol string, startTime time.Time, l
 
 		trade := TradeRecord{
 			TradeID:      strconv.FormatInt(at.ID, 10),
-			Symbol:       at.Symbol,
+			Symbol:       internalSymbol,
 			Side:         string(at.Side),
 			PositionSide: string(at.PositionSide),
 			Price:        price,
@@ -1178,6 +1225,12 @@ func (t *FuturesTrader) GetTradesForSymbol(symbol string, startTime time.Time, l
 // GetTradesForSymbolFromID retrieves trade history for a specific symbol starting from a given trade ID
 // This is used for incremental sync - only fetch new trades since last sync
 func (t *FuturesTrader) GetTradesForSymbolFromID(symbol string, fromID int64, limit int) ([]TradeRecord, error) {
+	internalSymbol := market.FromBinanceFuturesSymbol(symbol)
+	if internalSymbol == "" {
+		internalSymbol = market.Normalize(symbol)
+	}
+	binanceSymbol := market.ToBinanceFuturesSymbol(symbol)
+
 	if limit <= 0 {
 		limit = 100
 	}
@@ -1186,12 +1239,12 @@ func (t *FuturesTrader) GetTradesForSymbolFromID(symbol string, fromID int64, li
 	}
 
 	accountTrades, err := t.client.NewListAccountTradeService().
-		Symbol(symbol).
+		Symbol(binanceSymbol).
 		FromID(fromID).
 		Limit(limit).
 		Do(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get trade history for %s from ID %d: %w", symbol, fromID, err)
+		return nil, fmt.Errorf("failed to get trade history for %s from ID %d: %w", internalSymbol, fromID, err)
 	}
 
 	var trades []TradeRecord
@@ -1203,7 +1256,7 @@ func (t *FuturesTrader) GetTradesForSymbolFromID(symbol string, fromID int64, li
 
 		trade := TradeRecord{
 			TradeID:      strconv.FormatInt(at.ID, 10),
-			Symbol:       at.Symbol,
+			Symbol:       internalSymbol,
 			Side:         string(at.Side),
 			PositionSide: string(at.PositionSide),
 			Price:        price,
@@ -1233,7 +1286,7 @@ func (t *FuturesTrader) GetCommissionSymbols(lastSyncTime time.Time) ([]string, 
 	symbolMap := make(map[string]bool)
 	for _, income := range incomes {
 		if income.Symbol != "" {
-			symbolMap[income.Symbol] = true
+			symbolMap[market.FromBinanceFuturesSymbol(income.Symbol)] = true
 		}
 	}
 

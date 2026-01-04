@@ -216,6 +216,7 @@ func (s *Server) setupRoutes() {
 			protected.GET("/orders/:id/fills", s.handleOrderFills) // Order fill details
 			protected.GET("/decisions", s.handleDecisions)
 			protected.GET("/decisions/latest", s.handleLatestDecisions)
+			protected.GET("/decisions/:id/vision-images/:name", s.handleDecisionVisionImage)
 			protected.GET("/statistics", s.handleStatistics)
 
 			// Backtest routes
@@ -2620,6 +2621,10 @@ func (s *Server) getKlinesFromCoinank(symbol, interval, exchange string, limit i
 		// For any unknown exchange, default to Binance
 		logger.Warnf("⚠️ Unknown exchange '%s', defaulting to Binance for CoinAnk", exchange)
 		coinankExchange = coinank_enum.Binance
+	}
+	// CoinAnk's Binance data uses Binance Futures contract symbols (e.g. 1000PEPEUSDT).
+	if coinankExchange == coinank_enum.Binance {
+		symbol = market.ToBinanceFuturesSymbol(symbol)
 	}
 
 	// Map interval string to coinank enum

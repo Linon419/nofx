@@ -606,12 +606,37 @@ func (client *Client) callWithRequest(req *Request) (string, error) {
 // buildRequestBodyFromRequest builds request body from Request object
 func (client *Client) buildRequestBodyFromRequest(req *Request) map[string]any {
 	// Convert Message to API format
-	messages := make([]map[string]string, 0, len(req.Messages))
+	messages := make([]map[string]any, 0, len(req.Messages))
 	for _, msg := range req.Messages {
-		messages = append(messages, map[string]string{
-			"role":    msg.Role,
-			"content": msg.Content,
-		})
+		entry := map[string]any{
+			"role": msg.Role,
+		}
+		if len(msg.Parts) > 0 {
+			parts := make([]map[string]any, 0, len(msg.Parts))
+			for _, p := range msg.Parts {
+				switch p.Type {
+				case "text":
+					if p.Text != "" {
+						parts = append(parts, map[string]any{"type": "text", "text": p.Text})
+					}
+				case "image":
+					if p.DataURI != "" {
+						parts = append(parts, map[string]any{
+							"type": "image_url",
+							"image_url": map[string]any{
+								"url": p.DataURI,
+							},
+						})
+					}
+				default:
+					// ignore unknown part types
+				}
+			}
+			entry["content"] = parts
+		} else {
+			entry["content"] = msg.Content
+		}
+		messages = append(messages, entry)
 	}
 
 	// Build basic request body

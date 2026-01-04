@@ -33,6 +33,7 @@ import type { Strategy, StrategyConfig, AIModel } from '../types'
 import { confirmToast, notify } from '../lib/notify'
 import { CoinSourceEditor } from '../components/strategy/CoinSourceEditor'
 import { IndicatorEditor } from '../components/strategy/IndicatorEditor'
+import { VisionEditor } from '../components/strategy/VisionEditor'
 import { RiskControlEditor } from '../components/strategy/RiskControlEditor'
 import { PromptSectionsEditor } from '../components/strategy/PromptSectionsEditor'
 
@@ -58,6 +59,7 @@ export function StrategyStudioPage() {
   const [expandedSections, setExpandedSections] = useState({
     coinSource: true,
     indicators: false,
+    vision: false,
     riskControl: false,
     promptSections: false,
     customPrompt: false,
@@ -435,6 +437,7 @@ export function StrategyStudioPage() {
       newStrategy: { zh: '新建', en: 'New' },
       coinSource: { zh: '币种来源', en: 'Coin Source' },
       indicators: { zh: '技术指标', en: 'Indicators' },
+      vision: { zh: '视觉读图', en: 'Vision' },
       riskControl: { zh: '风控参数', en: 'Risk Control' },
       promptSections: { zh: 'Prompt 编辑', en: 'Prompt Editor' },
       customPrompt: { zh: '附加提示', en: 'Extra Prompt' },
@@ -503,6 +506,20 @@ export function StrategyStudioPage() {
         <IndicatorEditor
           config={editingConfig.indicators}
           onChange={(indicators) => updateConfig('indicators', indicators)}
+          disabled={selectedStrategy?.is_default}
+          language={language}
+        />
+      ),
+    },
+    {
+      key: 'vision' as const,
+      icon: Eye,
+      color: '#F0B90B',
+      title: t('vision'),
+      content: editingConfig && (
+        <VisionEditor
+          config={editingConfig.vision}
+          onChange={(vision) => updateConfig('vision', vision)}
           disabled={selectedStrategy?.is_default}
           language={language}
         />

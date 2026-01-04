@@ -175,7 +175,7 @@ func (c *ClaudeClient) CallWithRequest(req *Request) (string, error) {
 
 	// Build Claude system prompt (Claude uses top-level "system", not a system message)
 	var systemParts []string
-	messages := make([]map[string]string, 0, len(req.Messages))
+	messages := make([]map[string]any, 0, len(req.Messages))
 	for _, msg := range req.Messages {
 		switch msg.Role {
 		case "system":
@@ -183,10 +183,40 @@ func (c *ClaudeClient) CallWithRequest(req *Request) (string, error) {
 				systemParts = append(systemParts, msg.Content)
 			}
 		case "user", "assistant":
-			messages = append(messages, map[string]string{
-				"role":    msg.Role,
-				"content": msg.Content,
-			})
+			if len(msg.Parts) > 0 {
+				blocks := make([]map[string]any, 0, len(msg.Parts))
+				for _, p := range msg.Parts {
+					switch p.Type {
+					case "text":
+						if strings.TrimSpace(p.Text) != "" {
+							blocks = append(blocks, map[string]any{"type": "text", "text": p.Text})
+						}
+					case "image":
+						mediaType, data, ok := parseDataURI(p.DataURI)
+						if !ok {
+							c.logger.Warnf("⚠️  Claude: invalid image data URI, skipping")
+							continue
+						}
+						blocks = append(blocks, map[string]any{
+							"type": "image",
+							"source": map[string]any{
+								"type":       "base64",
+								"media_type": mediaType,
+								"data":       data,
+							},
+						})
+					}
+				}
+				messages = append(messages, map[string]any{
+					"role":    msg.Role,
+					"content": blocks,
+				})
+			} else {
+				messages = append(messages, map[string]any{
+					"role":    msg.Role,
+					"content": msg.Content,
+				})
+			}
 		}
 	}
 
@@ -292,4 +322,39 @@ func (c *ClaudeClient) CallWithRequest(req *Request) (string, error) {
 	}
 
 	return "", fmt.Errorf("still failed after %d retries: %w", maxRetries, lastErr)
+}
+
+func parseDataURI(raw string) (mediaType, data string, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || !strings.HasPrefix(raw, "data:") {
+		return "", "", false
+	}
+	comma := strings.Index(raw, ",")
+	if comma < 0 {
+		return "", "", false
+	}
+	meta := strings.TrimSpace(raw[len("data:"):comma])
+	data = strings.TrimSpace(raw[comma+1:])
+	if data == "" {
+		return "", "", false
+	}
+	parts := strings.Split(meta, ";")
+	if len(parts) == 0 {
+		return "", "", false
+	}
+	mediaType = strings.TrimSpace(parts[0])
+	if mediaType == "" {
+		mediaType = "application/octet-stream"
+	}
+	hasBase64 := false
+	for _, part := range parts[1:] {
+		if strings.EqualFold(strings.TrimSpace(part), "base64") {
+			hasBase64 = true
+			break
+		}
+	}
+	if !hasBase64 {
+		return "", "", false
+	}
+	return mediaType, data, true
 }

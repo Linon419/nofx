@@ -609,7 +609,8 @@ func (at *AutoTrader) runCycle() error {
 
 	// 5. Use strategy engine to call AI for decision
 	logger.Infof("🤖 Requesting AI analysis and decision... [Strategy Engine]")
-	aiDecision, err := decision.GetFullDecisionWithStrategy(ctx, at.mcpClient, at.strategyEngine, "balanced")
+	nextCycleNumber := at.cycleNumber + 1
+	aiDecision, err := decision.GetFullDecisionWithStrategy(ctx, at.mcpClient, at.strategyEngine, "balanced", at.id, nextCycleNumber)
 
 	if aiDecision != nil && aiDecision.AIRequestDurationMs > 0 {
 		record.AIRequestDurationMs = aiDecision.AIRequestDurationMs
@@ -624,6 +625,9 @@ func (at *AutoTrader) runCycle() error {
 		record.InputPrompt = aiDecision.UserPrompt
 		record.CoTTrace = aiDecision.CoTTrace
 		record.RawResponse = aiDecision.RawResponse // Save raw AI response for debugging
+		if len(aiDecision.VisionImages) > 0 {
+			record.VisionImages = aiDecision.VisionImages
+		}
 		if len(aiDecision.Decisions) > 0 {
 			decisionJSON, _ := json.MarshalIndent(aiDecision.Decisions, "", "  ")
 			record.DecisionJSON = string(decisionJSON)
@@ -728,7 +732,8 @@ func (at *AutoTrader) runCycle() error {
 		}
 
 		// Enforce AI claim guard: block opens if the model cites evidence not present in this cycle.
-		enforceClaimGuard := true
+		// Default disabled (opt-in) because full-chain reasoning can mention other symbols and cause false positives.
+		enforceClaimGuard := false
 		if at.config.StrategyConfig != nil && at.config.StrategyConfig.RiskControl.EnforceAIClaimGuard != nil {
 			enforceClaimGuard = *at.config.StrategyConfig.RiskControl.EnforceAIClaimGuard
 		}
@@ -736,7 +741,9 @@ func (at *AutoTrader) runCycle() error {
 			if d.Action == "open_long" || d.Action == "open_short" {
 				claimText := d.Reasoning
 				if aiDecision != nil && strings.TrimSpace(aiDecision.CoTTrace) != "" {
-					claimText = strings.TrimSpace(claimText + "\n" + aiDecision.CoTTrace)
+					if scoped := extractSymbolSectionFromCoT(aiDecision.CoTTrace, d.Symbol); strings.TrimSpace(scoped) != "" {
+						claimText = strings.TrimSpace(claimText + "\n" + scoped)
+					}
 				}
 				allowed, why := at.allowAIOpen(ctx, &d, claimText)
 				if !allowed {

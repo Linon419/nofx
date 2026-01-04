@@ -64,7 +64,17 @@ export interface AccountSnapshot {
   margin_used_pct: number
 }
 
+export interface VisionImageMeta {
+  name: string
+  symbol: string
+  timeframe: string
+  path: string
+  size_bytes: number
+}
+
 export interface DecisionRecord {
+  id?: number
+  trader_id?: string
   timestamp: string
   cycle_number: number
   system_prompt: string
@@ -76,8 +86,11 @@ export interface DecisionRecord {
   candidate_coins: string[]
   decisions: DecisionAction[]
   execution_log: string[]
+  vision_images?: VisionImageMeta[]
   success: boolean
   error_message?: string
+  raw_response?: string
+  ai_request_duration_ms?: number
 }
 
 export interface Statistics {
@@ -504,9 +517,26 @@ export interface PromptSectionsConfig {
 export interface StrategyConfig {
   coin_source: CoinSourceConfig;
   indicators: IndicatorConfig;
+  vision?: VisionConfig;
   custom_prompt?: string;
   risk_control: RiskControlConfig;
   prompt_sections?: PromptSectionsConfig;
+}
+
+export interface VisionConfig {
+  enabled: boolean;
+  max_symbols?: number;
+  timeframes?: string[]; // e.g. ["1h","15m"]
+  image_width?: number;
+  image_height?: number;
+  render_concurrency?: number;
+  indicators?: {
+    show_ema?: boolean;
+    show_macd?: boolean;
+    show_wavetrend?: boolean;
+    show_squeeze?: boolean;
+    show_divergence?: boolean;
+  };
 }
 
 export interface CoinSourceConfig {

@@ -216,6 +216,22 @@ export class HttpClient {
   }
 
   /**
+   * GET binary (blob) response
+   */
+  async getBlob(
+    url: string,
+    params?: any,
+    headers?: Record<string, string>
+  ): Promise<Blob> {
+    const response = await this.axiosInstance.get(url, {
+      params,
+      headers,
+      responseType: 'blob',
+    })
+    return response.data as Blob
+  }
+
+  /**
    * POST request
    */
   async post<T = any>(

@@ -114,6 +114,34 @@ func CalculateWaveTrend(klines []market.Kline, cfg WaveTrendConfig) *WaveTrendRe
 	}
 }
 
+// CalculateWaveTrendSeriesForChart returns a length-aligned series for charting (same length as klines).
+// It keeps NaN gaps so renderers can skip missing points while preserving index alignment.
+func CalculateWaveTrendSeriesForChart(klines []market.Kline, cfg WaveTrendConfig) []float64 {
+	if len(klines) == 0 {
+		return nil
+	}
+
+	cfg = normalizeConfig(cfg)
+
+	n := len(klines)
+	highs := make([]float64, n)
+	lows := make([]float64, n)
+	closes := make([]float64, n)
+	volumes := make([]float64, n)
+	for i, k := range klines {
+		highs[i] = k.High
+		lows[i] = k.Low
+		closes[i] = k.Close
+		volumes[i] = k.Volume
+	}
+
+	series := calculateWTMFIHybridSeries(highs, lows, closes, volumes, cfg)
+	if len(series) == 0 {
+		return nil
+	}
+	return postProcess(series, cfg.SmoothLen)
+}
+
 // normalizeConfig ensures config has valid values.
 func normalizeConfig(cfg WaveTrendConfig) WaveTrendConfig {
 	defaults := DefaultWaveTrendConfig()

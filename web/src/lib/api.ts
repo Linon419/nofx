@@ -499,6 +499,20 @@ export const api = {
     return result.data!
   },
 
+  async getDecisionVisionImageBlob(
+    decisionId: number,
+    imageName: string,
+    traderId?: string
+  ): Promise<Blob> {
+    if (!decisionId || !imageName) {
+      throw new Error('invalid image request')
+    }
+
+    const params = traderId ? { trader_id: traderId } : undefined
+    const safeName = encodeURIComponent(imageName)
+    return httpClient.getBlob(`${API_BASE}/decisions/${decisionId}/vision-images/${safeName}`, params)
+  },
+
   // 获取统计信息（支持trader_id）
   async getStatistics(traderId?: string): Promise<Statistics> {
     const url = traderId

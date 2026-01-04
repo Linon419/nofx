@@ -70,6 +70,15 @@ func (b *RequestBuilder) WithUserPrompt(prompt string) *RequestBuilder {
 	return b
 }
 
+// WithUserParts adds a multimodal user message (text + images).
+// Parts are converted to provider-specific formats by the client.
+func (b *RequestBuilder) WithUserParts(parts []ContentPart) *RequestBuilder {
+	if len(parts) > 0 {
+		b.messages = append(b.messages, Message{Role: "user", Parts: parts})
+	}
+	return b
+}
+
 // AddSystemMessage adds system message
 func (b *RequestBuilder) AddSystemMessage(content string) *RequestBuilder {
 	return b.WithSystemPrompt(content)

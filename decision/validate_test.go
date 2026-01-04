@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+func fixedEntryPriceLookup(entry float64) priceLookupFunc {
+	return func(string) (float64, bool) { return entry, true }
+}
+
+func rrEntryPrice(stopLoss, takeProfit, minRR float64) float64 {
+	return (takeProfit + minRR*stopLoss) / (1.0 + minRR)
+}
+
 func makeExitPlanForAction(t *testing.T, action string) *ExitPlan {
 	t.Helper()
 	tpTiers := []exitPlanTier{
@@ -41,6 +49,7 @@ func makeExitPlanForAction(t *testing.T, action string) *ExitPlan {
 
 // TestLeverageFallback tests automatic correction when leverage exceeds limit
 func TestLeverageFallback(t *testing.T) {
+	const minRR = 3.0
 	tests := []struct {
 		name            string
 		decision        Decision
@@ -119,9 +128,11 @@ func TestLeverageFallback(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.decision.ExitPlan = makeExitPlanForAction(t, tt.decision.Action)
+			priceLookup := fixedEntryPriceLookup(rrEntryPrice(tt.decision.StopLoss, tt.decision.TakeProfit, minRR))
 			// Use default position value ratios for testing (10x for BTC/ETH, 1.5x for altcoins)
 			err := validateDecision(
 				&tt.decision,
+				priceLookup,
 				tt.accountEquity,
 				tt.btcEthLeverage,
 				tt.altcoinLeverage,
@@ -129,6 +140,7 @@ func TestLeverageFallback(t *testing.T) {
 				1.5,
 				12.0,
 				true,
+				minRR,
 				"plan_tp_tiers_sl_single",
 			)
 
@@ -162,6 +174,7 @@ func stringContains(s, substr string) bool {
 }
 
 func TestValidateDecisions_MutatesSlice(t *testing.T) {
+	const minRR = 3.0
 	decisions := []Decision{
 		{
 			Symbol:          "SOLUSDT",
@@ -174,8 +187,9 @@ func TestValidateDecisions_MutatesSlice(t *testing.T) {
 		},
 	}
 
+	priceLookup := fixedEntryPriceLookup(rrEntryPrice(decisions[0].StopLoss, decisions[0].TakeProfit, minRR))
 	// Use default position value ratios for testing (10x for BTC/ETH, 1.5x for altcoins)
-	err := validateDecisions(decisions, 1000, 10, 5, 10.0, 1.5, 12.0, true, "plan_tp_tiers_sl_single")
+	err := validateDecisions(decisions, priceLookup, 1000, 10, 5, 10.0, 1.5, 12.0, true, minRR, "plan_tp_tiers_sl_single")
 	if err != nil {
 		t.Fatalf("validateDecisions() error = %v", err)
 	}
@@ -189,6 +203,7 @@ func TestValidateDecisions_MutatesSlice(t *testing.T) {
 }
 
 func TestValidateDecision_MinPositionSizeDisabled_AllowsSmallBTC(t *testing.T) {
+	const minRR = 3.0
 	d := Decision{
 		Symbol:          "BTCUSDT",
 		Action:          "open_long",
@@ -200,7 +215,7 @@ func TestValidateDecision_MinPositionSizeDisabled_AllowsSmallBTC(t *testing.T) {
 	}
 	d.ExitPlan = makeExitPlanForAction(t, d.Action)
 
-	err := validateDecision(&d, 1000, 10, 5, 10.0, 1.5, 12.0, false, "plan_tp_tiers_sl_single")
+	err := validateDecision(&d, fixedEntryPriceLookup(rrEntryPrice(d.StopLoss, d.TakeProfit, minRR)), 1000, 10, 5, 10.0, 1.5, 12.0, false, minRR, "plan_tp_tiers_sl_single")
 	if err != nil {
 		t.Fatalf("validateDecision() error = %v", err)
 	}
@@ -213,6 +228,7 @@ func TestValidateDecision_MinPositionSizeDisabled_AllowsSmallBTC(t *testing.T) {
 }
 
 func TestValidateDecision_MinPositionSizeEnforced_ConvertsImpossibleOpenToWait(t *testing.T) {
+	const minRR = 3.0
 	d := Decision{
 		Symbol:          "BTCUSDT",
 		Action:          "open_long",
@@ -225,7 +241,7 @@ func TestValidateDecision_MinPositionSizeEnforced_ConvertsImpossibleOpenToWait(t
 	d.ExitPlan = makeExitPlanForAction(t, d.Action)
 
 	// cap = equity * btcEthPosRatio = 10.6 * 5 = 53 < 60
-	err := validateDecision(&d, 10.6, 10, 5, 5.0, 1.5, 12.0, true, "plan_tp_tiers_sl_single")
+	err := validateDecision(&d, fixedEntryPriceLookup(rrEntryPrice(d.StopLoss, d.TakeProfit, minRR)), 10.6, 10, 5, 5.0, 1.5, 12.0, true, minRR, "plan_tp_tiers_sl_single")
 	if err != nil {
 		t.Fatalf("validateDecision() error = %v", err)
 	}
@@ -235,6 +251,7 @@ func TestValidateDecision_MinPositionSizeEnforced_ConvertsImpossibleOpenToWait(t
 }
 
 func TestValidateDecision_MinPositionSizeEnforced_MinAboveCapConvertsToWaitEvenIfSizeMeetsMin(t *testing.T) {
+	const minRR = 3.0
 	d := Decision{
 		Symbol:          "BTCUSDT",
 		Action:          "open_long",
@@ -247,7 +264,7 @@ func TestValidateDecision_MinPositionSizeEnforced_MinAboveCapConvertsToWaitEvenI
 	d.ExitPlan = makeExitPlanForAction(t, d.Action)
 
 	// cap = equity * btcEthPosRatio = 10.6 * 5 = 53 < min(100)
-	err := validateDecision(&d, 10.6, 10, 5, 5.0, 1.5, 100.0, true, "plan_tp_tiers_sl_single")
+	err := validateDecision(&d, fixedEntryPriceLookup(rrEntryPrice(d.StopLoss, d.TakeProfit, minRR)), 10.6, 10, 5, 5.0, 1.5, 100.0, true, minRR, "plan_tp_tiers_sl_single")
 	if err != nil {
 		t.Fatalf("validateDecision() error = %v", err)
 	}
@@ -257,6 +274,7 @@ func TestValidateDecision_MinPositionSizeEnforced_MinAboveCapConvertsToWaitEvenI
 }
 
 func TestValidateDecision_MinPositionSizeEnforced_UsesConfigForBTCETH(t *testing.T) {
+	const minRR = 3.0
 	d := Decision{
 		Symbol:          "BTCUSDT",
 		Action:          "open_long",
@@ -269,7 +287,7 @@ func TestValidateDecision_MinPositionSizeEnforced_UsesConfigForBTCETH(t *testing
 	d.ExitPlan = makeExitPlanForAction(t, d.Action)
 
 	// equity cap = 1000 * 10 = 10000, so min can be satisfied.
-	err := validateDecision(&d, 1000, 10, 5, 10.0, 1.5, 100.0, true, "plan_tp_tiers_sl_single")
+	err := validateDecision(&d, fixedEntryPriceLookup(rrEntryPrice(d.StopLoss, d.TakeProfit, minRR)), 1000, 10, 5, 10.0, 1.5, 100.0, true, minRR, "plan_tp_tiers_sl_single")
 	if err != nil {
 		t.Fatalf("validateDecision() error = %v", err)
 	}
@@ -279,6 +297,7 @@ func TestValidateDecision_MinPositionSizeEnforced_UsesConfigForBTCETH(t *testing
 }
 
 func TestValidateDecision_PositionSizeOverCap_AutoCaps(t *testing.T) {
+	const minRR = 3.0
 	d := Decision{
 		Symbol:          "BTCUSDT",
 		Action:          "open_long",
@@ -291,11 +310,41 @@ func TestValidateDecision_PositionSizeOverCap_AutoCaps(t *testing.T) {
 	d.ExitPlan = makeExitPlanForAction(t, d.Action)
 
 	// cap = equity * btcEthPosRatio = 10.6 * 5 = 53
-	err := validateDecision(&d, 10.6, 10, 5, 5.0, 1.5, 1.0, false, "plan_tp_tiers_sl_single")
+	err := validateDecision(&d, fixedEntryPriceLookup(rrEntryPrice(d.StopLoss, d.TakeProfit, minRR)), 10.6, 10, 5, 5.0, 1.5, 1.0, false, minRR, "plan_tp_tiers_sl_single")
 	if err != nil {
 		t.Fatalf("validateDecision() error = %v", err)
 	}
 	if d.PositionSizeUSD > 53.0+1e-9 {
 		t.Fatalf("expected position_size_usd to be capped to <=53, got %.2f", d.PositionSizeUSD)
+	}
+}
+
+func TestValidateDecision_RRTooLowAtCurrentPrice_ConvertsToWait(t *testing.T) {
+	const minRR = 3.0
+	d := Decision{
+		Symbol:          "LDOUSDT",
+		Action:          "open_long",
+		Leverage:        10,
+		PositionSizeUSD: 100,
+		StopLoss:        0.6100,
+		TakeProfit:      0.6550,
+		Reasoning:       "test",
+	}
+	d.ExitPlan = makeExitPlanForAction(t, d.Action)
+
+	// Current price is worse than the required entry for RR>=3, should auto-convert to wait.
+	priceLookup := fixedEntryPriceLookup(0.6308)
+	err := validateDecision(&d, priceLookup, 1000, 10, 10, 10.0, 1.5, 12.0, true, minRR, "plan_tp_tiers_sl_single")
+	if err != nil {
+		t.Fatalf("validateDecision() error = %v", err)
+	}
+	if d.Action != "wait" {
+		t.Fatalf("expected action to be converted to wait, got %s", d.Action)
+	}
+	if d.StopLoss != 0 || d.TakeProfit != 0 || d.Leverage != 0 || d.PositionSizeUSD != 0 {
+		t.Fatalf("expected open parameters to be cleared on wait, got leverage=%d size=%.2f sl=%.4f tp=%.4f", d.Leverage, d.PositionSizeUSD, d.StopLoss, d.TakeProfit)
+	}
+	if !contains(d.Reasoning, "auto-wait") {
+		t.Fatalf("expected reasoning to mention auto-wait, got %q", d.Reasoning)
 	}
 }
