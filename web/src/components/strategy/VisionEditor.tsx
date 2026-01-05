@@ -32,8 +32,8 @@ export function VisionEditor({ config, onChange, disabled, language }: VisionEdi
       showSqueeze: { zh: '挤压预警 (Squeeze)', en: 'Squeeze' },
       showDivergence: { zh: '背离 (Divergence)', en: 'Divergence' },
       note: {
-        zh: '模式：每个币种分两次带图请求(1h+15m)，最后一次汇总决策不带图。',
-        en: 'Mode: per-symbol image calls (1h+15m), final decision call is text-only.',
+        zh: '模式：每个币种按所选时间周期附加 K 线图；最后一次汇总决策不带图。',
+        en: 'Mode: per-symbol image calls use the selected timeframes; final decision call is text-only.',
       },
     }
     return translations[key]?.[language] || key
@@ -196,7 +196,7 @@ export function VisionEditor({ config, onChange, disabled, language }: VisionEdi
           {t('timeframes')}
         </div>
         <div className="flex gap-2 flex-wrap">
-          {['15m', '1h'].map((tf) => (
+          {['5m', '15m', '1h'].map((tf) => (
             <button
               key={tf}
               type="button"
