@@ -7,6 +7,8 @@ import type {
   CreateTraderRequest,
   AIModel,
   Exchange,
+  ModelTestResponse,
+  RemoteModelListItem,
 } from '../types'
 import { useLanguage } from '../contexts/LanguageContext'
 import { t, type Language } from '../i18n/translations'
@@ -568,8 +570,10 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
       buildRequest: (models) => ({
         models: Object.fromEntries(
           models.map((model) => [
-            model.provider,
+            model.id,
             {
+              name: model.name,
+              provider: model.provider,
               enabled: model.enabled,
               api_key: model.apiKey || '',
               custom_api_url: model.customApiUrl || '',
@@ -594,9 +598,11 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
 
   const handleSaveModelConfig = async (
     modelId: string,
+    provider: string,
     apiKey: string,
     customApiUrl?: string,
-    customModelName?: string
+    customModelName?: string,
+    displayName?: string
   ) => {
     try {
       // 创建或更新用户的模型配置
@@ -604,12 +610,10 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
       let updatedModels
 
       // 找到要配置的模型（优先从已配置列表，其次从支持列表）
-      const modelToUpdate =
-        existingModel || supportedModels?.find((m) => m.id === modelId)
-      if (!modelToUpdate) {
-        toast.error(t('modelNotExist', language))
-        return
-      }
+      const providerKey = provider?.trim() || existingModel?.provider || ''
+      const templateModel = supportedModels?.find(
+        (m) => (m.provider || m.id) === providerKey
+      )
 
       if (existingModel) {
         // 更新现有配置
@@ -618,6 +622,8 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
             m.id === modelId
               ? {
                 ...m,
+                name: displayName?.trim() || m.name,
+                provider: providerKey || m.provider,
                 apiKey,
                 customApiUrl: customApiUrl || '',
                 customModelName: customModelName || '',
@@ -627,8 +633,14 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
           ) || []
       } else {
         // 添加新配置
+        if (!providerKey) {
+          toast.error(t('modelNotExist', language))
+          return
+        }
         const newModel = {
-          ...modelToUpdate,
+          id: modelId,
+          provider: providerKey,
+          name: displayName?.trim() || templateModel?.name || providerKey,
           apiKey,
           customApiUrl: customApiUrl || '',
           customModelName: customModelName || '',
@@ -640,8 +652,10 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
       const request = {
         models: Object.fromEntries(
           updatedModels.map((model) => [
-            model.provider, // 使用 provider 而不是 id
+            model.id,
             {
+              name: model.name,
+              provider: model.provider,
               enabled: model.enabled,
               api_key: model.apiKey || '',
               custom_api_url: model.customApiUrl || '',
@@ -1399,46 +1413,172 @@ function ModelConfigModal({
   editingModelId: string | null
   onSave: (
     modelId: string,
+    provider: string,
     apiKey: string,
     baseUrl?: string,
-    modelName?: string
+    modelName?: string,
+    displayName?: string
   ) => void
   onDelete: (modelId: string) => void
   onClose: () => void
   language: Language
 }) {
   const [selectedModelId, setSelectedModelId] = useState(editingModelId || '')
+  const [selectedProvider, setSelectedProvider] = useState('')
+  const [displayName, setDisplayName] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [modelName, setModelName] = useState('')
+  const [remoteModels, setRemoteModels] = useState<RemoteModelListItem[]>([])
+  const [isFetchingRemoteModels, setIsFetchingRemoteModels] = useState(false)
+  const [isTestingModel, setIsTestingModel] = useState(false)
+  const [testResult, setTestResult] = useState<ModelTestResponse | null>(null)
 
   // 获取当前编辑的模型信息 - 编辑时从已配置的模型中查找，新建时从所有支持的模型中查找
   const selectedModel = editingModelId
     ? configuredModels?.find((m) => m.id === selectedModelId)
-    : allModels?.find((m) => m.id === selectedModelId)
+    : allModels?.find((m) => (m.provider || m.id) === selectedProvider)
+
+  const effectiveProvider = editingModelId ? (selectedModel?.provider || '') : selectedProvider
+
+  const genSuffix = () => {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (crypto as any).randomUUID().slice(0, 8)
+    }
+    return Date.now().toString(36).slice(-8)
+  }
+
+  const ensureUniqueModelID = (provider: string) => {
+    const existing = new Set((configuredModels || []).map((m) => m.id))
+    const base = provider.trim()
+    if (!existing.has(base)) return base
+    let candidate = `${base}_${genSuffix()}`
+    while (existing.has(candidate)) {
+      candidate = `${base}_${genSuffix()}`
+    }
+    return candidate
+  }
 
   // 如果是编辑现有模型，初始化API Key、Base URL和Model Name
   useEffect(() => {
     if (editingModelId && selectedModel) {
+      setDisplayName(selectedModel.name || '')
       setApiKey(selectedModel.apiKey || '')
       setBaseUrl(selectedModel.customApiUrl || '')
       setModelName(selectedModel.customModelName || '')
     }
   }, [editingModelId, selectedModel])
 
+  // Add mode: initialize provider + unique model ID (allows multiple models per provider)
+  useEffect(() => {
+    if (editingModelId) return
+    if (selectedProvider) return
+    if (!allModels || allModels.length === 0) return
+
+    const defaultProvider = allModels[0].provider || allModels[0].id
+    if (!defaultProvider) return
+
+    setSelectedProvider(defaultProvider)
+    setSelectedModelId(ensureUniqueModelID(defaultProvider))
+  }, [editingModelId, allModels])
+
+  useEffect(() => {
+    if (editingModelId) return
+    if (!selectedProvider) return
+
+    setSelectedModelId(ensureUniqueModelID(selectedProvider))
+    setRemoteModels([])
+    setTestResult(null)
+
+    if (!displayName.trim()) {
+      const template = allModels?.find(
+        (m) => m.provider === selectedProvider || m.id === selectedProvider
+      )
+      setDisplayName(template?.name || selectedProvider)
+    }
+  }, [editingModelId, selectedProvider])
+
+  useEffect(() => {
+    if (!selectedModel) return
+
+    setRemoteModels([])
+    setTestResult(null)
+
+    if (!editingModelId && !displayName.trim()) {
+      setDisplayName(selectedModel.name || '')
+    }
+  }, [selectedModelId])
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedModelId || !apiKey.trim()) return
+    if (!selectedModelId) return
+    if (!effectiveProvider) return
+    if (!editingModelId && !apiKey.trim()) return
 
     onSave(
       selectedModelId,
+      effectiveProvider,
       apiKey.trim(),
       baseUrl.trim() || undefined,
-      modelName.trim() || undefined
+      modelName.trim() || undefined,
+      displayName.trim() || undefined
     )
   }
 
   // 可选择的模型列表（所有支持的模型）
+  const handleFetchModelList = async () => {
+    if (!effectiveProvider) return
+    if (!apiKey.trim()) {
+      toast.error(t('fetchModelListFailed', language))
+      return
+    }
+
+    setIsFetchingRemoteModels(true)
+    const toastId = toast.loading(`${t('fetchModelList', language)}...`)
+    try {
+      const models = await api.fetchRemoteModels({
+        provider: effectiveProvider,
+        apiKey: apiKey.trim(),
+        customApiUrl: baseUrl.trim() || undefined,
+        customModelName: modelName.trim() || undefined,
+      })
+      setRemoteModels(Array.isArray(models) ? models : [])
+      toast.success(t('fetchModelListSuccess', language), { id: toastId })
+    } catch (err) {
+      console.error('Failed to fetch model list:', err)
+      toast.error(t('fetchModelListFailed', language), { id: toastId })
+    } finally {
+      setIsFetchingRemoteModels(false)
+    }
+  }
+
+  const handleTestModel = async () => {
+    if (!effectiveProvider) return
+    if (!apiKey.trim()) {
+      toast.error(t('testModelConfigFailed', language))
+      return
+    }
+
+    setIsTestingModel(true)
+    const toastId = toast.loading(`${t('testModelConfig', language)}...`)
+    try {
+      const result = await api.testModelConfig({
+        provider: effectiveProvider,
+        apiKey: apiKey.trim(),
+        customApiUrl: baseUrl.trim() || undefined,
+        customModelName: modelName.trim() || undefined,
+      })
+      setTestResult(result)
+      toast.success(t('testModelConfigSuccess', language), { id: toastId })
+    } catch (err) {
+      console.error('Failed to test model config:', err)
+      toast.error(t('testModelConfigFailed', language), { id: toastId })
+    } finally {
+      setIsTestingModel(false)
+    }
+  }
+
   const availableModels = allModels || []
 
   return (
@@ -1486,8 +1626,8 @@ function ModelConfigModal({
                   {t('selectModel', language)}
                 </label>
                 <select
-                  value={selectedModelId}
-                  onChange={(e) => setSelectedModelId(e.target.value)}
+                  value={selectedProvider}
+                  onChange={(e) => setSelectedProvider(e.target.value)}
                   className="w-full px-3 py-2 rounded"
                   style={{
                     background: '#0B0E11',
@@ -1498,11 +1638,16 @@ function ModelConfigModal({
                 >
                   <option value="">{t('pleaseSelectModel', language)}</option>
                   {availableModels.map((model) => (
-                    <option key={model.id} value={model.id}>
+                    <option key={model.provider || model.id} value={model.provider || model.id}>
                       {getShortName(model.name)} ({model.provider})
                     </option>
                   ))}
                 </select>
+                {selectedModelId && (
+                  <div className="mt-2 text-xs font-mono" style={{ color: '#848E9C' }}>
+                    Model ID: {selectedModelId}
+                  </div>
+                )}
               </div>
             )}
 
@@ -1513,7 +1658,7 @@ function ModelConfigModal({
               >
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-8 h-8 flex items-center justify-center">
-                    {getModelIcon(selectedModel.provider || selectedModel.id, {
+                    {getModelIcon(effectiveProvider || selectedModelId, {
                       width: 32,
                       height: 32,
                     }) || (
@@ -1521,19 +1666,19 @@ function ModelConfigModal({
                           className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
                           style={{
                             background:
-                              selectedModel.id === 'deepseek'
+                              effectiveProvider === 'deepseek'
                                 ? '#60a5fa'
                                 : '#c084fc',
                             color: '#fff',
                           }}
                         >
-                          {selectedModel.name[0]}
+                          {(displayName.trim() || selectedModel.name || effectiveProvider)[0]}
                         </div>
                       )}
                   </div>
                   <div className="flex-1">
                     <div className="font-semibold" style={{ color: '#EAECEF' }}>
-                      {getShortName(selectedModel.name)}
+                      {getShortName(displayName.trim() || selectedModel.name)}
                     </div>
                     <div className="text-xs" style={{ color: '#848E9C' }}>
                       {selectedModel.provider} • {selectedModel.id}
@@ -1541,22 +1686,22 @@ function ModelConfigModal({
                   </div>
                 </div>
                 {/* Default model info and API link */}
-                {AI_PROVIDER_CONFIG[selectedModel.provider] && (
+                {AI_PROVIDER_CONFIG[effectiveProvider] && (
                   <div className="mt-3 pt-3" style={{ borderTop: '1px solid #2B3139' }}>
                     <div className="text-xs mb-2" style={{ color: '#848E9C' }}>
-                      {t('defaultModel', language)}: <span style={{ color: '#F0B90B' }}>{AI_PROVIDER_CONFIG[selectedModel.provider].defaultModel}</span>
+                      {t('defaultModel', language)}: <span style={{ color: '#F0B90B' }}>{AI_PROVIDER_CONFIG[effectiveProvider].defaultModel}</span>
                     </div>
                     <a
-                      href={AI_PROVIDER_CONFIG[selectedModel.provider].apiUrl}
+                      href={AI_PROVIDER_CONFIG[effectiveProvider].apiUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 text-xs hover:underline"
                       style={{ color: '#F0B90B' }}
                     >
                       <ExternalLink className="w-3 h-3" />
-                      {t('applyApiKey', language)} → {AI_PROVIDER_CONFIG[selectedModel.provider].apiName}
+                      {t('applyApiKey', language)} → {AI_PROVIDER_CONFIG[effectiveProvider].apiName}
                     </a>
-                    {selectedModel.provider === 'kimi' && (
+                    {effectiveProvider === 'kimi' && (
                       <div className="mt-2 text-xs p-2 rounded" style={{ background: 'rgba(246, 70, 93, 0.1)', color: '#F6465D' }}>
                         ⚠️ {t('kimiApiNote', language)}
                       </div>
@@ -1568,6 +1713,27 @@ function ModelConfigModal({
 
             {selectedModel && (
               <>
+                <div>
+                  <label
+                    className="block text-sm font-semibold mb-2"
+                    style={{ color: '#EAECEF' }}
+                  >
+                    {t('modelDisplayName', language)}
+                  </label>
+                  <input
+                    type="text"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder={t('modelDisplayNamePlaceholder', language)}
+                    className="w-full px-3 py-2 rounded"
+                    style={{
+                      background: '#0B0E11',
+                      border: '1px solid #2B3139',
+                      color: '#EAECEF',
+                    }}
+                  />
+                </div>
+
                 <div>
                   <label
                     className="block text-sm font-semibold mb-2"
@@ -1586,7 +1752,7 @@ function ModelConfigModal({
                       border: '1px solid #2B3139',
                       color: '#EAECEF',
                     }}
-                    required
+                    required={!editingModelId}
                   />
                 </div>
 
@@ -1615,12 +1781,56 @@ function ModelConfigModal({
                 </div>
 
                 <div>
-                  <label
-                    className="block text-sm font-semibold mb-2"
-                    style={{ color: '#EAECEF' }}
-                  >
-                    {t('customModelName', language)}
-                  </label>
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <label
+                      className="block text-sm font-semibold"
+                      style={{ color: '#EAECEF' }}
+                    >
+                      {t('customModelName', language)}
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleFetchModelList}
+                        disabled={!apiKey.trim() || isFetchingRemoteModels}
+                        className="px-2.5 py-1 rounded text-xs font-semibold disabled:opacity-50"
+                        style={{ background: '#2B3139', color: '#EAECEF' }}
+                      >
+                        {t('fetchModelList', language)}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleTestModel}
+                        disabled={!apiKey.trim() || isTestingModel}
+                        className="px-2.5 py-1 rounded text-xs font-semibold disabled:opacity-50"
+                        style={{ background: '#2B3139', color: '#EAECEF' }}
+                      >
+                        {t('testModelConfig', language)}
+                      </button>
+                    </div>
+                  </div>
+
+                  {remoteModels.length > 0 && (
+                    <select
+                      value={modelName}
+                      onChange={(e) => setModelName(e.target.value)}
+                      className="w-full px-3 py-2 rounded mb-2"
+                      style={{
+                        background: '#0B0E11',
+                        border: '1px solid #2B3139',
+                        color: '#EAECEF',
+                      }}
+                    >
+                      <option value="">
+                        {t('customModelNamePlaceholder', language)}
+                      </option>
+                      {remoteModels.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name ? `${m.name} (${m.id})` : m.id}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   <input
                     type="text"
                     value={modelName}
@@ -1637,6 +1847,24 @@ function ModelConfigModal({
                     {t('leaveBlankForDefaultModel', language)}
                   </div>
                 </div>
+
+                {testResult && (
+                  <div
+                    className="p-4 rounded"
+                    style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+                  >
+                    <div className="text-xs" style={{ color: '#848E9C' }}>
+                      {testResult.provider} · {testResult.model} ·{' '}
+                      {testResult.latency_ms}ms
+                    </div>
+                    <pre
+                      className="mt-2 text-xs whitespace-pre-wrap break-words"
+                      style={{ color: '#EAECEF' }}
+                    >
+                      {testResult.raw_tool_args}
+                    </pre>
+                  </div>
+                )}
 
                 <div
                   className="p-4 rounded"
@@ -1678,7 +1906,7 @@ function ModelConfigModal({
             </button>
             <button
               type="submit"
-              disabled={!selectedModel || !apiKey.trim()}
+              disabled={!selectedModel || (!editingModelId && !apiKey.trim())}
               className="flex-1 px-4 py-2 rounded text-sm font-semibold disabled:opacity-50"
               style={{ background: '#F0B90B', color: '#000' }}
             >

@@ -33,6 +33,10 @@ export function RiskControlEditor({
       atrTimeframe: { zh: 'ATR 时间周期', en: 'ATR Timeframe' },
       stopLossRiskPct: { zh: '单笔风险(%)', en: 'Risk Per Trade (%)' },
       stopLossRiskPctDesc: { zh: '单笔最大亏损占净值比例', en: 'Max loss as % of equity' },
+      stopLossSizing: { zh: '强制止损定仓（代码强制）', en: 'Stop-Loss Sizing (CODE ENFORCED)' },
+      stopLossSizingDesc: { zh: '关闭ATR时，系统会根据止损距离 + 杠杆重算 position_size_usd', en: 'When ATR is OFF, system recomputes position_size_usd using stop distance and leverage' },
+      stopLossSizingEnabled: { zh: '开启止损定仓', en: 'Enable stop-loss sizing' },
+      stopLossSizingEnabledDesc: { zh: '需要提供 stop_loss，系统在下单前覆盖 position_size_usd', en: 'Requires stop_loss; system overrides position_size_usd before placing orders' },
       // Position value ratio (risk control) - CODE ENFORCED
       positionValueRatio: { zh: '仓位价值比例（代码强制）', en: 'Position Value Ratio (CODE ENFORCED)' },
       positionValueRatioDesc: { zh: '仓位名义价值/净值，代码强制', en: 'Position notional value / equity, enforced by code' },
@@ -66,6 +70,8 @@ export function RiskControlEditor({
   }
 
   const atrEnabled = config.atr_enabled ?? false
+  const stopLossSizingEnabled = config.stop_loss_sizing_enabled ?? false
+  const stopLossSizingEffective = atrEnabled || stopLossSizingEnabled
   const enforceMinPositionSize = config.enforce_min_position_size ?? true
 
   return (
@@ -230,7 +236,7 @@ export function RiskControlEditor({
                 onChange={(e) =>
                   updateField('stop_loss_risk_pct', parseFloat(e.target.value) || 5)
                 }
-                disabled={disabled || !atrEnabled}
+                disabled={disabled || !stopLossSizingEffective}
                 min={0.1}
                 max={20}
                 step={0.1}
@@ -245,6 +251,35 @@ export function RiskControlEditor({
                 %
               </span>
             </div>
+          </div>
+
+          <div
+            className="p-4 rounded-lg"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+          >
+            <label className="block text-sm mb-1" style={{ color: '#EAECEF' }}>
+              {t('stopLossSizing')}
+            </label>
+            <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+              {t('stopLossSizingDesc')}
+            </p>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={stopLossSizingEnabled}
+                onChange={(e) =>
+                  updateField('stop_loss_sizing_enabled', e.target.checked)
+                }
+                disabled={disabled || atrEnabled}
+                className="accent-yellow-500"
+              />
+              <span style={{ color: atrEnabled ? '#848E9C' : '#F0B90B' }}>
+                {atrEnabled ? 'Controlled by ATR' : stopLossSizingEnabled ? 'ON' : 'OFF'}
+              </span>
+            </label>
+            <p className="text-xs mt-2" style={{ color: '#848E9C' }}>
+              {t('stopLossSizingEnabledDesc')}
+            </p>
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4">

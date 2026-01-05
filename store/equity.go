@@ -34,6 +34,30 @@ func NewEquityStore(db *gorm.DB) *EquityStore {
 
 // initTables initializes equity tables
 func (s *EquityStore) initTables() error {
+	// SQLite: avoid GORM AutoMigrate table-rebuild behavior (can fail on existing data)
+	if s.db.Dialector.Name() == "sqlite" {
+		if s.db.Migrator().HasTable(&EquitySnapshot{}) {
+			for _, field := range []string{
+				"TraderID",
+				"Timestamp",
+				"TotalEquity",
+				"Balance",
+				"UnrealizedPnL",
+				"PositionCount",
+				"MarginUsedPct",
+				"CreatedAt",
+			} {
+				if !s.db.Migrator().HasColumn(&EquitySnapshot{}, field) {
+					_ = s.db.Migrator().AddColumn(&EquitySnapshot{}, field)
+				}
+			}
+
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_equity_trader_time ON trader_equity_snapshots(trader_id, timestamp)`)
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_equity_timestamp ON trader_equity_snapshots(timestamp)`)
+			return nil
+		}
+	}
+
 	// For PostgreSQL with existing table, skip AutoMigrate
 	if s.db.Dialector.Name() == "postgres" {
 		var tableExists int64

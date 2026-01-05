@@ -18,17 +18,17 @@ import (
 
 // Bitget API endpoints (V2)
 const (
-	bitgetBaseURL         = "https://api.bitget.com"
-	bitgetAccountPath     = "/api/v2/mix/account/accounts"
-	bitgetPositionPath    = "/api/v2/mix/position/all-position"
-	bitgetOrderPath       = "/api/v2/mix/order/place-order"
-	bitgetLeveragePath    = "/api/v2/mix/account/set-leverage"
-	bitgetTickerPath      = "/api/v2/mix/market/ticker"
-	bitgetContractsPath   = "/api/v2/mix/market/contracts"
-	bitgetCancelOrderPath = "/api/v2/mix/order/cancel-order"
-	bitgetPendingPath     = "/api/v2/mix/order/orders-pending"
-	bitgetHistoryPath     = "/api/v2/mix/order/orders-history"
-	bitgetMarginModePath  = "/api/v2/mix/account/set-margin-mode"
+	bitgetBaseURL          = "https://api.bitget.com"
+	bitgetAccountPath      = "/api/v2/mix/account/accounts"
+	bitgetPositionPath     = "/api/v2/mix/position/all-position"
+	bitgetOrderPath        = "/api/v2/mix/order/place-order"
+	bitgetLeveragePath     = "/api/v2/mix/account/set-leverage"
+	bitgetTickerPath       = "/api/v2/mix/market/ticker"
+	bitgetContractsPath    = "/api/v2/mix/market/contracts"
+	bitgetCancelOrderPath  = "/api/v2/mix/order/cancel-order"
+	bitgetPendingPath      = "/api/v2/mix/order/orders-pending"
+	bitgetHistoryPath      = "/api/v2/mix/order/orders-history"
+	bitgetMarginModePath   = "/api/v2/mix/account/set-margin-mode"
 	bitgetPositionModePath = "/api/v2/mix/account/set-position-mode"
 )
 
@@ -40,6 +40,10 @@ type BitgetTrader struct {
 
 	// HTTP client
 	httpClient *http.Client
+
+	// Margin mode cache (crossed/isolated) by symbol
+	marginModeCache      map[string]string
+	marginModeCacheMutex sync.RWMutex
 
 	// Balance cache
 	cachedBalance     map[string]interface{}
@@ -62,22 +66,22 @@ type BitgetTrader struct {
 
 // BitgetContract Bitget contract info
 type BitgetContract struct {
-	Symbol       string  // Symbol name
-	BaseCoin     string  // Base coin
-	QuoteCoin    string  // Quote coin
-	MinTradeNum  float64 // Minimum trade amount
-	MaxTradeNum  float64 // Maximum trade amount
+	Symbol         string  // Symbol name
+	BaseCoin       string  // Base coin
+	QuoteCoin      string  // Quote coin
+	MinTradeNum    float64 // Minimum trade amount
+	MaxTradeNum    float64 // Maximum trade amount
 	SizeMultiplier float64 // Contract size multiplier
-	PricePlace   int     // Price decimal places
-	VolumePlace  int     // Volume decimal places
+	PricePlace     int     // Price decimal places
+	VolumePlace    int     // Volume decimal places
 }
 
 // BitgetResponse Bitget API response
 type BitgetResponse struct {
-	Code    string          `json:"code"`
-	Msg     string          `json:"msg"`
-	Data    json.RawMessage `json:"data"`
-	RequestTime int64       `json:"requestTime"`
+	Code        string          `json:"code"`
+	Msg         string          `json:"msg"`
+	Data        json.RawMessage `json:"data"`
+	RequestTime int64           `json:"requestTime"`
 }
 
 // NewBitgetTrader creates a Bitget trader
@@ -88,12 +92,13 @@ func NewBitgetTrader(apiKey, secretKey, passphrase string) *BitgetTrader {
 	}
 
 	trader := &BitgetTrader{
-		apiKey:         apiKey,
-		secretKey:      secretKey,
-		passphrase:     passphrase,
-		httpClient:     httpClient,
-		cacheDuration:  15 * time.Second,
-		contractsCache: make(map[string]*BitgetContract),
+		apiKey:          apiKey,
+		secretKey:       secretKey,
+		passphrase:      passphrase,
+		httpClient:      httpClient,
+		cacheDuration:   15 * time.Second,
+		contractsCache:  make(map[string]*BitgetContract),
+		marginModeCache: make(map[string]string),
 	}
 
 	// Set one-way position mode (net mode)
@@ -217,6 +222,30 @@ func (t *BitgetTrader) convertSymbol(symbol string) string {
 	return strings.ToUpper(symbol)
 }
 
+func (t *BitgetTrader) setMarginModeCache(symbol, marginMode string) {
+	symbol = t.convertSymbol(symbol)
+
+	t.marginModeCacheMutex.Lock()
+	if t.marginModeCache == nil {
+		t.marginModeCache = make(map[string]string)
+	}
+	t.marginModeCache[symbol] = marginMode
+	t.marginModeCacheMutex.Unlock()
+}
+
+func (t *BitgetTrader) getMarginMode(symbol string) string {
+	symbol = t.convertSymbol(symbol)
+
+	t.marginModeCacheMutex.RLock()
+	marginMode := t.marginModeCache[symbol]
+	t.marginModeCacheMutex.RUnlock()
+
+	if marginMode == "" {
+		return "crossed"
+	}
+	return marginMode
+}
+
 // GetBalance gets account balance
 func (t *BitgetTrader) GetBalance() (map[string]interface{}, error) {
 	// Check cache
@@ -237,11 +266,11 @@ func (t *BitgetTrader) GetBalance() (map[string]interface{}, error) {
 	}
 
 	var accounts []struct {
-		MarginCoin      string `json:"marginCoin"`
-		Available       string `json:"available"`       // Available balance
-		AccountEquity   string `json:"accountEquity"`   // Total equity
-		UsdtEquity      string `json:"usdtEquity"`      // USDT equity
-		UnrealizedPL    string `json:"unrealizedPL"`    // Unrealized P&L
+		MarginCoin    string `json:"marginCoin"`
+		Available     string `json:"available"`     // Available balance
+		AccountEquity string `json:"accountEquity"` // Total equity
+		UsdtEquity    string `json:"usdtEquity"`    // USDT equity
+		UnrealizedPL  string `json:"unrealizedPL"`  // Unrealized P&L
 	}
 
 	if err := json.Unmarshal(data, &accounts); err != nil {
@@ -438,6 +467,8 @@ func (t *BitgetTrader) SetMarginMode(symbol string, isCrossMargin bool) error {
 		marginMode = "crossed"
 	}
 
+	t.setMarginModeCache(symbol, marginMode)
+
 	body := map[string]interface{}{
 		"symbol":      symbol,
 		"productType": "USDT-FUTURES",
@@ -503,7 +534,7 @@ func (t *BitgetTrader) OpenLong(symbol string, quantity float64, leverage int) (
 	body := map[string]interface{}{
 		"symbol":      symbol,
 		"productType": "USDT-FUTURES",
-		"marginMode":  "crossed",
+		"marginMode":  t.getMarginMode(symbol),
 		"marginCoin":  "USDT",
 		"side":        "buy",
 		"orderType":   "market",
@@ -557,7 +588,7 @@ func (t *BitgetTrader) OpenShort(symbol string, quantity float64, leverage int) 
 	body := map[string]interface{}{
 		"symbol":      symbol,
 		"productType": "USDT-FUTURES",
-		"marginMode":  "crossed",
+		"marginMode":  t.getMarginMode(symbol),
 		"marginCoin":  "USDT",
 		"side":        "sell",
 		"orderType":   "market",
@@ -620,7 +651,7 @@ func (t *BitgetTrader) CloseLong(symbol string, quantity float64) (map[string]in
 	body := map[string]interface{}{
 		"symbol":      symbol,
 		"productType": "USDT-FUTURES",
-		"marginMode":  "crossed",
+		"marginMode":  t.getMarginMode(symbol),
 		"marginCoin":  "USDT",
 		"side":        "sell",
 		"orderType":   "market",
@@ -688,7 +719,7 @@ func (t *BitgetTrader) CloseShort(symbol string, quantity float64) (map[string]i
 	body := map[string]interface{}{
 		"symbol":      symbol,
 		"productType": "USDT-FUTURES",
-		"marginMode":  "crossed",
+		"marginMode":  t.getMarginMode(symbol),
 		"marginCoin":  "USDT",
 		"side":        "buy",
 		"orderType":   "market",
@@ -776,7 +807,7 @@ func (t *BitgetTrader) SetStopLoss(symbol string, positionSide string, quantity,
 		"planType":     "loss_plan",
 		"symbol":       symbol,
 		"productType":  "USDT-FUTURES",
-		"marginMode":   "crossed",
+		"marginMode":   t.getMarginMode(symbol),
 		"marginCoin":   "USDT",
 		"triggerPrice": fmt.Sprintf("%.8f", stopPrice),
 		"triggerType":  "mark_price",
@@ -790,7 +821,7 @@ func (t *BitgetTrader) SetStopLoss(symbol string, positionSide string, quantity,
 
 	_, err := t.doRequest("POST", "/api/v2/mix/order/place-plan-order", body)
 	if err != nil {
-		return fmt.Errorf("failed to set stop loss: %w", err)
+		return fmt.Errorf("failed to set stop loss (symbol=%s marginMode=%s): %w", symbol, t.getMarginMode(symbol), err)
 	}
 
 	logger.Infof("  ✓ [Bitget] Stop loss set: %s @ %.4f", symbol, stopPrice)
@@ -815,7 +846,7 @@ func (t *BitgetTrader) SetTakeProfit(symbol string, positionSide string, quantit
 		"planType":     "profit_plan",
 		"symbol":       symbol,
 		"productType":  "USDT-FUTURES",
-		"marginMode":   "crossed",
+		"marginMode":   t.getMarginMode(symbol),
 		"marginCoin":   "USDT",
 		"triggerPrice": fmt.Sprintf("%.8f", takeProfitPrice),
 		"triggerType":  "mark_price",
@@ -829,7 +860,7 @@ func (t *BitgetTrader) SetTakeProfit(symbol string, positionSide string, quantit
 
 	_, err := t.doRequest("POST", "/api/v2/mix/order/place-plan-order", body)
 	if err != nil {
-		return fmt.Errorf("failed to set take profit: %w", err)
+		return fmt.Errorf("failed to set take profit (symbol=%s marginMode=%s): %w", symbol, t.getMarginMode(symbol), err)
 	}
 
 	logger.Infof("  ✓ [Bitget] Take profit set: %s @ %.4f", symbol, takeProfitPrice)
@@ -964,15 +995,15 @@ func (t *BitgetTrader) GetOrderStatus(symbol string, orderID string) (map[string
 	}
 
 	var order struct {
-		OrderId      string `json:"orderId"`
-		State        string `json:"state"`        // filled, canceled, partially_filled, new
-		PriceAvg     string `json:"priceAvg"`     // Average fill price
-		BaseVolume   string `json:"baseVolume"`   // Filled quantity
-		Fee          string `json:"fee"`          // Fee
-		Side         string `json:"side"`
-		OrderType    string `json:"orderType"`
-		CTime        string `json:"cTime"`
-		UTime        string `json:"uTime"`
+		OrderId    string `json:"orderId"`
+		State      string `json:"state"`      // filled, canceled, partially_filled, new
+		PriceAvg   string `json:"priceAvg"`   // Average fill price
+		BaseVolume string `json:"baseVolume"` // Filled quantity
+		Fee        string `json:"fee"`        // Fee
+		Side       string `json:"side"`
+		OrderType  string `json:"orderType"`
+		CTime      string `json:"cTime"`
+		UTime      string `json:"uTime"`
 	}
 
 	if err := json.Unmarshal(data, &order); err != nil {
@@ -1034,16 +1065,16 @@ func (t *BitgetTrader) GetClosedPnL(startTime time.Time, limit int) ([]ClosedPnL
 
 	var resp struct {
 		List []struct {
-			Symbol       string `json:"symbol"`
-			HoldSide     string `json:"holdSide"`
-			OpenPriceAvg string `json:"openPriceAvg"`
-			ClosePriceAvg string `json:"closePriceAvg"`
-			CloseVol     string `json:"closeVol"`
+			Symbol          string `json:"symbol"`
+			HoldSide        string `json:"holdSide"`
+			OpenPriceAvg    string `json:"openPriceAvg"`
+			ClosePriceAvg   string `json:"closePriceAvg"`
+			CloseVol        string `json:"closeVol"`
 			AchievedProfits string `json:"achievedProfits"`
-			TotalFee     string `json:"totalFee"`
-			Leverage     string `json:"leverage"`
-			CTime        string `json:"cTime"`
-			UTime        string `json:"uTime"`
+			TotalFee        string `json:"totalFee"`
+			Leverage        string `json:"leverage"`
+			CTime           string `json:"cTime"`
+			UTime           string `json:"uTime"`
 		} `json:"list"`
 	}
 

@@ -500,6 +500,16 @@ func GetSchemaPrompt(lang Language) string {
 	return getSchemaPromptEN()
 }
 
+// GetSchemaPromptLite returns a compact data dictionary intended for the analysis layer.
+// It includes field definitions only (no OI interpretation and no "common mistakes") to
+// reduce tokens and avoid directional language in the analysis stage.
+func GetSchemaPromptLite(lang Language) string {
+	if lang == LangChinese {
+		return getSchemaPromptLiteZH()
+	}
+	return getSchemaPromptLiteEN()
+}
+
 // getSchemaPromptZH 生成中文Prompt
 func getSchemaPromptZH() string {
 	prompt := "# 📖 数据字典\n\n"
@@ -554,6 +564,43 @@ func getSchemaPromptZH() string {
 	return prompt
 }
 
+func getSchemaPromptLiteZH() string {
+	prompt := "# 📖 数据字典（精简版）\n\n"
+	prompt += "## 📊 字段含义说明\n\n"
+
+	// 账户指标
+	prompt += "### 账户指标\n"
+	for key, field := range DataDictionary["AccountMetrics"] {
+		prompt += formatFieldDefZH(key, field)
+	}
+
+	// 交易指标
+	prompt += "\n### 交易指标\n"
+	for key, field := range DataDictionary["TradeMetrics"] {
+		prompt += formatFieldDefZH(key, field)
+	}
+
+	// 持仓指标
+	prompt += "\n### 持仓指标\n"
+	for key, field := range DataDictionary["PositionMetrics"] {
+		prompt += formatFieldDefZH(key, field)
+	}
+
+	// 市场数据
+	prompt += "\n### 市场数据\n"
+	for key, field := range DataDictionary["MarketData"] {
+		prompt += formatFieldDefZH(key, field)
+	}
+
+	// 技术分析
+	prompt += "\n### 技术分析\n"
+	for key, field := range DataDictionary["TechnicalAnalysis"] {
+		prompt += formatFieldDefZH(key, field)
+	}
+
+	return prompt
+}
+
 // getSchemaPromptEN 生成英文Prompt
 func getSchemaPromptEN() string {
 	prompt := "# 📖 Data Dictionary\n\n"
@@ -603,6 +650,43 @@ func getSchemaPromptEN() string {
 		prompt += fmt.Sprintf("**Mistake %d**: %s\n", i+1, mistake.ErrorEN)
 		prompt += "- Bad Example: " + mistake.ExampleEN + "\n"
 		prompt += "- Correct Approach: " + mistake.CorrectEN + "\n\n"
+	}
+
+	return prompt
+}
+
+func getSchemaPromptLiteEN() string {
+	prompt := "# 📖 Data Dictionary (Lite)\n\n"
+	prompt += "## 📊 Field Definitions\n\n"
+
+	// Account Metrics
+	prompt += "### Account Metrics\n"
+	for key, field := range DataDictionary["AccountMetrics"] {
+		prompt += formatFieldDefEN(key, field)
+	}
+
+	// Trade Metrics
+	prompt += "\n### Trade Metrics\n"
+	for key, field := range DataDictionary["TradeMetrics"] {
+		prompt += formatFieldDefEN(key, field)
+	}
+
+	// Position Metrics
+	prompt += "\n### Position Metrics\n"
+	for key, field := range DataDictionary["PositionMetrics"] {
+		prompt += formatFieldDefEN(key, field)
+	}
+
+	// Market Data
+	prompt += "\n### Market Data\n"
+	for key, field := range DataDictionary["MarketData"] {
+		prompt += formatFieldDefEN(key, field)
+	}
+
+	// Technical Analysis
+	prompt += "\n### Technical Analysis\n"
+	for key, field := range DataDictionary["TechnicalAnalysis"] {
+		prompt += formatFieldDefEN(key, field)
 	}
 
 	return prompt

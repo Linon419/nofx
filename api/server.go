@@ -409,6 +409,8 @@ func (s *Server) getTraderFromQuery(c *gin.Context) (*manager.TraderManager, str
 type CreateTraderRequest struct {
 	Name                string  `json:"name" binding:"required"`
 	AIModelID           string  `json:"ai_model_id" binding:"required"`
+	AnalysisAIModelID   string  `json:"analysis_ai_model_id"`
+	VisionAIModelID     string  `json:"vision_ai_model_id"`
 	ExchangeID          string  `json:"exchange_id" binding:"required"`
 	StrategyID          string  `json:"strategy_id"` // Strategy ID (new version)
 	InitialBalance      float64 `json:"initial_balance"`
@@ -700,6 +702,8 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 		UserID:               userID,
 		Name:                 req.Name,
 		AIModelID:            req.AIModelID,
+		AnalysisAIModelID:    strings.TrimSpace(req.AnalysisAIModelID),
+		VisionAIModelID:      strings.TrimSpace(req.VisionAIModelID),
 		ExchangeID:           req.ExchangeID,
 		StrategyID:           req.StrategyID, // Associated strategy ID (new version)
 		InitialBalance:       actualBalance,  // Use actual queried balance
@@ -751,6 +755,8 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 type UpdateTraderRequest struct {
 	Name                string  `json:"name" binding:"required"`
 	AIModelID           string  `json:"ai_model_id" binding:"required"`
+	AnalysisAIModelID   *string `json:"analysis_ai_model_id"`
+	VisionAIModelID     *string `json:"vision_ai_model_id"`
 	ExchangeID          string  `json:"exchange_id" binding:"required"`
 	StrategyID          string  `json:"strategy_id"` // Strategy ID (new version)
 	InitialBalance      float64 `json:"initial_balance"`
@@ -840,12 +846,26 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		strategyID = existingTrader.StrategyID
 	}
 
+	// Handle vision model ID (nil => keep, non-nil => set; empty string clears to fallback behavior)
+	visionAIModelID := existingTrader.VisionAIModelID
+	if req.VisionAIModelID != nil {
+		visionAIModelID = strings.TrimSpace(*req.VisionAIModelID)
+	}
+
+	// Handle analysis model ID (nil => keep, non-nil => set; empty string means "use decision model")
+	analysisAIModelID := existingTrader.AnalysisAIModelID
+	if req.AnalysisAIModelID != nil {
+		analysisAIModelID = strings.TrimSpace(*req.AnalysisAIModelID)
+	}
+
 	// Update trader configuration
 	traderRecord := &store.Trader{
 		ID:                   traderID,
 		UserID:               userID,
 		Name:                 req.Name,
 		AIModelID:            req.AIModelID,
+		AnalysisAIModelID:    analysisAIModelID,
+		VisionAIModelID:      visionAIModelID,
 		ExchangeID:           req.ExchangeID,
 		StrategyID:           strategyID, // Associated strategy ID
 		InitialBalance:       req.InitialBalance,
@@ -2249,6 +2269,8 @@ func (s *Server) handleGetTraderConfig(c *gin.Context) {
 		"trader_id":             traderConfig.ID,
 		"trader_name":           traderConfig.Name,
 		"ai_model":              aiModelID,
+		"analysis_ai_model_id":  traderConfig.AnalysisAIModelID,
+		"vision_ai_model_id":    traderConfig.VisionAIModelID,
 		"exchange_id":           traderConfig.ExchangeID,
 		"strategy_id":           traderConfig.StrategyID,
 		"initial_balance":       traderConfig.InitialBalance,

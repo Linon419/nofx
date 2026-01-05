@@ -211,6 +211,16 @@ func (BacktestDecision) TableName() string {
 
 // initTables initializes backtest related tables
 func (s *BacktestStore) initTables() error {
+	// SQLite: avoid GORM AutoMigrate table-rebuild behavior (can fail on existing data)
+	if s.db.Dialector.Name() == "sqlite" {
+		if s.db.Migrator().HasTable(&BacktestRun{}) {
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_backtest_equity_run_ts ON backtest_equity(run_id, ts)`)
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_backtest_trades_run_ts ON backtest_trades(run_id, ts)`)
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_backtest_decisions_run_cycle ON backtest_decisions(run_id, cycle)`)
+			return nil
+		}
+	}
+
 	// For PostgreSQL with existing tables, skip AutoMigrate to avoid type conflicts
 	if s.db.Dialector.Name() == "postgres" {
 		var tableExists int64

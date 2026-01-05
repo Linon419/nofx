@@ -23,6 +23,20 @@ type AutoTraderConfig struct {
 	Name    string // Trader display name
 	AIModel string // AI model: "qwen" or "deepseek"
 
+	// Optional dedicated analysis model configuration (text-only).
+	// If AnalysisAIModel is empty, the decision model is used for analysis as well.
+	AnalysisAIModel         string // Provider name (e.g. "openai", "claude", "gemini")
+	AnalysisAPIKey          string // API key for analysis model (encrypted in DB, loaded into memory here)
+	AnalysisCustomAPIURL    string // Optional custom base URL (OpenAI-compatible)
+	AnalysisCustomModelName string // Optional custom model name
+
+	// Optional dedicated vision (chart-reading) model configuration.
+	// If VisionAIModel is empty, the decision model is used for vision as well.
+	VisionAIModel         string // Provider name (e.g. "openai", "claude", "gemini")
+	VisionAPIKey          string // API key for vision model (encrypted in DB, loaded into memory here)
+	VisionCustomAPIURL    string // Optional custom base URL (OpenAI-compatible)
+	VisionCustomModelName string // Optional custom model name
+
 	// Trading platform selection
 	Exchange   string // Exchange type: "binance", "bybit", "okx", "bitget", "hyperliquid", "aster" or "lighter"
 	ExchangeID string // Exchange account UUID (for multi-account support)
@@ -104,6 +118,7 @@ type AutoTrader struct {
 	config                AutoTraderConfig
 	trader                Trader // Use Trader interface (supports multiple platforms)
 	mcpClient             mcp.AIClient
+	analysisClient        mcp.AIClient
 	store                 *store.Store             // Data storage (decision records, etc.)
 	strategyEngine        *decision.StrategyEngine // Strategy engine (uses strategy configuration)
 	cycleNumber           int                      // Current cycle number
@@ -132,6 +147,27 @@ type AutoTrader struct {
 	pendingStrategyConfigMu     sync.Mutex
 	pendingStrategyConfig       *store.StrategyConfig
 	pendingStrategyUpdateSource string
+}
+
+func newMCPClientByProvider(provider string) mcp.AIClient {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "claude":
+		return mcp.NewClaudeClient()
+	case "kimi":
+		return mcp.NewKimiClient()
+	case "gemini":
+		return mcp.NewGeminiClient()
+	case "grok":
+		return mcp.NewGrokClient()
+	case "openai":
+		return mcp.NewOpenAIClient()
+	case "qwen":
+		return mcp.NewQwenClient()
+	case "custom":
+		return mcp.New()
+	default: // deepseek or empty
+		return mcp.NewDeepSeekClient()
+	}
 }
 
 // NewAutoTrader creates an automatic trader
@@ -209,8 +245,53 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		logger.Infof("🤖 [%s] Using DeepSeek AI", config.Name)
 	}
 
+	decisionClient := mcpClient
+	analysisClient := decisionClient
+
 	if config.CustomAPIURL != "" || config.CustomModelName != "" {
 		logger.Infof("🔧 [%s] Custom config - URL: %s, Model: %s", config.Name, config.CustomAPIURL, config.CustomModelName)
+	}
+
+	// Optional dedicated analysis client (text-only, used before final decision).
+	analysisProvider := strings.TrimSpace(config.AnalysisAIModel)
+	analysisKey := strings.TrimSpace(config.AnalysisAPIKey)
+	if analysisProvider != "" {
+		if analysisKey == "" {
+			logger.Infof("⚠️ [%s] Analysis model configured (%s) but API key is empty; falling back to decision model for analysis", config.Name, analysisProvider)
+		} else {
+			preClient := newMCPClientByProvider(analysisProvider)
+			if preClient == nil {
+				logger.Infof("⚠️ [%s] Analysis model provider %s not supported; falling back to decision model for analysis", config.Name, analysisProvider)
+			} else {
+				preClient.SetAPIKey(analysisKey, config.AnalysisCustomAPIURL, config.AnalysisCustomModelName)
+				analysisClient = preClient
+				logger.Infof("🔎 [%s] Using dedicated analysis AI: %s", config.Name, analysisProvider)
+				if config.AnalysisCustomAPIURL != "" || config.AnalysisCustomModelName != "" {
+					logger.Infof("🔧 [%s] Analysis custom config - URL: %s, Model: %s", config.Name, config.AnalysisCustomAPIURL, config.AnalysisCustomModelName)
+				}
+			}
+		}
+	}
+
+	// Optional dedicated vision client (used only for multimodal requests with images).
+	visionProvider := strings.TrimSpace(config.VisionAIModel)
+	visionKey := strings.TrimSpace(config.VisionAPIKey)
+	if visionProvider != "" {
+		if visionKey == "" {
+			logger.Infof("⚠️ [%s] Vision model configured (%s) but API key is empty; falling back to decision model for vision", config.Name, visionProvider)
+		} else {
+			visionClient := newMCPClientByProvider(visionProvider)
+			if visionClient == nil {
+				logger.Infof("⚠️ [%s] Vision model provider %s not supported; falling back to decision model for vision", config.Name, visionProvider)
+			} else {
+				visionClient.SetAPIKey(visionKey, config.VisionCustomAPIURL, config.VisionCustomModelName)
+				mcpClient = mcp.NewSplitClient(decisionClient, visionClient)
+				logger.Infof("👁️ [%s] Using dedicated vision AI: %s", config.Name, visionProvider)
+				if config.VisionCustomAPIURL != "" || config.VisionCustomModelName != "" {
+					logger.Infof("🔧 [%s] Vision custom config - URL: %s, Model: %s", config.Name, config.VisionCustomAPIURL, config.VisionCustomModelName)
+				}
+			}
+		}
 	}
 
 	// Set default trading platform
@@ -332,6 +413,7 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		config:                config,
 		trader:                trader,
 		mcpClient:             mcpClient,
+		analysisClient:        analysisClient,
 		store:                 st,
 		strategyEngine:        strategyEngine,
 		cycleNumber:           cycleNumber,
@@ -610,7 +692,7 @@ func (at *AutoTrader) runCycle() error {
 	// 5. Use strategy engine to call AI for decision
 	logger.Infof("🤖 Requesting AI analysis and decision... [Strategy Engine]")
 	nextCycleNumber := at.cycleNumber + 1
-	aiDecision, err := decision.GetFullDecisionWithStrategy(ctx, at.mcpClient, at.strategyEngine, "balanced", at.id, nextCycleNumber)
+	aiDecision, err := decision.GetFullDecisionWithStrategyWithAnalysis(ctx, at.mcpClient, at.analysisClient, at.strategyEngine, "balanced", at.id, nextCycleNumber)
 
 	if aiDecision != nil && aiDecision.AIRequestDurationMs > 0 {
 		record.AIRequestDurationMs = aiDecision.AIRequestDurationMs
@@ -1167,6 +1249,7 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *decision.Decision, act
 	}
 
 	at.applyATRLeverageAndSize(decision, marketData.CurrentPrice, equity)
+	at.applyStopLossSizing(decision, marketData.CurrentPrice, equity)
 
 	// [CODE ENFORCED] Position Value Ratio Check: position_value <= equity × ratio
 	adjustedPositionSize, wasCapped := at.enforcePositionValueRatio(decision.PositionSizeUSD, equity, decision.Symbol)
@@ -1288,6 +1371,7 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *decision.Decision, ac
 	}
 
 	at.applyATRLeverageAndSize(decision, marketData.CurrentPrice, equity)
+	at.applyStopLossSizing(decision, marketData.CurrentPrice, equity)
 
 	// [CODE ENFORCED] Position Value Ratio Check: position_value <= equity × ratio
 	adjustedPositionSize, wasCapped := at.enforcePositionValueRatio(decision.PositionSizeUSD, equity, decision.Symbol)
@@ -2346,6 +2430,56 @@ func (at *AutoTrader) applyATRLeverageAndSize(dec *decision.Decision, entryPrice
 			result.MaxATR24h,
 			oldLeverage,
 			dec.Leverage,
+			oldPositionSize,
+			dec.PositionSizeUSD,
+		)
+	}
+}
+
+func (at *AutoTrader) applyStopLossSizing(dec *decision.Decision, entryPrice float64, equity float64) {
+	if at == nil || dec == nil || at.config.StrategyConfig == nil {
+		return
+	}
+	riskControl := at.config.StrategyConfig.RiskControl
+
+	// When ATR leverage is enabled, stop-loss sizing is already enforced as part of ATR override.
+	if riskControl.ATREnabled {
+		return
+	}
+	if !riskControl.StopLossSizingEnabled {
+		return
+	}
+	if equity <= 0 || entryPrice <= 0 {
+		return
+	}
+	if dec.Leverage <= 0 || dec.StopLoss <= 0 {
+		return
+	}
+
+	riskPct := riskControl.StopLossRiskPct
+	if riskPct <= 0 {
+		riskPct = 5.0
+	}
+
+	stopDistPct := stopDistancePct(entryPrice, dec.StopLoss)
+	if stopDistPct <= 0 {
+		return
+	}
+
+	oldPositionSize := dec.PositionSizeUSD
+	newSize := decision.CalcPositionSizeByStopLoss(equity, riskPct, stopDistPct, dec.Leverage)
+	if newSize > 0 {
+		dec.PositionSizeUSD = newSize
+	}
+
+	if dec.PositionSizeUSD != oldPositionSize {
+		logger.Infof(
+			"  🎯 [SL-Sizing] %s equity=%.2f risk=%.2f%% lev=%dx stopDist=%.2f%% size %.2f->%.2f",
+			dec.Symbol,
+			equity,
+			riskPct,
+			dec.Leverage,
+			stopDistPct,
 			oldPositionSize,
 			dec.PositionSizeUSD,
 		)

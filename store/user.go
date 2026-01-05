@@ -42,6 +42,24 @@ func NewUserStore(db *gorm.DB) *UserStore {
 }
 
 func (s *UserStore) initTables() error {
+	// SQLite: avoid GORM AutoMigrate table-rebuild behavior (can fail on existing data)
+	if s.db.Dialector.Name() == "sqlite" {
+		if s.db.Migrator().HasTable(&User{}) {
+			s.db.Exec(`UPDATE users SET email = COALESCE(email, id || '@local') WHERE email IS NULL`)
+			s.db.Exec(`UPDATE users SET password_hash = COALESCE(password_hash, '') WHERE password_hash IS NULL`)
+
+			if !s.db.Migrator().HasColumn(&User{}, "OTPSecret") {
+				_ = s.db.Migrator().AddColumn(&User{}, "OTPSecret")
+			}
+			if !s.db.Migrator().HasColumn(&User{}, "OTPVerified") {
+				_ = s.db.Migrator().AddColumn(&User{}, "OTPVerified")
+			}
+
+			s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)`)
+			return nil
+		}
+	}
+
 	// For PostgreSQL with existing table, skip AutoMigrate to avoid index conflicts
 	if s.db.Dialector.Name() == "postgres" {
 		var tableExists int64

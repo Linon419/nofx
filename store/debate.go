@@ -74,11 +74,11 @@ type DebateSession struct {
 	Name            string            `json:"name"`
 	StrategyID      string            `json:"strategy_id"`
 	Status          DebateStatus      `json:"status"`
-	Symbol          string            `json:"symbol"`           // Primary symbol (for backward compat, may be empty for multi-coin)
+	Symbol          string            `json:"symbol"` // Primary symbol (for backward compat, may be empty for multi-coin)
 	MaxRounds       int               `json:"max_rounds"`
 	CurrentRound    int               `json:"current_round"`
-	IntervalMinutes int               `json:"interval_minutes"` // Debate interval (5, 15, 30, 60 minutes)
-	PromptVariant   string            `json:"prompt_variant"`   // balanced/aggressive/conservative/scalping
+	IntervalMinutes int               `json:"interval_minutes"`          // Debate interval (5, 15, 30, 60 minutes)
+	PromptVariant   string            `json:"prompt_variant"`            // balanced/aggressive/conservative/scalping
 	FinalDecision   *DebateDecision   `json:"final_decision,omitempty"`  // Single decision (backward compat)
 	FinalDecisions  []*DebateDecision `json:"final_decisions,omitempty"` // Multi-coin decisions
 	AutoExecute     bool              `json:"auto_execute"`
@@ -191,9 +191,9 @@ type DebateMessage struct {
 	Personality DebatePersonality `gorm:"column:personality;not null" json:"personality"`
 	MessageType string            `gorm:"column:message_type;not null" json:"message_type"` // analysis/rebuttal/final/vote
 	Content     string            `gorm:"column:content;not null" json:"content"`
-	DecisionRaw string            `gorm:"column:decision" json:"-"`                       // JSON string in DB
-	Decision    *DebateDecision   `gorm:"-" json:"decision,omitempty"`                    // Parsed for API
-	Decisions   []*DebateDecision `gorm:"-" json:"decisions,omitempty"`                   // Multi-coin decisions
+	DecisionRaw string            `gorm:"column:decision" json:"-"`     // JSON string in DB
+	Decision    *DebateDecision   `gorm:"-" json:"decision,omitempty"`  // Parsed for API
+	Decisions   []*DebateDecision `gorm:"-" json:"decisions,omitempty"` // Multi-coin decisions
 	Confidence  int               `gorm:"column:confidence;default:0" json:"confidence"`
 	CreatedAt   time.Time         `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 }
@@ -208,8 +208,8 @@ type DebateVote struct {
 	SessionID     string            `gorm:"column:session_id;not null;index" json:"session_id"`
 	AIModelID     string            `gorm:"column:ai_model_id;not null" json:"ai_model_id"`
 	AIModelName   string            `gorm:"column:ai_model_name;not null" json:"ai_model_name"`
-	Action        string            `gorm:"column:action;not null" json:"action"`   // Primary action (backward compat)
-	Symbol        string            `gorm:"column:symbol;not null" json:"symbol"`   // Primary symbol (backward compat)
+	Action        string            `gorm:"column:action;not null" json:"action"` // Primary action (backward compat)
+	Symbol        string            `gorm:"column:symbol;not null" json:"symbol"` // Primary symbol (backward compat)
 	Confidence    int               `gorm:"column:confidence;default:0" json:"confidence"`
 	Leverage      int               `gorm:"column:leverage;default:5" json:"leverage"`
 	PositionPct   float64           `gorm:"column:position_pct;default:0.2" json:"position_pct"`
@@ -236,6 +236,86 @@ func NewDebateStore(db *gorm.DB) *DebateStore {
 
 // InitSchema creates the debate tables using GORM AutoMigrate
 func (s *DebateStore) InitSchema() error {
+	// SQLite: avoid GORM AutoMigrate table-rebuild behavior (can fail on existing data)
+	if s.db.Dialector.Name() == "sqlite" {
+		if s.db.Migrator().HasTable(&DebateSessionDB{}) {
+			for _, field := range []string{
+				"UserID",
+				"Name",
+				"StrategyID",
+				"Status",
+				"Symbol",
+				"MaxRounds",
+				"CurrentRound",
+				"IntervalMinutes",
+				"PromptVariant",
+				"FinalDecision",
+				"AutoExecute",
+				"TraderID",
+				"EnableOIRanking",
+				"OIRankingLimit",
+				"OIDuration",
+				"CreatedAt",
+				"UpdatedAt",
+			} {
+				if !s.db.Migrator().HasColumn(&DebateSessionDB{}, field) {
+					_ = s.db.Migrator().AddColumn(&DebateSessionDB{}, field)
+				}
+			}
+			for _, field := range []string{
+				"SessionID",
+				"AIModelID",
+				"AIModelName",
+				"Personality",
+				"Position",
+				"JoinedAt",
+			} {
+				if !s.db.Migrator().HasColumn(&DebateParticipant{}, field) {
+					_ = s.db.Migrator().AddColumn(&DebateParticipant{}, field)
+				}
+			}
+			for _, field := range []string{
+				"ID",
+				"SessionID",
+				"Round",
+				"AIModelID",
+				"AIModelName",
+				"Personality",
+				"Role",
+				"Content",
+				"CreatedAt",
+			} {
+				if !s.db.Migrator().HasColumn(&DebateMessage{}, field) {
+					_ = s.db.Migrator().AddColumn(&DebateMessage{}, field)
+				}
+			}
+			for _, field := range []string{
+				"SessionID",
+				"AIModelID",
+				"AIModelName",
+				"Action",
+				"Symbol",
+				"Confidence",
+				"Leverage",
+				"PositionPct",
+				"StopLossPct",
+				"TakeProfitPct",
+				"Reasoning",
+				"CreatedAt",
+			} {
+				if !s.db.Migrator().HasColumn(&DebateVote{}, field) {
+					_ = s.db.Migrator().AddColumn(&DebateVote{}, field)
+				}
+			}
+
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_debate_sessions_user_id ON debate_sessions(user_id)`)
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_debate_participants_session_id ON debate_participants(session_id)`)
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_debate_messages_session_id ON debate_messages(session_id)`)
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_debate_votes_session_id ON debate_votes(session_id)`)
+			return nil
+		}
+	}
+
 	return s.db.AutoMigrate(
 		&DebateSessionDB{},
 		&DebateParticipant{},

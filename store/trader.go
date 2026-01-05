@@ -23,6 +23,8 @@ type Trader struct {
 	UserID              string    `gorm:"column:user_id;not null;default:default;index" json:"user_id"`
 	Name                string    `gorm:"column:name;not null" json:"name"`
 	AIModelID           string    `gorm:"column:ai_model_id;not null" json:"ai_model_id"`
+	AnalysisAIModelID   string    `gorm:"column:analysis_ai_model_id;not null;default:''" json:"analysis_ai_model_id"`
+	VisionAIModelID     string    `gorm:"column:vision_ai_model_id;not null;default:''" json:"vision_ai_model_id"`
 	ExchangeID          string    `gorm:"column:exchange_id;not null" json:"exchange_id"`
 	StrategyID          string    `gorm:"column:strategy_id;default:''" json:"strategy_id"`
 	InitialBalance      float64   `gorm:"column:initial_balance;not null" json:"initial_balance"`
@@ -59,11 +61,54 @@ type TraderFullConfig struct {
 }
 
 func (s *TraderStore) initTables() error {
+	// SQLite: avoid GORM AutoMigrate table-rebuild behavior (can fail on existing data)
+	if s.db.Dialector.Name() == "sqlite" {
+		if s.db.Migrator().HasTable(&Trader{}) {
+			for _, field := range []string{
+				"UserID",
+				"Name",
+				"AIModelID",
+				"AnalysisAIModelID",
+				"VisionAIModelID",
+				"ExchangeID",
+				"StrategyID",
+				"InitialBalance",
+				"ScanIntervalMinutes",
+				"IsRunning",
+				"IsCrossMargin",
+				"ShowInCompetition",
+				"BTCETHLeverage",
+				"AltcoinLeverage",
+				"TradingSymbols",
+				"UseAI500",
+				"UseOITop",
+				"UseOTCTop",
+				"CustomPrompt",
+				"OverrideBasePrompt",
+				"SystemPromptTemplate",
+				"CreatedAt",
+				"UpdatedAt",
+			} {
+				if !s.db.Migrator().HasColumn(&Trader{}, field) {
+					_ = s.db.Migrator().AddColumn(&Trader{}, field)
+				}
+			}
+
+			s.db.Exec(`UPDATE traders SET analysis_ai_model_id = '' WHERE analysis_ai_model_id IS NULL`)
+			s.db.Exec(`UPDATE traders SET vision_ai_model_id = '' WHERE vision_ai_model_id IS NULL`)
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_traders_user_id ON traders(user_id)`)
+			return nil
+		}
+	}
+
 	// For PostgreSQL with existing table, skip AutoMigrate
 	if s.db.Dialector.Name() == "postgres" {
 		var tableExists int64
 		s.db.Raw(`SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'traders'`).Scan(&tableExists)
 		if tableExists > 0 {
+			// Ensure new columns exist without relying on AutoMigrate (which may be skipped for existing Postgres tables).
+			s.db.Exec(`ALTER TABLE traders ADD COLUMN IF NOT EXISTS analysis_ai_model_id TEXT NOT NULL DEFAULT ''`)
+			s.db.Exec(`ALTER TABLE traders ADD COLUMN IF NOT EXISTS vision_ai_model_id TEXT NOT NULL DEFAULT ''`)
 			return nil
 		}
 	}
@@ -111,12 +156,14 @@ func (s *TraderStore) Update(trader *Trader) error {
 		trader.ID, trader.Name, trader.AIModelID, trader.StrategyID)
 
 	updates := map[string]interface{}{
-		"name":                trader.Name,
-		"ai_model_id":         trader.AIModelID,
-		"exchange_id":         trader.ExchangeID,
-		"strategy_id":         trader.StrategyID,
-		"is_cross_margin":     trader.IsCrossMargin,
-		"show_in_competition": trader.ShowInCompetition,
+		"name":                 trader.Name,
+		"ai_model_id":          trader.AIModelID,
+		"analysis_ai_model_id": trader.AnalysisAIModelID,
+		"vision_ai_model_id":   trader.VisionAIModelID,
+		"exchange_id":          trader.ExchangeID,
+		"strategy_id":          trader.StrategyID,
+		"is_cross_margin":      trader.IsCrossMargin,
+		"show_in_competition":  trader.ShowInCompetition,
 	}
 
 	// Only update these if > 0

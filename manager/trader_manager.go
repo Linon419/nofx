@@ -9,6 +9,7 @@ import (
 	"nofx/store"
 	"nofx/trader"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -467,21 +468,7 @@ func (tm *TraderManager) LoadUserTradersFromStore(st *store.Store, userID string
 		}
 
 		// Find AI model config from already queried list
-		var aiModelCfg *store.AIModel
-		for _, model := range aiModels {
-			if model.ID == traderCfg.AIModelID {
-				aiModelCfg = model
-				break
-			}
-		}
-		if aiModelCfg == nil {
-			for _, model := range aiModels {
-				if model.Provider == traderCfg.AIModelID {
-					aiModelCfg = model
-					break
-				}
-			}
-		}
+		aiModelCfg := findAIModel(aiModels, traderCfg.AIModelID)
 
 		if aiModelCfg == nil {
 			logger.Infof("⚠️ AI model %s for trader %s does not exist, skipping", traderCfg.AIModelID, traderCfg.Name)
@@ -512,9 +499,33 @@ func (tm *TraderManager) LoadUserTradersFromStore(st *store.Store, userID string
 			continue
 		}
 
+		// Optional analysis model config (fallback to decision model if missing/disabled)
+		var analysisModelCfg *store.AIModel
+		if strings.TrimSpace(traderCfg.AnalysisAIModelID) != "" {
+			analysisModelCfg = findAIModel(aiModels, traderCfg.AnalysisAIModelID)
+			if analysisModelCfg == nil {
+				logger.Infof("⚠️ Analysis AI model %s for trader %s not found; falling back to decision model", traderCfg.AnalysisAIModelID, traderCfg.Name)
+			} else if !analysisModelCfg.Enabled {
+				logger.Infof("⚠️ Analysis AI model %s for trader %s is disabled; falling back to decision model", traderCfg.AnalysisAIModelID, traderCfg.Name)
+				analysisModelCfg = nil
+			}
+		}
+
+		// Optional vision model config (fallback to decision model if missing/disabled)
+		var visionModelCfg *store.AIModel
+		if strings.TrimSpace(traderCfg.VisionAIModelID) != "" {
+			visionModelCfg = findAIModel(aiModels, traderCfg.VisionAIModelID)
+			if visionModelCfg == nil {
+				logger.Infof("⚠️ Vision AI model %s for trader %s not found; falling back to decision model", traderCfg.VisionAIModelID, traderCfg.Name)
+			} else if !visionModelCfg.Enabled {
+				logger.Infof("⚠️ Vision AI model %s for trader %s is disabled; falling back to decision model", traderCfg.VisionAIModelID, traderCfg.Name)
+				visionModelCfg = nil
+			}
+		}
+
 		// Use existing method to load trader
 		logger.Infof("📦 Loading trader %s (AI Model: %s, Exchange: %s/%s, Strategy ID: %s)", traderCfg.Name, aiModelCfg.Provider, exchangeCfg.ExchangeType, exchangeCfg.AccountName, traderCfg.StrategyID)
-		err = tm.addTraderFromStore(traderCfg, aiModelCfg, exchangeCfg, st)
+		err = tm.addTraderFromStore(traderCfg, aiModelCfg, analysisModelCfg, visionModelCfg, exchangeCfg, st)
 		if err != nil {
 			logger.Infof("❌ Failed to load trader %s: %v", traderCfg.Name, err)
 			// Save error for later retrieval
@@ -618,8 +629,30 @@ func (tm *TraderManager) LoadTradersFromStore(st *store.Store) error {
 			continue
 		}
 
+		var analysisModelCfg *store.AIModel
+		if strings.TrimSpace(traderCfg.AnalysisAIModelID) != "" {
+			analysisModelCfg = findAIModel(aiModels, traderCfg.AnalysisAIModelID)
+			if analysisModelCfg == nil {
+				logger.Infof("⚠️  Analysis AI model %s for trader %s not found; falling back to decision model", traderCfg.AnalysisAIModelID, traderCfg.Name)
+			} else if !analysisModelCfg.Enabled {
+				logger.Infof("⚠️  Analysis AI model %s for trader %s is disabled; falling back to decision model", traderCfg.AnalysisAIModelID, traderCfg.Name)
+				analysisModelCfg = nil
+			}
+		}
+
+		var visionModelCfg *store.AIModel
+		if strings.TrimSpace(traderCfg.VisionAIModelID) != "" {
+			visionModelCfg = findAIModel(aiModels, traderCfg.VisionAIModelID)
+			if visionModelCfg == nil {
+				logger.Infof("⚠️  Vision AI model %s for trader %s not found; falling back to decision model", traderCfg.VisionAIModelID, traderCfg.Name)
+			} else if !visionModelCfg.Enabled {
+				logger.Infof("⚠️  Vision AI model %s for trader %s is disabled; falling back to decision model", traderCfg.VisionAIModelID, traderCfg.Name)
+				visionModelCfg = nil
+			}
+		}
+
 		// Add to TraderManager (ai500APIURL/oiTopAPIURL already obtained from strategy config)
-		err = tm.addTraderFromStore(traderCfg, aiModelCfg, exchangeCfg, st)
+		err = tm.addTraderFromStore(traderCfg, aiModelCfg, analysisModelCfg, visionModelCfg, exchangeCfg, st)
 		if err != nil {
 			logger.Infof("❌ Failed to add trader %s: %v", traderCfg.Name, err)
 			continue
@@ -631,7 +664,7 @@ func (tm *TraderManager) LoadTradersFromStore(st *store.Store) error {
 }
 
 // addTraderFromStore internal method: adds trader from store configuration
-func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg *store.AIModel, exchangeCfg *store.Exchange, st *store.Store) error {
+func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg *store.AIModel, analysisModelCfg *store.AIModel, visionModelCfg *store.AIModel, exchangeCfg *store.Exchange, st *store.Store) error {
 	if _, exists := tm.traders[traderCfg.ID]; exists {
 		return fmt.Errorf("trader ID '%s' already exists", traderCfg.ID)
 	}
@@ -721,6 +754,20 @@ func (tm *TraderManager) addTraderFromStore(traderCfg *store.Trader, aiModelCfg 
 		traderConfig.CustomAPIKey = string(aiModelCfg.APIKey)
 	}
 
+	if analysisModelCfg != nil {
+		traderConfig.AnalysisAIModel = analysisModelCfg.Provider
+		traderConfig.AnalysisAPIKey = string(analysisModelCfg.APIKey)
+		traderConfig.AnalysisCustomAPIURL = analysisModelCfg.CustomAPIURL
+		traderConfig.AnalysisCustomModelName = analysisModelCfg.CustomModelName
+	}
+
+	if visionModelCfg != nil {
+		traderConfig.VisionAIModel = visionModelCfg.Provider
+		traderConfig.VisionAPIKey = string(visionModelCfg.APIKey)
+		traderConfig.VisionCustomAPIURL = visionModelCfg.CustomAPIURL
+		traderConfig.VisionCustomModelName = visionModelCfg.CustomModelName
+	}
+
 	// Create trader instance
 	at, err := trader.NewAutoTrader(traderConfig, st, traderCfg.UserID)
 	if err != nil {
@@ -767,4 +814,27 @@ func (tm *TraderManager) GetTraderExecutor(traderID string) (debate.TraderExecut
 		return nil, err
 	}
 	return &TraderExecutorAdapter{autoTrader: at}, nil
+}
+
+func findAIModel(models []*store.AIModel, idOrProvider string) *store.AIModel {
+	idOrProvider = strings.TrimSpace(idOrProvider)
+	if idOrProvider == "" {
+		return nil
+	}
+
+	for _, model := range models {
+		if model.ID == idOrProvider {
+			return model
+		}
+	}
+
+	// Backward compatibility: some records stored provider as model ID.
+	for _, model := range models {
+		if model.Provider == idOrProvider {
+			logger.Infof("⚠️  Using legacy provider match for AI model: %s -> %s", idOrProvider, model.ID)
+			return model
+		}
+	}
+
+	return nil
 }

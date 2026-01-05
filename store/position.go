@@ -75,6 +75,45 @@ func (s *PositionStore) isPostgres() bool {
 
 // InitTables initializes position tables
 func (s *PositionStore) InitTables() error {
+	// SQLite: avoid GORM AutoMigrate table-rebuild behavior (can fail on existing data)
+	if s.db.Dialector.Name() == "sqlite" {
+		if s.db.Migrator().HasTable(&TraderPosition{}) {
+			for _, field := range []string{
+				"TraderID",
+				"ExchangeID",
+				"ExchangeType",
+				"ExchangePositionID",
+				"Symbol",
+				"Side",
+				"EntryQuantity",
+				"Quantity",
+				"EntryPrice",
+				"EntryOrderID",
+				"EntryTime",
+				"ExitPrice",
+				"ExitOrderID",
+				"ExitTime",
+				"RealizedPnL",
+				"Fee",
+				"Leverage",
+				"Status",
+				"CloseReason",
+				"ExitPlanSnapshot",
+				"ExitPlanState",
+				"Source",
+				"CreatedAt",
+				"UpdatedAt",
+			} {
+				if !s.db.Migrator().HasColumn(&TraderPosition{}, field) {
+					_ = s.db.Migrator().AddColumn(&TraderPosition{}, field)
+				}
+			}
+
+			s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_exchange_pos_unique ON trader_positions(exchange_id, exchange_position_id) WHERE exchange_position_id != ''`)
+			return nil
+		}
+	}
+
 	// For PostgreSQL with existing table, skip AutoMigrate
 	if s.isPostgres() {
 		var tableExists int64

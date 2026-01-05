@@ -115,6 +115,38 @@ func NewDecisionStore(db *gorm.DB) *DecisionStore {
 
 // initTables initializes AI decision log tables
 func (s *DecisionStore) initTables() error {
+	// SQLite: avoid GORM AutoMigrate table-rebuild behavior (can fail on existing data)
+	if s.db.Dialector.Name() == "sqlite" {
+		if s.db.Migrator().HasTable(&DecisionRecordDB{}) {
+			for _, field := range []string{
+				"TraderID",
+				"CycleNumber",
+				"Timestamp",
+				"SystemPrompt",
+				"InputPrompt",
+				"CoTTrace",
+				"DecisionJSON",
+				"RawResponse",
+				"CandidateCoins",
+				"ExecutionLog",
+				"Decisions",
+				"VisionImages",
+				"Success",
+				"ErrorMessage",
+				"AIRequestDurationMs",
+				"CreatedAt",
+			} {
+				if !s.db.Migrator().HasColumn(&DecisionRecordDB{}, field) {
+					_ = s.db.Migrator().AddColumn(&DecisionRecordDB{}, field)
+				}
+			}
+
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_decision_records_trader_time ON decision_records(trader_id, timestamp)`)
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_decision_records_timestamp ON decision_records(timestamp)`)
+			return nil
+		}
+	}
+
 	// For PostgreSQL with existing table, skip AutoMigrate
 	if s.db.Dialector.Name() == "postgres" {
 		var tableExists int64

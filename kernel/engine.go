@@ -14,6 +14,7 @@ import (
 	"nofx/security"
 	"nofx/store"
 	"regexp"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -277,6 +278,16 @@ func GetFullDecision(ctx *Context, mcpClient mcp.AIClient) (*FullDecision, error
 
 // GetFullDecisionWithStrategy uses StrategyEngine to get AI decision (unified prompt generation)
 func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *StrategyEngine, variant string, traderID string, cycleNumber int) (*FullDecision, error) {
+	return getFullDecisionWithStrategyInternal(ctx, mcpClient, nil, engine, variant, traderID, cycleNumber)
+}
+
+// GetFullDecisionWithStrategyWithAnalysis runs a pre-analysis stage (text notes) before producing the final JSON decisions.
+// analysisClient can be nil to disable the pre-analysis stage.
+func GetFullDecisionWithStrategyWithAnalysis(ctx *Context, decisionClient mcp.AIClient, analysisClient mcp.AIClient, engine *StrategyEngine, variant string, traderID string, cycleNumber int) (*FullDecision, error) {
+	return getFullDecisionWithStrategyInternal(ctx, decisionClient, analysisClient, engine, variant, traderID, cycleNumber)
+}
+
+func getFullDecisionWithStrategyInternal(ctx *Context, mcpClient mcp.AIClient, analysisClient mcp.AIClient, engine *StrategyEngine, variant string, traderID string, cycleNumber int) (*FullDecision, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("context is nil")
 	}
@@ -329,6 +340,23 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 		}
 	}
 	userPrompt := engine.BuildUserPromptWithOptions(ctx, userPromptOpts)
+
+	decisionPrompt := userPrompt
+	if analysisClient != nil {
+		analysisSystem := engine.buildDecisionAnalysisSystemPrompt()
+		analysisStart := time.Now()
+		analysisNotes, err := analysisClient.CallWithMessages(analysisSystem, userPrompt)
+		analysisDur := time.Since(analysisStart)
+		if err != nil {
+			logger.Infof("⚠️ Pre-analysis stage failed; continuing without analysis notes: %v", err)
+		} else {
+			analysisNotes = strings.TrimSpace(analysisNotes)
+			if analysisNotes != "" {
+				decisionPrompt = appendDecisionAnalysisNotes(userPrompt, analysisNotes)
+				logger.Infof("🧠 Pre-analysis stage completed in %d ms", analysisDur.Milliseconds())
+			}
+		}
+	}
 
 	callAIAndParse := func(prompt string) (*FullDecision, error) {
 		aiCallStart := time.Now()
@@ -395,7 +423,7 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 			ctx,
 			mcpClient,
 			systemPrompt,
-			userPrompt,
+			decisionPrompt,
 			riskConfig,
 			exitPlanID,
 		)
@@ -415,7 +443,7 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 		logger.Infof("AI tool-call decision temporarily disabled; using text decision parsing")
 	}
 
-	decision, err := callAIAndParse(userPrompt)
+	decision, err := callAIAndParse(decisionPrompt)
 	if err != nil {
 		return decision, err
 	}
@@ -434,7 +462,7 @@ func GetFullDecisionWithStrategy(ctx *Context, mcpClient mcp.AIClient, engine *S
 	logger.Infof("AI did not output JSON decision array; retrying up to %d time(s) for structured output", maxDecisionFormatRetries)
 	for attempt := 1; attempt <= maxDecisionFormatRetries; attempt++ {
 		time.Sleep(time.Duration(attempt) * decisionFormatRetryBaseDelay)
-		repairPrompt := buildDecisionRepairPrompt(userPrompt, lastAIResponse)
+		repairPrompt := buildDecisionRepairPrompt(decisionPrompt, lastAIResponse)
 
 		retryDecision, retryErr := callAIAndParse(repairPrompt)
 		if retryDecision != nil {
@@ -730,10 +758,10 @@ func buildDecisionRepairPrompt(userPrompt, priorAIOutput string) string {
 	sb.WriteString("\n\n")
 	sb.WriteString("## Requirements (MUST FOLLOW)\n")
 	sb.WriteString("- Output ONLY the required XML tags <reasoning> and <decision>.\n")
-	sb.WriteString("- Inside <decision>, output a single ```json fenced JSON array of objects.\n")
+	sb.WriteString("- Inside <decision>, output a single pure JSON array of objects (no code fences).\n")
 	sb.WriteString("- Do NOT add any extra text outside these tags.\n")
 	sb.WriteString("- Do NOT change any numbers or decisions from your previous reply.\n")
-	sb.WriteString("- If you cannot extract a valid decision array, output: [{\"symbol\":\"ALL\",\"action\":\"wait\",\"reasoning\":\"missing structured JSON decision\"}]\n")
+	sb.WriteString("- If you cannot extract a valid decision array, output:\n<reasoning>- missing structured JSON decision</reasoning>\n<decision>[{\"symbol\":\"ALL\",\"action\":\"wait\",\"reasoning\":\"missing structured JSON decision\"}]</decision>\n")
 	return sb.String()
 }
 
@@ -1445,6 +1473,15 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 		sb.WriteString(fmt.Sprintf("- Leverage = round(close / max_atr_24h) using %s ATR (period %d), clamped to [1, max]\n", atrTF, atrPeriod))
 		sb.WriteString(fmt.Sprintf("- position_size_usd = equity * %.1f%% * leverage / stop_distance_pct\n", riskPct))
 		sb.WriteString("- Still output stop_loss/take_profit; the system may override leverage and position_size_usd when enabled.\n\n")
+	} else if riskControl.StopLossSizingEnabled {
+		riskPct := riskControl.StopLossRiskPct
+		if riskPct <= 0 {
+			riskPct = 5.0
+		}
+		sb.WriteString("## Stop-Loss Position Sizing (Code Enforced)\n")
+		sb.WriteString(fmt.Sprintf("- position_size_usd = equity * %.1f%% * leverage / stop_distance_pct\n", riskPct))
+		sb.WriteString("- stop_distance_pct = abs(entry_price - stop_loss) / entry_price * 100\n")
+		sb.WriteString("- Still output stop_loss/take_profit; the system overrides position_size_usd before placing orders.\n\n")
 	}
 	// 4. Trading frequency (editable)
 	if promptSections.TradingFrequency != "" {
@@ -1479,7 +1516,7 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 		sb.WriteString("# 馃搵 Decision Process\n\n")
 		sb.WriteString("1. Check positions 鈫?Should we take profit/stop-loss\n")
 		sb.WriteString("2. Scan candidate coins + multi-timeframe 鈫?Are there strong signals\n")
-		sb.WriteString("3. Write chain of thought first, then output structured JSON\n\n")
+		sb.WriteString("3. Write brief public rationale points, then output structured JSON\n\n")
 	}
 
 	exitPlanPrompt := buildExitPlanPrompt(exitPlanID)
@@ -1489,15 +1526,18 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 
 	// 7. Output format
 	sb.WriteString("# Output Format (Strictly Follow)\n\n")
-	sb.WriteString("**Must use XML tags <reasoning> and <decision> to separate chain of thought and decision JSON, avoiding parsing errors**\n\n")
+	sb.WriteString("**Must use XML tags <reasoning> and <decision> to separate brief public rationale and decision JSON, avoiding parsing errors**\n\n")
 	sb.WriteString("## Format Requirements\n\n")
 	sb.WriteString("<reasoning>\n")
-	sb.WriteString("Your chain of thought analysis...\n")
-	sb.WriteString("- Briefly analyze your thinking process \n")
+	sb.WriteString("Requirements:\n")
+	sb.WriteString("- Write brief public rationale notes grouped by symbol (recommended: 2-6 bullets per symbol, total <= 40 lines).\n")
+	sb.WriteString("- Do NOT output chain-of-thought.\n")
 	sb.WriteString("</reasoning>\n\n")
 	sb.WriteString("<decision>\n")
-	sb.WriteString("Step 2: JSON decision array\n\n")
-	sb.WriteString("```json\n[\n")
+	sb.WriteString("Requirements:\n")
+	sb.WriteString("- Only output a pure JSON array inside <decision> ... </decision> (no extra text).\n")
+	sb.WriteString("- Do NOT use code fences (no ```).\n\n")
+	sb.WriteString("[\n")
 	// Use the actual configured position value ratio for BTC/ETH in the example
 	examplePositionSize := accountEquity * btcEthPosValueRatio
 	exitPlanExample := buildExitPlanExample(exitPlanID)
@@ -1519,7 +1559,7 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	}
 	sb.WriteString("  },\n")
 	sb.WriteString("  {\"symbol\": \"ETHUSDT\", \"action\": \"close_long\"}\n")
-	sb.WriteString("]\n```\n")
+	sb.WriteString("]\n")
 	sb.WriteString("</decision>\n\n")
 	sb.WriteString("## Field Description\n\n")
 	sb.WriteString("- `action`: open_long | open_short | close_long | close_short | hold | wait\n")
@@ -1531,6 +1571,7 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	sb.WriteString("- No range/approx symbols in JSON: do not use `~` or `～` anywhere (e.g., use `88336`, not `~88336` or `88000~89000`)\n")
 	sb.WriteString("- No thousand separators in JSON numbers (e.g., `98000`, not `98,000`)\n")
 	sb.WriteString("- No comments in JSON (no `//` or `/* */`)\n\n")
+	sb.WriteString("- No trailing commas in JSON\n\n")
 
 	// 8. Custom Prompt
 	if e.config.CustomPrompt != "" {
@@ -1547,12 +1588,23 @@ func (e *StrategyEngine) writeAvailableIndicators(sb *strings.Builder) {
 	indicators := e.config.Indicators
 	kline := indicators.Klines
 
-	sb.WriteString(fmt.Sprintf("- %s price series", kline.PrimaryTimeframe))
-	if kline.EnableMultiTimeframe {
-		sb.WriteString(fmt.Sprintf(" + %s K-line series\n", kline.LongerTimeframe))
-	} else {
-		sb.WriteString("\n")
+	timeframes := make([]string, 0, len(kline.SelectedTimeframes)+2)
+	if len(kline.SelectedTimeframes) > 0 {
+		timeframes = append(timeframes, kline.SelectedTimeframes...)
+	} else if kline.PrimaryTimeframe != "" {
+		timeframes = append(timeframes, kline.PrimaryTimeframe)
 	}
+	if kline.EnableMultiTimeframe && kline.LongerTimeframe != "" {
+		timeframes = append(timeframes, kline.LongerTimeframe)
+	}
+	timeframes = normalizeAndDedupTimeframes(timeframes)
+
+	if len(timeframes) > 0 {
+		sb.WriteString(fmt.Sprintf("- K-line OHLCV series (timeframes: %s; primary: %s)\n", strings.Join(timeframes, ", "), kline.PrimaryTimeframe))
+	} else {
+		sb.WriteString("- K-line OHLCV series\n")
+	}
+	sb.WriteString("- Technical Analysis (auto-computed per timeframe JSON): pattern, trend structure & key levels (support/resistance), WaveTrend (WT+MFI), divergence, volatility squeeze\n")
 
 	if indicators.EnableEMA {
 		sb.WriteString("- EMA indicators")
@@ -1884,21 +1936,61 @@ func (e *StrategyEngine) formatPositionInfo(index int, pos PositionInfo, ctx *Co
 }
 
 func (e *StrategyEngine) formatCoinSourceTag(sources []string) string {
-	if len(sources) > 1 {
-		return " (AI500+OI_Top dual signal)"
-	} else if len(sources) == 1 {
-		switch sources[0] {
-		case "ai500":
-			return " (AI500)"
-		case "oi_top":
-			return " (OI_Top position growth)"
-		case "otc_top":
-			return " (OTC Top)"
-		case "static":
-			return " (Manual selection)"
+	if len(sources) == 0 {
+		return ""
+	}
+
+	priority := map[string]int{
+		"ai500":   1,
+		"oi_top":  2,
+		"otc_top": 3,
+		"static":  4,
+	}
+	ordered := make([]string, 0, len(sources))
+	for _, s := range sources {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			ordered = append(ordered, s)
 		}
 	}
-	return ""
+	sort.SliceStable(ordered, func(i, j int) bool {
+		pi, okI := priority[ordered[i]]
+		pj, okJ := priority[ordered[j]]
+		if okI && okJ {
+			return pi < pj
+		}
+		if okI != okJ {
+			return okI
+		}
+		return strings.ToLower(ordered[i]) < strings.ToLower(ordered[j])
+	})
+
+	labels := make([]string, 0, len(ordered))
+	for _, src := range ordered {
+		switch src {
+		case "ai500":
+			labels = append(labels, "AI500")
+		case "oi_top":
+			labels = append(labels, "OI_Top")
+		case "otc_top":
+			labels = append(labels, "OTC Top")
+		case "static":
+			labels = append(labels, "Manual")
+		default:
+			labels = append(labels, src)
+		}
+	}
+	if len(labels) == 1 {
+		switch ordered[0] {
+		case "oi_top":
+			return " (OI_Top position growth)"
+		case "static":
+			return " (Manual selection)"
+		default:
+			return fmt.Sprintf(" (%s)", labels[0])
+		}
+	}
+	return fmt.Sprintf(" (%s multi-signal)", strings.Join(labels, "+"))
 }
 
 // ============================================================================

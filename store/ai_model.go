@@ -38,6 +38,34 @@ func NewAIModelStore(db *gorm.DB) *AIModelStore {
 }
 
 func (s *AIModelStore) initTables() error {
+	// SQLite: avoid GORM AutoMigrate table-rebuild behavior (can fail on existing data)
+	if s.db.Dialector.Name() == "sqlite" {
+		if s.db.Migrator().HasTable(&AIModel{}) {
+			s.db.Exec(`UPDATE ai_models SET user_id = COALESCE(user_id, 'default') WHERE user_id IS NULL`)
+			s.db.Exec(`UPDATE ai_models SET provider = COALESCE(provider, id) WHERE provider IS NULL`)
+			s.db.Exec(`UPDATE ai_models SET name = COALESCE(name, provider, id) WHERE name IS NULL`)
+
+			for _, field := range []string{
+				"UserID",
+				"Name",
+				"Provider",
+				"Enabled",
+				"APIKey",
+				"CustomAPIURL",
+				"CustomModelName",
+				"CreatedAt",
+				"UpdatedAt",
+			} {
+				if !s.db.Migrator().HasColumn(&AIModel{}, field) {
+					_ = s.db.Migrator().AddColumn(&AIModel{}, field)
+				}
+			}
+
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_models_user_id ON ai_models(user_id)`)
+			return nil
+		}
+	}
+
 	// For PostgreSQL with existing table, skip AutoMigrate
 	if s.db.Dialector.Name() == "postgres" {
 		var tableExists int64

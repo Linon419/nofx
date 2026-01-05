@@ -71,8 +71,11 @@ export function StrategyStudioPage() {
 
   // Right panel states
   const [activeRightTab, setActiveRightTab] = useState<'prompt' | 'test'>('prompt')
+  const [activePromptLayer, setActivePromptLayer] = useState<'decision' | 'analysis' | 'vision'>('decision')
   const [promptPreview, setPromptPreview] = useState<{
     system_prompt: string
+    analysis_system_prompt?: string
+    vision_system_prompt?: string
     user_prompt?: string
     prompt_variant: string
     config_summary: Record<string, unknown>
@@ -502,6 +505,9 @@ export function StrategyStudioPage() {
       promptPreview: { zh: 'Prompt 预览', en: 'Prompt Preview' },
       aiTestRun: { zh: 'AI 测试', en: 'AI Test' },
       systemPrompt: { zh: 'System Prompt', en: 'System Prompt' },
+      decisionLayer: { zh: '决策层', en: 'Decision' },
+      analysisLayer: { zh: '分析层', en: 'Analysis' },
+      visionLayer: { zh: '读图层', en: 'Vision' },
       userPrompt: { zh: 'User Prompt', en: 'User Prompt' },
       loadPrompt: { zh: '生成 Prompt', en: 'Generate Prompt' },
       refreshPrompt: { zh: '刷新', en: 'Refresh' },
@@ -651,6 +657,15 @@ export function StrategyStudioPage() {
       ),
     },
   ]
+
+  const getPromptTextByLayer = () => {
+    if (!promptPreview) return ''
+    if (activePromptLayer === 'analysis') return promptPreview.analysis_system_prompt || ''
+    if (activePromptLayer === 'vision') return promptPreview.vision_system_prompt || ''
+    return promptPreview.system_prompt || ''
+  }
+
+  const promptText = getPromptTextByLayer()
 
   return (
     <DeepVoidBackground className="h-[calc(100vh-64px)] flex flex-col bg-nofx-bg relative overflow-hidden">
@@ -945,15 +960,67 @@ export function StrategyStudioPage() {
                           <FileText className="w-3 h-3 text-purple-500" />
                           <span className="text-xs font-medium text-nofx-text">{t('systemPrompt')}</span>
                         </div>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-nofx-bg-lighter text-nofx-text-muted">
-                          {promptPreview.system_prompt.length.toLocaleString()} chars
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-nofx-bg-lighter text-nofx-text-muted">
+                            {promptText.length.toLocaleString()} chars
+                          </span>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(promptText)
+                                notify.success(language === 'zh' ? '已复制' : 'Copied')
+                              } catch {
+                                notify.error(language === 'zh' ? '复制失败' : 'Copy failed')
+                              }
+                            }}
+                            className="text-[10px] px-2 py-0.5 rounded bg-nofx-bg border border-nofx-gold/20 text-nofx-text-muted hover:text-nofx-text transition-colors flex items-center gap-1"
+                          >
+                            <Copy className="w-3 h-3" />
+                            {language === 'zh' ? '复制' : 'Copy'}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <button
+                          type="button"
+                          onClick={() => setActivePromptLayer('decision')}
+                          className={`text-[11px] px-2 py-1 rounded border transition-colors ${
+                            activePromptLayer === 'decision'
+                              ? 'bg-purple-500/20 border-purple-500/40 text-purple-300'
+                              : 'bg-nofx-bg border-nofx-gold/20 text-nofx-text-muted hover:text-nofx-text'
+                          }`}
+                        >
+                          {t('decisionLayer')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActivePromptLayer('analysis')}
+                          className={`text-[11px] px-2 py-1 rounded border transition-colors ${
+                            activePromptLayer === 'analysis'
+                              ? 'bg-purple-500/20 border-purple-500/40 text-purple-300'
+                              : 'bg-nofx-bg border-nofx-gold/20 text-nofx-text-muted hover:text-nofx-text'
+                          }`}
+                        >
+                          {t('analysisLayer')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActivePromptLayer('vision')}
+                          className={`text-[11px] px-2 py-1 rounded border transition-colors ${
+                            activePromptLayer === 'vision'
+                              ? 'bg-purple-500/20 border-purple-500/40 text-purple-300'
+                              : 'bg-nofx-bg border-nofx-gold/20 text-nofx-text-muted hover:text-nofx-text'
+                          }`}
+                        >
+                          {t('visionLayer')}
+                        </button>
                       </div>
                       <pre
                         className="p-2 rounded-lg text-[11px] font-mono overflow-auto bg-nofx-bg border border-nofx-gold/20 text-nofx-text"
                         style={{ maxHeight: '400px' }}
                       >
-                        {promptPreview.system_prompt}
+                        {promptText}
                       </pre>
                     </div>
                   </>

@@ -84,6 +84,78 @@ func NewOrderStore(db *gorm.DB) *OrderStore {
 
 // InitTables initializes order tables
 func (s *OrderStore) InitTables() error {
+	// SQLite: avoid GORM AutoMigrate table-rebuild behavior (can fail on existing data)
+	if s.db.Dialector.Name() == "sqlite" {
+		if s.db.Migrator().HasTable(&TraderOrder{}) && s.db.Migrator().HasTable(&TraderFill{}) {
+			for _, field := range []string{
+				"TraderID",
+				"ExchangeID",
+				"ExchangeType",
+				"ExchangeOrderID",
+				"ClientOrderID",
+				"Symbol",
+				"Side",
+				"PositionSide",
+				"Type",
+				"TimeInForce",
+				"Quantity",
+				"Price",
+				"StopPrice",
+				"Status",
+				"FilledQuantity",
+				"AvgFillPrice",
+				"Commission",
+				"CommissionAsset",
+				"Leverage",
+				"ReduceOnly",
+				"ClosePosition",
+				"WorkingType",
+				"PriceProtect",
+				"OrderAction",
+				"RelatedPositionID",
+				"CreatedAt",
+				"UpdatedAt",
+				"FilledAt",
+			} {
+				if !s.db.Migrator().HasColumn(&TraderOrder{}, field) {
+					_ = s.db.Migrator().AddColumn(&TraderOrder{}, field)
+				}
+			}
+			for _, field := range []string{
+				"TraderID",
+				"ExchangeID",
+				"ExchangeType",
+				"OrderID",
+				"ExchangeOrderID",
+				"ExchangeTradeID",
+				"Symbol",
+				"Side",
+				"Price",
+				"Quantity",
+				"QuoteQuantity",
+				"Commission",
+				"CommissionAsset",
+				"RealizedPnL",
+				"IsMaker",
+				"CreatedAt",
+			} {
+				if !s.db.Migrator().HasColumn(&TraderFill{}, field) {
+					_ = s.db.Migrator().AddColumn(&TraderFill{}, field)
+				}
+			}
+
+			// Ensure indexes exist (SQLite-safe)
+			s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_exchange_unique ON trader_orders(exchange_id, exchange_order_id)`)
+			s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_fills_exchange_unique ON trader_fills(exchange_id, exchange_trade_id)`)
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_trader_id ON trader_orders(trader_id)`)
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_symbol ON trader_orders(symbol)`)
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_orders_status ON trader_orders(status)`)
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_fills_trader_id ON trader_fills(trader_id)`)
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_fills_order_id ON trader_fills(order_id)`)
+			return nil
+		}
+	}
+
 	// For PostgreSQL, check if tables exist to avoid AutoMigrate index conflicts
 	if s.db.Dialector.Name() == "postgres" {
 		var ordersExist, fillsExist int64

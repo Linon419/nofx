@@ -95,6 +95,16 @@ Before reporting a bug, please check:
 
 ---
 
+#### ❌ Stop-Loss-Based Position Sizing Not Applied
+
+**Symptom:** You expect "以损定仓" (size by stop-loss distance), but `position_size_usd` seems unchanged.
+
+**Fix:**
+- If ATR is disabled, enable **Stop-Loss Sizing (CODE ENFORCED)** in Strategy → Risk Control.
+- Set `stop_loss_risk_pct` (risk per trade, % of equity) and ensure AI outputs a valid `stop_loss`.
+
+---
+
 ### 2. AI Decision Issues
 
 #### ❌ AI Always Says "Wait" / "Hold"

@@ -255,6 +255,11 @@ type RiskControlConfig struct {
 	ATRTimeframe    string  `json:"atr_timeframe"`
 	StopLossRiskPct float64 `json:"stop_loss_risk_pct"`
 
+	// Stop-loss-based position sizing (CODE ENFORCED).
+	// When enabled (and ATR leverage is disabled), the system overrides AI-provided position_size_usd
+	// using: position_size_usd = equity * stop_loss_risk_pct% * leverage / stop_distance_pct.
+	StopLossSizingEnabled bool `json:"stop_loss_sizing_enabled,omitempty"`
+
 	// BTC/ETH single position max value = equity × this ratio (CODE ENFORCED, default: 5)
 	BTCETHMaxPositionValueRatio float64 `json:"btc_eth_max_position_value_ratio"`
 	// Altcoin single position max value = equity × this ratio (CODE ENFORCED, default: 1)
@@ -280,6 +285,75 @@ func NewStrategyStore(db *gorm.DB) *StrategyStore {
 }
 
 func (s *StrategyStore) initTables() error {
+	// SQLite: avoid GORM AutoMigrate table-rebuild behavior (can fail on existing data)
+	if s.db.Dialector.Name() == "sqlite" {
+		if s.db.Migrator().HasTable(&Strategy{}) {
+			for _, field := range []string{
+				"UserID",
+				"Name",
+				"Description",
+				"IsActive",
+				"IsDefault",
+				"IsPublic",
+				"ConfigVisible",
+				"Config",
+				"CreatedAt",
+				"UpdatedAt",
+			} {
+				if !s.db.Migrator().HasColumn(&Strategy{}, field) {
+					_ = s.db.Migrator().AddColumn(&Strategy{}, field)
+				}
+			}
+
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_strategies_user_id ON strategies(user_id)`)
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_strategies_is_active ON strategies(is_active)`)
+			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_strategies_is_public ON strategies(is_public)`)
+
+			// Legacy migration: older SQLite DBs may have empty/incorrect user_id for strategies.
+			// Fix ownership to avoid mistakenly marking user strategies as system defaults (which makes them read-only in UI).
+			//
+			// 1) Prefer inferring owner from any trader that references this strategy_id.
+			s.db.Exec(`
+				UPDATE strategies
+				SET user_id = (
+					SELECT t.user_id
+					FROM traders t
+					WHERE t.strategy_id = strategies.id
+						AND t.user_id IS NOT NULL
+						AND t.user_id != ''
+						AND t.user_id != 'default'
+					LIMIT 1
+				),
+				is_default = 0
+				WHERE (user_id IS NULL OR user_id = '' OR user_id = 'default')
+				  AND EXISTS (
+					SELECT 1
+					FROM traders t
+					WHERE t.strategy_id = strategies.id
+						AND t.user_id IS NOT NULL
+						AND t.user_id != ''
+						AND t.user_id != 'default'
+				  )
+			`)
+
+			// 2) Fallback: assign remaining legacy strategies to the earliest created user.
+			s.db.Exec(`
+				UPDATE strategies
+				SET user_id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1),
+				    is_default = 0
+				WHERE (user_id IS NULL OR user_id = '' OR user_id = 'default')
+				  AND (SELECT COUNT(*) FROM users) >= 1
+			`)
+
+			// Ensure non-default strategies are not flagged as system defaults.
+			s.db.Exec(`UPDATE strategies SET is_default = 0 WHERE user_id != 'default'`)
+
+			s.db.Exec(`UPDATE strategies SET is_public = 0 WHERE is_public IS NULL`)
+			s.db.Exec(`UPDATE strategies SET config_visible = 1 WHERE config_visible IS NULL`)
+			return nil
+		}
+	}
+
 	// AutoMigrate will add missing columns without dropping existing data
 	return s.db.AutoMigrate(&Strategy{})
 }
@@ -380,6 +454,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			ATRPeriod:                    14,
 			ATRTimeframe:                 "1d",
 			StopLossRiskPct:              5.0,
+			StopLossSizingEnabled:        false,
 			BTCETHMaxPositionValueRatio:  5.0, // BTC/ETH: max position = 5x equity (CODE ENFORCED)
 			AltcoinMaxPositionValueRatio: 1.0, // Altcoin: max position = 1x equity (CODE ENFORCED)
 			MaxMarginUsage:               0.9, // Max 90% margin usage (CODE ENFORCED)

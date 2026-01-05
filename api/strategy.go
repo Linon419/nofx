@@ -422,8 +422,10 @@ func (s *Server) handlePreviewPrompt(c *gin.Context) {
 	)
 
 	c.JSON(http.StatusOK, gin.H{
-		"system_prompt":  systemPrompt,
-		"prompt_variant": req.PromptVariant,
+		"system_prompt":           systemPrompt,
+		"analysis_system_prompt":  engine.BuildDecisionAnalysisSystemPrompt(),
+		"vision_system_prompt":    engine.BuildVisionSystemPrompt(),
+		"prompt_variant":          req.PromptVariant,
 		"config_summary": gin.H{
 			"coin_source":      req.Config.CoinSource.SourceType,
 			"primary_tf":       req.Config.Indicators.Klines.PrimaryTimeframe,

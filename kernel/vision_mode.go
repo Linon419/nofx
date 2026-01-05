@@ -199,7 +199,14 @@ func boolOrDefault(v *bool, def bool) bool {
 }
 
 func clientSupportsVision(c mcp.AIClient) bool {
-	switch c.(type) {
+	switch v := c.(type) {
+	case *mcp.SplitClient:
+		visionOK := v.VisionClient() != nil && clientSupportsVision(v.VisionClient())
+		decisionOK := v.DecisionClient() != nil && clientSupportsVision(v.DecisionClient())
+		return visionOK || decisionOK
+	case *mcp.Client:
+		// mcp.Client can encode image parts using OpenAI-compatible "image_url" content.
+		return v.Provider == mcp.ProviderCustom || v.Provider == mcp.ProviderOpenAI
 	case *mcp.OpenAIClient, *mcp.GeminiClient, *mcp.ClaudeClient:
 		return true
 	default:
@@ -207,7 +214,7 @@ func clientSupportsVision(c mcp.AIClient) bool {
 	}
 }
 
-func (e *StrategyEngine) buildVisionSystemPrompt() string {
+/*func (e *StrategyEngine) buildVisionSystemPrompt() string {
 	lang := detectLanguage(e.config.PromptSections.RoleDefinition)
 	if lang == LangChinese {
 		return strings.TrimSpace(`
@@ -239,6 +246,47 @@ Rules:
 - Do not guess or invent numbers.
 - Keep it short: up to 6 bullet points, one sentence each.
 - This stage outputs chart-reading notes only. Do NOT output trading decision JSON or any open/close instructions.`)
+}*/
+
+func (e *StrategyEngine) buildVisionSystemPrompt() string {
+	lang := detectLanguage(e.config.PromptSections.RoleDefinition)
+	if lang == LangChinese {
+		return strings.TrimSpace(`
+你是一个严格的 K 线读图助手。你会看到一组图（常见为 1h 与 15m），图中可能包含：
+- K 线蜡烛
+- EMA21/55/100/200（如开启）
+- Volume / MACD / WT+MFI 等面板（如开启）
+- 主图背离标记（如开启）
+
+规则：
+- 只描述图上能直接看到的事实；不要猜测不可见信息。
+- 禁止方向判断/预测/建议：不要使用看多/看空/上涨/下跌/趋势/大概率等结论性措辞。
+- 不要编造任何数值/价格/指标读数；只有在图中坐标/价格清晰可见时才可引用具体价格，否则用相对描述（例如“近期 swing low 区域”“前高附近”“EMA200 附近”）。
+- 看不清或无法确认就明确写“无法从图中确认”。
+- 本阶段只输出读图要点；不要输出任何交易决策 JSON，也不要给出开/平仓指令。
+- 若图上能清晰看出关键价位/区域，请客观描述支撑/阻力/区间/前高前低/均线附近/成交量密集区等，并给出可见依据（例如多次触及、明显转折、影线密集、放量区等）。
+- 若图上能看出形态/结构（例如箱体、三角收敛、突破/假突破迹象、背离标记等），只描述“看到了什么”，不要给出方向判断或交易建议。
+- 输出纯文本，不要代码块；内容保持简短、事实为主。`)
+	}
+
+	return strings.TrimSpace(`
+You are a strict chart-reading assistant. You will see one or more charts (commonly 1h and 15m) that may include:
+- Candles
+- EMA overlays (if enabled)
+- Volume panel
+- MACD panel (hist + DIF/DEA) (if enabled)
+- WT+MFI panel (if enabled)
+- Divergence dots on the main chart (if enabled)
+
+Rules:
+- Only describe what is directly visible in the images (EMA positioning, relative placement, oscillator state, obvious squeeze/divergence cues, etc.).
+- No directional judgement, predictions, or recommendations. Do NOT use words like bullish/bearish, uptrend/downtrend, likely to rise/fall, etc.
+- Do not guess or invent numbers/price levels. Only mention specific prices if clearly visible; otherwise use relative references (recent swing low/high area, prior high/low, near EMA200, etc.).
+- If something is not visible/unclear, explicitly say so.
+- This stage outputs chart-reading notes only. Do NOT output trading decision JSON or any open/close instructions.
+- If clear, describe visible support/resistance/levels/regions (prior highs/lows, EMA confluence, volume nodes) and the visible evidence (multiple touches, obvious pivots, wick clusters, volume spikes).
+- If clear, describe visible structure/patterns (range, triangle, breakout/failed-breakout hints, divergence markers) as observations only.
+- Plain text only (no code blocks). Keep it concise.`)
 }
 
 func (e *StrategyEngine) buildVisionUserText(ctx *Context, symbol string, timeframes []string, data *market.Data) string {
@@ -264,7 +312,7 @@ func (e *StrategyEngine) buildVisionUserText(ctx *Context, symbol string, timefr
 	for _, tf := range timeframes {
 		sb.WriteString(fmt.Sprintf("- %s\n", tf))
 	}
-	sb.WriteString("\nOutput format: 4-6 bullet points.\n")
+	sb.WriteString("\nKeep it concise.\n")
 	return sb.String()
 }
 

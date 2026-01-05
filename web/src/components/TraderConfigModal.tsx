@@ -29,6 +29,8 @@ interface FormState {
   trader_id?: string
   trader_name: string
   ai_model: string
+  analysis_ai_model_id: string
+  vision_ai_model_id: string
   exchange_id: string
   strategy_id: string
   is_cross_margin: boolean
@@ -57,13 +59,15 @@ export function TraderConfigModal({
   onSave,
 }: TraderConfigModalProps) {
   const { language } = useLanguage()
-  const [formData, setFormData] = useState<FormState>({
-    trader_name: '',
-    ai_model: '',
-    exchange_id: '',
-    strategy_id: '',
-    is_cross_margin: true,
-    show_in_competition: true,
+	  const [formData, setFormData] = useState<FormState>({
+	    trader_name: '',
+	    ai_model: '',
+	    analysis_ai_model_id: '',
+	    vision_ai_model_id: '',
+	    exchange_id: '',
+	    strategy_id: '',
+	    is_cross_margin: true,
+	    show_in_competition: true,
     scan_interval_minutes: 3,
   })
   const [isSaving, setIsSaving] = useState(false)
@@ -99,19 +103,23 @@ export function TraderConfigModal({
   }, [isOpen])
 
   useEffect(() => {
-    if (traderData) {
-      setFormData({
-        ...traderData,
-        strategy_id: traderData.strategy_id || '',
-      })
-    } else if (!isEditMode) {
-      setFormData({
-        trader_name: '',
-        ai_model: availableModels[0]?.id || '',
-        exchange_id: availableExchanges[0]?.id || '',
-        strategy_id: '',
-        is_cross_margin: true,
-        show_in_competition: true,
+	    if (traderData) {
+	      setFormData({
+	        ...traderData,
+	        analysis_ai_model_id: traderData.analysis_ai_model_id || '',
+	        vision_ai_model_id: traderData.vision_ai_model_id || '',
+	        strategy_id: traderData.strategy_id || '',
+	      })
+	    } else if (!isEditMode) {
+	      setFormData({
+	        trader_name: '',
+	        ai_model: availableModels[0]?.id || '',
+	        analysis_ai_model_id: '',
+	        vision_ai_model_id: '',
+	        exchange_id: availableExchanges[0]?.id || '',
+	        strategy_id: '',
+	        is_cross_margin: true,
+	        show_in_competition: true,
         scan_interval_minutes: 3,
       })
     }
@@ -159,13 +167,15 @@ export function TraderConfigModal({
 
     setIsSaving(true)
     try {
-      const saveData: CreateTraderRequest = {
-        name: formData.trader_name,
-        ai_model_id: formData.ai_model,
-        exchange_id: formData.exchange_id,
-        strategy_id: formData.strategy_id,
-        is_cross_margin: formData.is_cross_margin,
-        show_in_competition: formData.show_in_competition,
+	      const saveData: CreateTraderRequest = {
+	        name: formData.trader_name,
+	        ai_model_id: formData.ai_model,
+	        analysis_ai_model_id: formData.analysis_ai_model_id || '',
+	        vision_ai_model_id: formData.vision_ai_model_id || '',
+	        exchange_id: formData.exchange_id,
+	        strategy_id: formData.strategy_id,
+	        is_cross_margin: formData.is_cross_margin,
+	        show_in_competition: formData.show_in_competition,
         scan_interval_minutes: formData.scan_interval_minutes,
       }
 
@@ -248,11 +258,11 @@ export function TraderConfigModal({
                   placeholder="请输入交易员名称"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm text-[#EAECEF] block mb-2">
-                    AI模型 <span className="text-red-500">*</span>
-                  </label>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm text-[#EAECEF] block mb-2">
+                      决策模型 <span className="text-red-500">*</span>
+                    </label>
                   <select
                     value={formData.ai_model}
                     onChange={(e) =>
@@ -311,6 +321,50 @@ export function TraderConfigModal({
                     )
                   })()}
                 </div>
+              </div>
+              <div>
+                <label className="text-sm text-[#EAECEF] block mb-2">
+                  分析模型（可选）
+                </label>
+                <select
+                  value={formData.analysis_ai_model_id}
+                  onChange={(e) =>
+                    handleInputChange('analysis_ai_model_id', e.target.value)
+                  }
+                  className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
+                >
+                  <option value="">同决策模型</option>
+                  {availableModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {getShortName(model.name || model.id).toUpperCase()} ({model.provider})
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-xs text-[#848E9C]">
+                  提示：分析层只输出文本要点（不输出决策 JSON），随后再由决策模型输出最终 JSON；会额外消耗一次 AI 调用。
+                </p>
+              </div>
+              <div>
+                <label className="text-sm text-[#EAECEF] block mb-2">
+                  识图模型（可选）
+                </label>
+                <select
+                  value={formData.vision_ai_model_id}
+                  onChange={(e) =>
+                    handleInputChange('vision_ai_model_id', e.target.value)
+                  }
+                  className="w-full px-3 py-2 bg-[#0B0E11] border border-[#2B3139] rounded text-[#EAECEF] focus:border-[#F0B90B] focus:outline-none"
+                >
+                  <option value="">同决策模型</option>
+                  {availableModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {getShortName(model.name || model.id).toUpperCase()} ({model.provider})
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-xs text-[#848E9C]">
+                  提示：目前仅 OpenAI / Claude / Gemini 支持识图；其他模型会自动回退为同决策模型。
+                </p>
               </div>
             </div>
           </div>

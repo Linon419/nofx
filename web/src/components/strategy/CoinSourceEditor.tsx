@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, X, Database, TrendingUp, List, Ban, Zap } from 'lucide-react'
+import { Plus, X, Database, TrendingUp, List, Ban, Zap, Link, AlertCircle } from 'lucide-react'
 import type { CoinSourceConfig } from '../../types'
 
 const DEFAULT_OTC_TOP_API_URL = 'http://168.138.207.11:3080/api/public/top-otc-crypto'

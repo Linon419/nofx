@@ -207,6 +207,8 @@ export interface CreateExchangeRequest {
 export interface CreateTraderRequest {
   name: string
   ai_model_id: string
+  analysis_ai_model_id?: string
+  vision_ai_model_id?: string
   exchange_id: string
   strategy_id?: string // 策略ID（新版，使用保存的策略配置）
   initial_balance?: number // 可选：创建时由后端自动获取，编辑时可手动更新
@@ -305,6 +307,8 @@ export interface TraderConfigData {
   trader_id?: string
   trader_name: string
   ai_model: string
+  analysis_ai_model_id?: string
+  vision_ai_model_id?: string
   exchange_id: string
   strategy_id?: string  // 策略ID
   strategy_name?: string  // 策略名称
@@ -660,6 +664,7 @@ export interface RiskControlConfig {
   atr_period?: number;
   atr_timeframe?: string;
   stop_loss_risk_pct?: number;
+  stop_loss_sizing_enabled?: boolean;
 
   // Position Value Ratio - single position notional value / account equity (CODE ENFORCED)
   // Max position value = equity × this ratio
