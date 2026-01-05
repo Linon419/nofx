@@ -509,16 +509,6 @@ func (at *AutoTrader) Run() error {
 		}
 	}
 
-	schedule, ok := at.resolveDecisionSchedule()
-	offset := time.Duration(0)
-	runImmediately := false
-	if ok {
-		offset = schedule.offset
-		runImmediately = schedule.runImmediately
-	}
-
-	logger.Infof("[%s] Decision schedule: align=scan interval %v offset=%s run_immediately=%v (strategy=%v)",
-		at.name, at.config.ScanInterval, offset, runImmediately, ok)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
@@ -526,9 +516,10 @@ func (at *AutoTrader) Run() error {
 		cancel()
 	}()
 
-	sched := newAlignedOnceScheduler(ctx, at.config.ScanInterval, at.config.ScanInterval, offset)
-	sched.Name = fmt.Sprintf("scan-%s", at.config.ScanInterval)
-	sched.RunImmediately = runImmediately
+	sched, schedule := at.newDecisionScheduler(ctx)
+	logger.Infof("[%s] Decision schedule: source=%s align=%s interval=%s offset=%s run_immediately=%v (timeframe=%s multiple=%d)",
+		at.name, schedule.source, schedule.alignInterval, schedule.interval, schedule.offset, schedule.runImmediately, schedule.alignTimeframe, schedule.multiple)
+
 	sched.Start(func() {
 		if err := at.runCycle(); err != nil {
 			logger.Infof("Execution failed: %v", err)
@@ -544,6 +535,53 @@ type decisionSchedule struct {
 	offset         time.Duration
 	runImmediately bool
 	multiple       int
+}
+
+type effectiveDecisionSchedule struct {
+	name           string
+	source         string
+	alignTimeframe string
+	alignInterval  time.Duration
+	interval       time.Duration
+	offset         time.Duration
+	runImmediately bool
+	multiple       int
+}
+
+func (at *AutoTrader) resolveEffectiveDecisionSchedule() effectiveDecisionSchedule {
+	schedule, ok := at.resolveDecisionSchedule()
+	if ok {
+		return effectiveDecisionSchedule{
+			name:           fmt.Sprintf("tf-%s-x%d", schedule.alignTimeframe, schedule.multiple),
+			source:         "strategy",
+			alignTimeframe: schedule.alignTimeframe,
+			alignInterval:  schedule.alignInterval,
+			interval:       schedule.interval,
+			offset:         schedule.offset,
+			runImmediately: schedule.runImmediately,
+			multiple:       schedule.multiple,
+		}
+	}
+
+	interval := at.config.ScanInterval
+	return effectiveDecisionSchedule{
+		name:           fmt.Sprintf("scan-%s", interval),
+		source:         "scan_interval",
+		alignTimeframe: "",
+		alignInterval:  interval,
+		interval:       interval,
+		offset:         0,
+		runImmediately: false,
+		multiple:       0,
+	}
+}
+
+func (at *AutoTrader) newDecisionScheduler(ctx context.Context) (*alignedOnceScheduler, effectiveDecisionSchedule) {
+	schedule := at.resolveEffectiveDecisionSchedule()
+	sched := newAlignedOnceScheduler(ctx, schedule.alignInterval, schedule.interval, schedule.offset)
+	sched.Name = schedule.name
+	sched.RunImmediately = schedule.runImmediately
+	return sched, schedule
 }
 
 func (at *AutoTrader) resolveDecisionSchedule() (decisionSchedule, bool) {
