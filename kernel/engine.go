@@ -2928,7 +2928,23 @@ func validateDecision(
 		}
 		entryPrice, ok := priceLookup(d.Symbol)
 		if !ok || entryPrice <= 0 {
-			return fmt.Errorf("missing current price for %s (cannot validate risk/reward)", d.Symbol)
+			originalAction := d.Action
+			d.Action = "wait"
+			d.Leverage = 0
+			d.PositionSizeUSD = 0
+			d.StopLoss = 0
+			d.TakeProfit = 0
+			d.ExitPlan = nil
+			d.Confidence = 0
+			d.RiskUSD = 0
+
+			if strings.TrimSpace(d.Reasoning) == "" {
+				d.Reasoning = fmt.Sprintf("auto-wait: missing current price for %s (cannot validate risk/reward)", d.Symbol)
+			} else {
+				d.Reasoning = fmt.Sprintf("%s | auto-wait: missing current price for %s", strings.TrimSpace(d.Reasoning), d.Symbol)
+			}
+			logger.Warnf("[Missing Price] %s missing current price, converting %s -> wait", d.Symbol, originalAction)
+			return nil
 		}
 
 		if d.Action == "open_long" {
