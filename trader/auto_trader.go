@@ -904,6 +904,9 @@ func (at *AutoTrader) runCycle() error {
 		} else {
 			actionRecord.Success = true
 			record.ExecutionLog = append(record.ExecutionLog, fmt.Sprintf("%s %s succeeded", d.Symbol, d.Action))
+			if strings.HasPrefix(actionRecord.Error, "WARN:") {
+				record.ExecutionLog = append(record.ExecutionLog, actionRecord.Error)
+			}
 			// Brief delay after successful execution
 			time.Sleep(1 * time.Second)
 		}
@@ -1238,6 +1241,79 @@ func (at *AutoTrader) ExecuteDecision(d *decision.Decision) error {
 	return nil
 }
 
+const postFillRRTolerancePctDefault = 0.10
+
+func calcRiskRewardRatio(action string, entryPrice, stopLoss, takeProfit float64) float64 {
+	if entryPrice <= 0 || stopLoss <= 0 || takeProfit <= 0 {
+		return 0
+	}
+
+	switch action {
+	case "open_long":
+		risk := entryPrice - stopLoss
+		reward := takeProfit - entryPrice
+		if risk <= 0 || reward <= 0 {
+			return 0
+		}
+		return reward / risk
+	case "open_short":
+		risk := stopLoss - entryPrice
+		reward := entryPrice - takeProfit
+		if risk <= 0 || reward <= 0 {
+			return 0
+		}
+		return reward / risk
+	default:
+		return 0
+	}
+}
+
+func (at *AutoTrader) effectiveMinRiskRewardRatio() float64 {
+	minRR := 0.0
+	if at != nil && at.strategyEngine != nil {
+		if cfg := at.strategyEngine.GetConfig(); cfg != nil {
+			minRR = cfg.RiskControl.MinRiskRewardRatio
+		}
+	}
+	if minRR <= 0 {
+		minRR = 3.0
+	}
+	return minRR
+}
+
+func (at *AutoTrader) maybeWarnPostFillRR(actionRecord *store.DecisionAction, action string, entryPrice, stopLoss, takeProfit float64) {
+	if actionRecord == nil {
+		return
+	}
+	if action != "open_long" && action != "open_short" {
+		return
+	}
+
+	minRR := at.effectiveMinRiskRewardRatio()
+	tolerancePct := postFillRRTolerancePctDefault
+	if tolerancePct < 0 {
+		tolerancePct = 0
+	}
+	if tolerancePct > 0.9 {
+		tolerancePct = 0.9
+	}
+	threshold := minRR * (1 - tolerancePct)
+	if threshold <= 0 {
+		return
+	}
+
+	rr := calcRiskRewardRatio(action, entryPrice, stopLoss, takeProfit)
+	if rr >= threshold {
+		return
+	}
+
+	actionRecord.Error = fmt.Sprintf(
+		"WARN: post-fill RR %.2f < %.2f (minRR=%.2f, tol=%.0f%%) entry=%.6f sl=%.6f tp=%.6f",
+		rr, threshold, minRR, tolerancePct*100, entryPrice, stopLoss, takeProfit,
+	)
+	logger.Warnf("  ⚠️ %s %s", actionRecord.Symbol, actionRecord.Error)
+}
+
 // executeOpenLongWithRecord executes open long position and records detailed information
 func (at *AutoTrader) executeOpenLongWithRecord(decision *decision.Decision, actionRecord *store.DecisionAction) error {
 	logger.Infof("  📈 Open long: %s", decision.Symbol)
@@ -1342,6 +1418,8 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *decision.Decision, act
 
 	// Record order to database and poll for confirmation
 	at.recordAndConfirmOrder(order, decision.Symbol, "open_long", quantity, marketData.CurrentPrice, decision.Leverage, 0)
+
+	at.maybeWarnPostFillRR(actionRecord, "open_long", marketData.CurrentPrice, decision.StopLoss, decision.TakeProfit)
 
 	// Record position opening time
 	posKey := decision.Symbol + "_long"
@@ -1464,6 +1542,8 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *decision.Decision, ac
 
 	// Record order to database and poll for confirmation
 	at.recordAndConfirmOrder(order, decision.Symbol, "open_short", quantity, marketData.CurrentPrice, decision.Leverage, 0)
+
+	at.maybeWarnPostFillRR(actionRecord, "open_short", marketData.CurrentPrice, decision.StopLoss, decision.TakeProfit)
 
 	// Record position opening time
 	posKey := decision.Symbol + "_short"
