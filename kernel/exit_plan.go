@@ -217,7 +217,7 @@ func buildExitPlanPrompt(planID string) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("## Exit Plan (Required)\n")
+	sb.WriteString("## Exit Plan (Optional Output)\n")
 	sb.WriteString(fmt.Sprintf("- plan_id: %s\n", planID))
 	sb.WriteString(fmt.Sprintf("- children must include: %s\n", strings.Join(componentHints, ", ")))
 	sb.WriteString("- tiers: 1-3, ratio sum = 1, target_price absolute\n")
@@ -226,6 +226,8 @@ func buildExitPlanPrompt(planID string) string {
 	if hasATR {
 		sb.WriteString("- tp_atr/sl_atr must include atr_value, trigger_multiplier, trail_multiplier; mode must match component (atr_value can be 0, system overrides)\n")
 	}
+	sb.WriteString("- You MAY omit exit_plan; the backend will auto-generate a valid exit_plan from stop_loss/take_profit.\n")
+	sb.WriteString("- If you include exit_plan, keep it minimal to avoid truncation (1 tier is acceptable).\n")
 	sb.WriteString("- Still output stop_loss and take_profit for compatibility\n\n")
 	return sb.String()
 }

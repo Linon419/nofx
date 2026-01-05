@@ -444,14 +444,6 @@ func getFullDecisionWithStrategyInternal(ctx *Context, mcpClient mcp.AIClient, a
 	}
 
 	decision, err := callAIAndParse(decisionPrompt)
-	if err != nil {
-		return decision, err
-	}
-
-	if !isMissingDecisionJSONFallback(decision) {
-		return decision, nil
-	}
-
 	const maxDecisionFormatRetries = 2
 	lastDecision := decision
 	lastAIResponse := ""
@@ -459,7 +451,42 @@ func getFullDecisionWithStrategyInternal(ctx *Context, mcpClient mcp.AIClient, a
 		lastAIResponse = decision.RawResponse
 	}
 
-	logger.Infof("AI did not output JSON decision array; retrying up to %d time(s) for structured output", maxDecisionFormatRetries)
+	isFormatRelatedError := func(err error) bool {
+		if err == nil {
+			return false
+		}
+		s := err.Error()
+		if strings.Contains(s, "failed to extract decisions") {
+			return true
+		}
+		if strings.Contains(s, "JSON parsing failed") {
+			return true
+		}
+		if strings.Contains(s, "JSON format validation failed") {
+			return true
+		}
+		if strings.Contains(s, "JSON must start with") {
+			return true
+		}
+		if strings.Contains(s, "not a valid decision array") {
+			return true
+		}
+		return false
+	}
+
+	if err != nil {
+		// If the error is format-related (e.g., truncated JSON), try to repair it instead of failing the whole cycle.
+		if !isFormatRelatedError(err) {
+			return decision, err
+		}
+		logger.Infof("AI output JSON but parsing failed; retrying up to %d time(s) for structured output: %v", maxDecisionFormatRetries, err)
+	} else {
+		if !isMissingDecisionJSONFallback(decision) {
+			return decision, nil
+		}
+		logger.Infof("AI did not output JSON decision array; retrying up to %d time(s) for structured output", maxDecisionFormatRetries)
+	}
+
 	for attempt := 1; attempt <= maxDecisionFormatRetries; attempt++ {
 		time.Sleep(time.Duration(attempt) * decisionFormatRetryBaseDelay)
 		repairPrompt := buildDecisionRepairPrompt(decisionPrompt, lastAIResponse)
@@ -480,6 +507,21 @@ func getFullDecisionWithStrategyInternal(ctx *Context, mcpClient mcp.AIClient, a
 		return retryDecision, nil
 	}
 
+	// Safe fallback: avoid propagating a hard error from format issues.
+	if lastDecision == nil || len(lastDecision.Decisions) == 0 {
+		lastDecision = &FullDecision{
+			SystemPrompt: systemPrompt,
+			UserPrompt:   decisionPrompt,
+			RawResponse:  lastAIResponse,
+			Timestamp:    time.Now(),
+			VisionImages: visionImages,
+			Decisions: []Decision{{
+				Symbol:    "ALL",
+				Action:    "wait",
+				Reasoning: "JSON decision parsing failed; entering safe wait",
+			}},
+		}
+	}
 	return lastDecision, nil
 }
 
