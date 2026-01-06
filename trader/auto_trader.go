@@ -707,13 +707,20 @@ func (at *AutoTrader) runCycle() error {
 	}
 
 	// 4. Collect trading context
-	ctx, err := at.buildTradingContext()
+	ctx, candidateWarnings, err := at.buildTradingContext()
 	if err != nil {
 		record.Success = false
 		record.ErrorMessage = fmt.Sprintf("Failed to build trading context: %v", err)
 		at.saveDecision(record)
 		sendTelegramErrorNotification(at.store, at.userID, at.name, at.exchange, "", "", fmt.Errorf("failed to build trading context: %w", err))
 		return fmt.Errorf("failed to build trading context: %w", err)
+	}
+	for _, w := range candidateWarnings {
+		w = strings.TrimSpace(w)
+		if w == "" {
+			continue
+		}
+		record.ExecutionLog = append(record.ExecutionLog, fmt.Sprintf("WARN: %s", w))
 	}
 
 	// Save equity snapshot independently (decoupled from AI decision, used for drawing profit curve)
@@ -923,11 +930,11 @@ func (at *AutoTrader) runCycle() error {
 }
 
 // buildTradingContext builds trading context
-func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
+func (at *AutoTrader) buildTradingContext() (*decision.Context, []string, error) {
 	// 1. Get account information
 	balance, err := at.trader.GetBalance()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get account balance: %w", err)
+		return nil, nil, fmt.Errorf("failed to get account balance: %w", err)
 	}
 
 	// Get account fields
@@ -957,7 +964,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 	// 2. Get position information
 	positions, err := at.trader.GetPositions()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get positions: %w", err)
+		return nil, nil, fmt.Errorf("failed to get positions: %w", err)
 	}
 
 	var positionInfos []decision.PositionInfo
@@ -1052,11 +1059,11 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 
 	// 3. Use strategy engine to get candidate coins (must have strategy engine)
 	if at.strategyEngine == nil {
-		return nil, fmt.Errorf("trader has no strategy engine configured")
+		return nil, nil, fmt.Errorf("trader has no strategy engine configured")
 	}
-	candidateCoins, err := at.strategyEngine.GetCandidateCoins()
+	candidateCoins, candidateWarnings, err := at.strategyEngine.GetCandidateCoinsWithWarnings()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get candidate coins: %w", err)
+		return nil, nil, fmt.Errorf("failed to get candidate coins: %w", err)
 	}
 	logger.Infof("📋 [%s] Strategy engine fetched candidate coins: %d", at.name, len(candidateCoins))
 
@@ -1192,7 +1199,7 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		}
 	}
 
-	return ctx, nil
+	return ctx, candidateWarnings, nil
 }
 
 // executeDecisionWithRecord executes AI decision and records detailed information

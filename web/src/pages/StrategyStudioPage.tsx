@@ -90,6 +90,9 @@ export function StrategyStudioPage() {
     ai_response?: string
     reasoning?: string
     decisions?: unknown[]
+    candidate_count?: number
+    candidates?: unknown[]
+    candidate_warnings?: string[]
     error?: string
     duration_ms?: number
   } | null>(null)
@@ -1104,6 +1107,46 @@ export function StrategyStudioPage() {
                             <span className="text-xs text-nofx-text-muted">
                               {t('duration')}: {(aiTestResult.duration_ms / 1000).toFixed(2)}s
                             </span>
+                          </div>
+                        )}
+
+                        {(aiTestResult.candidate_warnings && aiTestResult.candidate_warnings.length > 0) && (
+                          <div className="p-3 rounded-lg bg-nofx-gold/10 border border-nofx-gold/30">
+                            <p className="text-xs font-medium text-nofx-text mb-1">
+                              {language === 'zh' ? '候选币种警告' : 'Candidate Warnings'}
+                            </p>
+                            <ul className="text-[10px] text-nofx-text-muted list-disc pl-4 space-y-0.5">
+                              {aiTestResult.candidate_warnings.map((w, idx) => (
+                                <li key={idx}>{String(w)}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {typeof aiTestResult.candidate_count === 'number' && (
+                          <div className="p-3 rounded-lg bg-nofx-bg border border-nofx-gold/20">
+                            <p className="text-xs font-medium text-nofx-text">
+                              {language === 'zh'
+                                ? `候选币种数量：${aiTestResult.candidate_count}`
+                                : `Candidate Count: ${aiTestResult.candidate_count}`}
+                            </p>
+                          </div>
+                        )}
+
+                        {(aiTestResult.candidates && aiTestResult.candidates.length > 0) && (
+                          <div>
+                            <div className="flex items-center gap-1.5 mb-1.5">
+                              <Target className="w-3 h-3 text-nofx-gold" />
+                              <span className="text-xs font-medium text-nofx-text">
+                                {language === 'zh' ? '候选币种' : 'Candidates'}
+                              </span>
+                            </div>
+                            <pre
+                              className="p-2 rounded-lg text-[10px] font-mono overflow-auto bg-nofx-bg border border-nofx-gold/20 text-nofx-text"
+                              style={{ maxHeight: '160px' }}
+                            >
+                              {JSON.stringify(aiTestResult.candidates, null, 2)}
+                            </pre>
                           </div>
                         )}
 

@@ -463,12 +463,13 @@ func (s *Server) handleStrategyTestRun(c *gin.Context) {
 	// Create strategy engine to build prompt
 	engine := kernel.NewStrategyEngine(&req.Config)
 
-	// Get candidate coins
-	candidates, err := engine.GetCandidateCoins()
+	// Get candidate coins (with warnings for UI)
+	candidates, candidateWarnings, err := engine.GetCandidateCoinsWithWarnings()
 	if err != nil {
 		logger.Errorf("[API Error] Failed to get candidate coins: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":       "Failed to get candidate coins",
+			"warnings":    candidateWarnings,
 			"ai_response": "",
 		})
 		return
@@ -568,6 +569,7 @@ func (s *Server) handleStrategyTestRun(c *gin.Context) {
 				"user_prompt":     userPrompt,
 				"candidate_count": len(candidates),
 				"candidates":      candidates,
+				"candidate_warnings": candidateWarnings,
 				"prompt_variant":  req.PromptVariant,
 				"ai_response":     fmt.Sprintf("❌ AI call failed: %s", aiErr.Error()),
 				"ai_error":        aiErr.Error(),
@@ -581,6 +583,7 @@ func (s *Server) handleStrategyTestRun(c *gin.Context) {
 			"user_prompt":     userPrompt,
 			"candidate_count": len(candidates),
 			"candidates":      candidates,
+			"candidate_warnings": candidateWarnings,
 			"prompt_variant":  req.PromptVariant,
 			"ai_response":     aiResponse,
 			"note":            "✅ Real AI test run successful",
@@ -594,6 +597,7 @@ func (s *Server) handleStrategyTestRun(c *gin.Context) {
 		"user_prompt":     userPrompt,
 		"candidate_count": len(candidates),
 		"candidates":      candidates,
+		"candidate_warnings": candidateWarnings,
 		"prompt_variant":  req.PromptVariant,
 		"ai_response":     "Please select an AI model and click 'Run Test' to perform real AI analysis.",
 		"note":            "AI model not selected or real AI call not enabled",

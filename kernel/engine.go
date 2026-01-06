@@ -1076,6 +1076,63 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 	}
 }
 
+// GetCandidateCoinsWithWarnings returns candidate coins plus user-facing warnings for common misconfigurations.
+// It does not attempt to expose underlying provider errors; check logs for detailed fetch failures.
+func (e *StrategyEngine) GetCandidateCoinsWithWarnings() ([]CandidateCoin, []string, error) {
+	candidates, err := e.GetCandidateCoins()
+	if err != nil {
+		return nil, nil, err
+	}
+	if e == nil || e.config == nil {
+		return candidates, nil, nil
+	}
+
+	var warnings []string
+	cs := e.config.CoinSource
+
+	hasAnySource := func(source string) bool {
+		for _, c := range candidates {
+			if hasSource(c.Sources, source) {
+				return true
+			}
+		}
+		return false
+	}
+
+	switch cs.SourceType {
+	case "mixed":
+		if cs.UseAI500 && !hasAnySource("ai500") {
+			warnings = append(warnings, "coin_source: mixed has use_ai500=true but AI500 returned 0 symbols (check NofxOS connectivity/auth)")
+		}
+		if cs.UseOITop && !hasAnySource("oi_top") {
+			warnings = append(warnings, "coin_source: mixed has use_oi_top=true but OI Top returned 0 symbols (check NofxOS connectivity/auth)")
+		}
+		if cs.UseOTCTop && !hasAnySource("otc_top") {
+			warnings = append(warnings, "coin_source: mixed has use_otc_top=true but OTC Top returned 0 symbols (check OTC API URL/reachability)")
+		}
+		if len(cs.StaticCoins) > 0 && !hasAnySource("static") {
+			warnings = append(warnings, "coin_source: mixed has static_coins but none were included after normalization")
+		}
+		if len(candidates) == 0 {
+			warnings = append(warnings, "coin_source: mixed produced 0 candidate coins")
+		}
+	case "ai500", "coinpool":
+		if !cs.UseAI500 {
+			warnings = append(warnings, "coin_source: source_type=ai500 but use_ai500=false; falling back to static_coins")
+		}
+	case "oi_top":
+		if !cs.UseOITop {
+			warnings = append(warnings, "coin_source: source_type=oi_top but use_oi_top=false; falling back to static_coins")
+		}
+	case "otc_top":
+		if !cs.UseOTCTop {
+			warnings = append(warnings, "coin_source: source_type=otc_top but use_otc_top=false; falling back to static_coins")
+		}
+	}
+
+	return candidates, warnings, nil
+}
+
 func (e *StrategyEngine) getAI500Coins(limit int) ([]CandidateCoin, error) {
 	if limit <= 0 {
 		limit = 30
