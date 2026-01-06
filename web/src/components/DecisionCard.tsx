@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DecisionRecord, DecisionAction, VisionImageMeta } from '../types'
 import { t, type Language } from '../i18n/translations'
 import { api } from '../lib/api'
@@ -242,6 +242,8 @@ function ActionCard({ action, language, onSymbolClick }: { action: DecisionActio
 export function DecisionCard({ decision, language, onSymbolClick }: DecisionCardProps) {
   const [showSystemPrompt, setShowSystemPrompt] = useState(false)
   const [showInputPrompt, setShowInputPrompt] = useState(false)
+  const [showDecisionLayer, setShowDecisionLayer] = useState(false)
+  const [decisionLayerPretty, setDecisionLayerPretty] = useState(false)
   const [showVisionLayer, setShowVisionLayer] = useState(false)
   const [showAnalysisLayer, setShowAnalysisLayer] = useState(false)
   const [showCoT, setShowCoT] = useState(false)
@@ -268,6 +270,20 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
     '## AI åˆ†æžè¦ç‚¹',
   ])
 
+  const decisionLayerRaw = (decision.decision_json || '').trim()
+  const decisionLayerPrettyText = useMemo(() => {
+    if (!decisionLayerRaw) return null
+    try {
+      const parsed = JSON.parse(decisionLayerRaw)
+      return JSON.stringify(parsed, null, 2)
+    } catch {
+      return null
+    }
+  }, [decisionLayerRaw])
+
+  const decisionLayerText =
+    decisionLayerPretty && decisionLayerPrettyText ? decisionLayerPrettyText : decisionLayerRaw
+
   useEffect(() => {
     visionLoadAbortRef.current.aborted = false
     setVisionThumbs({})
@@ -276,6 +292,8 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
     setVisionLoading(false)
     setShowVisionCharts(false)
     setImagePreview({ visible: false, src: '' })
+    setShowDecisionLayer(false)
+    setDecisionLayerPretty(false)
 
     return () => {
       visionLoadAbortRef.current.aborted = true
@@ -474,6 +492,109 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
                     })}
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Decision Layer */}
+        {decisionLayerRaw && (
+          <div>
+            <button
+              onClick={() => setShowDecisionLayer(!showDecisionLayer)}
+              className="flex items-center gap-2 text-sm transition-colors w-full justify-between p-2 rounded hover:bg-white/5"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-base">🧾</span>
+                <span className="font-semibold" style={{ color: '#fb923c' }}>
+                  {language === 'zh' ? '决策层' : 'Decision JSON'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    copyToClipboard(decisionLayerText, language === 'zh' ? '决策层' : 'Decision JSON')
+                  }}
+                  className="text-xs px-2.5 py-1 rounded hover:opacity-80 transition-opacity flex items-center gap-1"
+                  style={{
+                    background: 'rgba(251, 146, 60, 0.2)',
+                    color: '#fb923c',
+                    border: '1px solid rgba(251, 146, 60, 0.3)',
+                  }}
+                  title="Copy to clipboard"
+                >
+                  <span>📋</span>
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    downloadAsFile(
+                      decisionLayerText,
+                      `decision-json-cycle-${decision.cycle_number}.${decisionLayerPretty ? 'pretty.json' : 'json'}`
+                    )
+                  }}
+                  className="text-xs px-2.5 py-1 rounded hover:opacity-80 transition-opacity flex items-center gap-1"
+                  style={{
+                    background: 'rgba(251, 146, 60, 0.2)',
+                    color: '#fb923c',
+                    border: '1px solid rgba(251, 146, 60, 0.3)',
+                  }}
+                  title="Download as file"
+                >
+                  <span>💾</span>
+                </button>
+
+                <button
+                  disabled={!decisionLayerPrettyText}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (!decisionLayerPrettyText) return
+                    setDecisionLayerPretty(!decisionLayerPretty)
+                  }}
+                  className="text-xs px-2.5 py-1 rounded hover:opacity-80 transition-opacity"
+                  style={
+                    decisionLayerPrettyText
+                      ? {
+                          background: decisionLayerPretty ? 'rgba(14, 203, 129, 0.2)' : 'rgba(132, 142, 156, 0.15)',
+                          color: decisionLayerPretty ? '#0ECB81' : '#848E9C',
+                          border: decisionLayerPretty ? '1px solid rgba(14, 203, 129, 0.35)' : '1px solid rgba(132, 142, 156, 0.25)',
+                        }
+                      : {
+                          background: 'rgba(132, 142, 156, 0.08)',
+                          color: 'rgba(132, 142, 156, 0.55)',
+                          border: '1px solid rgba(132, 142, 156, 0.12)',
+                          cursor: 'not-allowed',
+                        }
+                  }
+                  title={decisionLayerPrettyText ? 'Toggle pretty JSON' : 'Invalid JSON (pretty view unavailable)'}
+                >
+                  {decisionLayerPretty ? (language === 'zh' ? '原样' : 'Raw') : (language === 'zh' ? '格式化' : 'Pretty')}
+                </button>
+
+                <span
+                  className="text-xs px-2 py-0.5 rounded"
+                  style={{ background: 'rgba(251, 146, 60, 0.15)', color: '#fb923c' }}
+                >
+                  {showDecisionLayer ? t('collapse', language) : t('expand', language)}
+                </span>
+              </div>
+            </button>
+            {showDecisionLayer && (
+              <div
+                className="mt-2 rounded-lg p-4 text-sm font-mono whitespace-pre overflow-auto max-h-96"
+                style={{
+                  background: '#0B0E11',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              >
+                {decisionLayerPretty && !decisionLayerPrettyText && (
+                  <div className="mb-2 text-xs" style={{ color: '#F6465D' }}>
+                    ❌ Invalid JSON, showing raw text
+                  </div>
+                )}
+                {decisionLayerText}
               </div>
             )}
           </div>
