@@ -412,6 +412,7 @@ type CreateTraderRequest struct {
 	Name                string  `json:"name" binding:"required"`
 	AIModelID           string  `json:"ai_model_id" binding:"required"`
 	AnalysisAIModelID   string  `json:"analysis_ai_model_id"`
+	EnableAnalysisLayer *bool   `json:"enable_analysis_layer"`
 	VisionAIModelID     string  `json:"vision_ai_model_id"`
 	ExchangeID          string  `json:"exchange_id" binding:"required"`
 	StrategyID          string  `json:"strategy_id"` // Strategy ID (new version)
@@ -711,6 +712,7 @@ func (s *Server) handleCreateTrader(c *gin.Context) {
 		Name:                 req.Name,
 		AIModelID:            req.AIModelID,
 		AnalysisAIModelID:    strings.TrimSpace(req.AnalysisAIModelID),
+		EnableAnalysisLayer:  req.EnableAnalysisLayer == nil || *req.EnableAnalysisLayer,
 		VisionAIModelID:      strings.TrimSpace(req.VisionAIModelID),
 		ExchangeID:           req.ExchangeID,
 		StrategyID:           req.StrategyID, // Associated strategy ID (new version)
@@ -764,6 +766,7 @@ type UpdateTraderRequest struct {
 	Name                string  `json:"name" binding:"required"`
 	AIModelID           string  `json:"ai_model_id" binding:"required"`
 	AnalysisAIModelID   *string `json:"analysis_ai_model_id"`
+	EnableAnalysisLayer *bool   `json:"enable_analysis_layer"`
 	VisionAIModelID     *string `json:"vision_ai_model_id"`
 	ExchangeID          string  `json:"exchange_id" binding:"required"`
 	StrategyID          string  `json:"strategy_id"` // Strategy ID (new version)
@@ -866,6 +869,11 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		analysisAIModelID = strings.TrimSpace(*req.AnalysisAIModelID)
 	}
 
+	enableAnalysisLayer := existingTrader.EnableAnalysisLayer
+	if req.EnableAnalysisLayer != nil {
+		enableAnalysisLayer = *req.EnableAnalysisLayer
+	}
+
 	// Update trader configuration
 	traderRecord := &store.Trader{
 		ID:                   traderID,
@@ -873,6 +881,7 @@ func (s *Server) handleUpdateTrader(c *gin.Context) {
 		Name:                 req.Name,
 		AIModelID:            req.AIModelID,
 		AnalysisAIModelID:    analysisAIModelID,
+		EnableAnalysisLayer:  enableAnalysisLayer,
 		VisionAIModelID:      visionAIModelID,
 		ExchangeID:           req.ExchangeID,
 		StrategyID:           strategyID, // Associated strategy ID
@@ -2381,6 +2390,7 @@ func (s *Server) handleGetTraderConfig(c *gin.Context) {
 		"trader_name":           traderConfig.Name,
 		"ai_model":              aiModelID,
 		"analysis_ai_model_id":  traderConfig.AnalysisAIModelID,
+		"enable_analysis_layer": traderConfig.EnableAnalysisLayer,
 		"vision_ai_model_id":    traderConfig.VisionAIModelID,
 		"exchange_id":           traderConfig.ExchangeID,
 		"strategy_id":           traderConfig.StrategyID,

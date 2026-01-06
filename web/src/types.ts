@@ -208,6 +208,7 @@ export interface CreateTraderRequest {
   name: string
   ai_model_id: string
   analysis_ai_model_id?: string
+  enable_analysis_layer?: boolean
   vision_ai_model_id?: string
   exchange_id: string
   strategy_id?: string // 策略ID（新版，使用保存的策略配置）
@@ -308,6 +309,7 @@ export interface TraderConfigData {
   trader_name: string
   ai_model: string
   analysis_ai_model_id?: string
+  enable_analysis_layer?: boolean
   vision_ai_model_id?: string
   exchange_id: string
   strategy_id?: string  // 策略ID

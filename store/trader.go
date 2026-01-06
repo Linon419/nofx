@@ -24,6 +24,7 @@ type Trader struct {
 	Name                string    `gorm:"column:name;not null" json:"name"`
 	AIModelID           string    `gorm:"column:ai_model_id;not null" json:"ai_model_id"`
 	AnalysisAIModelID   string    `gorm:"column:analysis_ai_model_id;not null;default:''" json:"analysis_ai_model_id"`
+	EnableAnalysisLayer bool      `gorm:"column:enable_analysis_layer;not null;default:true" json:"enable_analysis_layer"`
 	VisionAIModelID     string    `gorm:"column:vision_ai_model_id;not null;default:''" json:"vision_ai_model_id"`
 	ExchangeID          string    `gorm:"column:exchange_id;not null" json:"exchange_id"`
 	StrategyID          string    `gorm:"column:strategy_id;default:''" json:"strategy_id"`
@@ -69,6 +70,7 @@ func (s *TraderStore) initTables() error {
 				"Name",
 				"AIModelID",
 				"AnalysisAIModelID",
+				"EnableAnalysisLayer",
 				"VisionAIModelID",
 				"ExchangeID",
 				"StrategyID",
@@ -94,6 +96,7 @@ func (s *TraderStore) initTables() error {
 				}
 			}
 
+			s.db.Exec(`UPDATE traders SET enable_analysis_layer = 1 WHERE enable_analysis_layer IS NULL`)
 			s.db.Exec(`UPDATE traders SET analysis_ai_model_id = '' WHERE analysis_ai_model_id IS NULL`)
 			s.db.Exec(`UPDATE traders SET vision_ai_model_id = '' WHERE vision_ai_model_id IS NULL`)
 			s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_traders_user_id ON traders(user_id)`)
@@ -108,6 +111,7 @@ func (s *TraderStore) initTables() error {
 		if tableExists > 0 {
 			// Ensure new columns exist without relying on AutoMigrate (which may be skipped for existing Postgres tables).
 			s.db.Exec(`ALTER TABLE traders ADD COLUMN IF NOT EXISTS analysis_ai_model_id TEXT NOT NULL DEFAULT ''`)
+			s.db.Exec(`ALTER TABLE traders ADD COLUMN IF NOT EXISTS enable_analysis_layer BOOLEAN NOT NULL DEFAULT TRUE`)
 			s.db.Exec(`ALTER TABLE traders ADD COLUMN IF NOT EXISTS vision_ai_model_id TEXT NOT NULL DEFAULT ''`)
 			return nil
 		}
@@ -156,14 +160,15 @@ func (s *TraderStore) Update(trader *Trader) error {
 		trader.ID, trader.Name, trader.AIModelID, trader.StrategyID)
 
 	updates := map[string]interface{}{
-		"name":                 trader.Name,
-		"ai_model_id":          trader.AIModelID,
-		"analysis_ai_model_id": trader.AnalysisAIModelID,
-		"vision_ai_model_id":   trader.VisionAIModelID,
-		"exchange_id":          trader.ExchangeID,
-		"strategy_id":          trader.StrategyID,
-		"is_cross_margin":      trader.IsCrossMargin,
-		"show_in_competition":  trader.ShowInCompetition,
+		"name":                  trader.Name,
+		"ai_model_id":           trader.AIModelID,
+		"analysis_ai_model_id":  trader.AnalysisAIModelID,
+		"enable_analysis_layer": trader.EnableAnalysisLayer,
+		"vision_ai_model_id":    trader.VisionAIModelID,
+		"exchange_id":           trader.ExchangeID,
+		"strategy_id":           trader.StrategyID,
+		"is_cross_margin":       trader.IsCrossMargin,
+		"show_in_competition":   trader.ShowInCompetition,
 	}
 
 	// Only update these if > 0

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"nofx/kernel"
 	"nofx/experience"
+	"nofx/kernel"
 	"nofx/logger"
 	"nofx/market"
 	"nofx/mcp"
@@ -18,9 +18,9 @@ import (
 // AutoTraderConfig auto trading configuration (simplified version - AI makes all decisions)
 type AutoTraderConfig struct {
 	// Trader identification
-	ID      string // Trader unique identifier (for log directory, etc.)
-	Name    string // Trader display name
-	AIModel string // AI model: "qwen" or "deepseek"
+	ID        string // Trader unique identifier (for log directory, etc.)
+	Name      string // Trader display name
+	AIModel   string // AI model: "qwen" or "deepseek"
 	AIModelID string // AI model identifier (from DB/config)
 
 	// Trading platform selection
@@ -36,13 +36,13 @@ type AutoTraderConfig struct {
 	BybitSecretKey string
 
 	// OKX API configuration
-	OKXAPIKey    string
-	OKXSecretKey string
+	OKXAPIKey     string
+	OKXSecretKey  string
 	OKXPassphrase string
 
 	// Bitget API configuration
-	BitgetAPIKey    string
-	BitgetSecretKey string
+	BitgetAPIKey     string
+	BitgetSecretKey  string
 	BitgetPassphrase string
 
 	// Hyperliquid configuration
@@ -77,6 +77,7 @@ type AutoTraderConfig struct {
 	AnalysisAPIKey          string
 	AnalysisCustomAPIURL    string
 	AnalysisCustomModelName string
+	EnableAnalysisLayer     bool
 
 	// Optional: vision stage AI configuration (separate model/provider)
 	VisionAIModel         string
@@ -117,14 +118,14 @@ type AutoTrader struct {
 	config                AutoTraderConfig
 	trader                Trader // Use Trader interface (supports multiple platforms)
 	mcpClient             mcp.AIClient
-	analysisClient         mcp.AIClient
-	visionClient           mcp.AIClient
-	store                 *store.Store             // Data storage (decision records, etc.)
+	analysisClient        mcp.AIClient
+	visionClient          mcp.AIClient
+	store                 *store.Store           // Data storage (decision records, etc.)
 	strategyEngine        *kernel.StrategyEngine // Strategy engine (uses strategy configuration)
-	pendingStrategyMu      sync.Mutex
-	pendingStrategyConfig  *store.StrategyConfig
-	pendingStrategyReason  string
-	cycleNumber           int                      // Current cycle number
+	pendingStrategyMu     sync.Mutex
+	pendingStrategyConfig *store.StrategyConfig
+	pendingStrategyReason string
+	cycleNumber           int // Current cycle number
 	initialBalance        float64
 	dailyPnL              float64
 	customPrompt          string // Custom trading strategy prompt
@@ -144,8 +145,8 @@ type AutoTrader struct {
 	pendingExitPlans      map[string]pendingExitPlan
 	exitPlanLocksMu       sync.Mutex
 	exitPlanLocks         map[string]*sync.Mutex
-	lastBalanceSyncTime   time.Time          // Last balance sync time
-	userID                string             // User ID
+	lastBalanceSyncTime   time.Time // Last balance sync time
+	userID                string    // User ID
 }
 
 // NewAutoTrader creates an automatic trader
@@ -229,7 +230,7 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 
 	// Optional: separate analysis-stage AI client
 	var analysisClient mcp.AIClient
-	if strings.TrimSpace(config.AnalysisAIModel) != "" {
+	if strings.TrimSpace(config.AnalysisAIModel) != "" && config.EnableAnalysisLayer {
 		switch strings.TrimSpace(strings.ToLower(config.AnalysisAIModel)) {
 		case "claude":
 			analysisClient = mcp.NewClaudeClient()
@@ -397,8 +398,8 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		config:                config,
 		trader:                trader,
 		mcpClient:             mcpClient,
-		analysisClient:         analysisClient,
-		visionClient:           visionClient,
+		analysisClient:        analysisClient,
+		visionClient:          visionClient,
 		store:                 st,
 		strategyEngine:        strategyEngine,
 		cycleNumber:           cycleNumber,
@@ -2167,22 +2168,22 @@ func (at *AutoTrader) recordOrderFill(orderRecordID int64, exchangeOrderID, symb
 	normalizedSymbol := market.Normalize(symbol)
 
 	fill := &store.TraderFill{
-		TraderID:         at.id,
-		ExchangeID:       at.exchangeID,
-		ExchangeType:     at.exchange,
-		OrderID:          orderRecordID,
-		ExchangeOrderID:  exchangeOrderID,
-		ExchangeTradeID:  tradeID,
-		Symbol:           normalizedSymbol,
-		Side:             side,
-		Price:            price,
-		Quantity:         quantity,
-		QuoteQuantity:    price * quantity,
-		Commission:       fee,
-		CommissionAsset:  "USDT",
-		RealizedPnL:      0, // Will be calculated for close orders
-		IsMaker:          false, // Market orders are usually taker
-		CreatedAt:        time.Now().UTC().UnixMilli(),
+		TraderID:        at.id,
+		ExchangeID:      at.exchangeID,
+		ExchangeType:    at.exchange,
+		OrderID:         orderRecordID,
+		ExchangeOrderID: exchangeOrderID,
+		ExchangeTradeID: tradeID,
+		Symbol:          normalizedSymbol,
+		Side:            side,
+		Price:           price,
+		Quantity:        quantity,
+		QuoteQuantity:   price * quantity,
+		Commission:      fee,
+		CommissionAsset: "USDT",
+		RealizedPnL:     0,     // Will be calculated for close orders
+		IsMaker:         false, // Market orders are usually taker
+		CreatedAt:       time.Now().UTC().UnixMilli(),
 	}
 
 	// Calculate realized PnL for close orders
@@ -2305,4 +2306,3 @@ func getSideFromAction(action string) string {
 		return "BUY"
 	}
 }
-

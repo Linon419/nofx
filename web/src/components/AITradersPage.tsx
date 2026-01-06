@@ -395,6 +395,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
         name: data.name,
         ai_model_id: data.ai_model_id,
         analysis_ai_model_id: data.analysis_ai_model_id ?? '',
+        enable_analysis_layer: data.enable_analysis_layer,
         vision_ai_model_id: data.vision_ai_model_id ?? '',
         exchange_id: data.exchange_id,
         strategy_id: data.strategy_id,

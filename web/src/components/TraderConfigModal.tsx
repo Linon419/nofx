@@ -30,6 +30,7 @@ interface FormState {
   trader_name: string
   ai_model: string
   analysis_ai_model_id: string
+  enable_analysis_layer: boolean
   vision_ai_model_id: string
   exchange_id: string
   strategy_id: string
@@ -63,13 +64,14 @@ export function TraderConfigModal({
 	    trader_name: '',
 	    ai_model: '',
 	    analysis_ai_model_id: '',
+	    enable_analysis_layer: true,
 	    vision_ai_model_id: '',
 	    exchange_id: '',
 	    strategy_id: '',
 	    is_cross_margin: true,
 	    show_in_competition: true,
-    scan_interval_minutes: 3,
-  })
+	    scan_interval_minutes: 3,
+	  })
   const [isSaving, setIsSaving] = useState(false)
   const [strategies, setStrategies] = useState<Strategy[]>([])
   const [isFetchingBalance, setIsFetchingBalance] = useState(false)
@@ -102,11 +104,12 @@ export function TraderConfigModal({
     }
   }, [isOpen])
 
-  useEffect(() => {
+	useEffect(() => {
 	    if (traderData) {
 	      setFormData({
 	        ...traderData,
 	        analysis_ai_model_id: traderData.analysis_ai_model_id || '',
+	        enable_analysis_layer: traderData.enable_analysis_layer ?? true,
 	        vision_ai_model_id: traderData.vision_ai_model_id || '',
 	        strategy_id: traderData.strategy_id || '',
 	      })
@@ -115,15 +118,16 @@ export function TraderConfigModal({
 	        trader_name: '',
 	        ai_model: availableModels[0]?.id || '',
 	        analysis_ai_model_id: '',
+	        enable_analysis_layer: true,
 	        vision_ai_model_id: '',
 	        exchange_id: availableExchanges[0]?.id || '',
 	        strategy_id: '',
 	        is_cross_margin: true,
 	        show_in_competition: true,
-        scan_interval_minutes: 3,
-      })
-    }
-  }, [traderData, isEditMode, availableModels, availableExchanges])
+	        scan_interval_minutes: 3,
+	      })
+	    }
+	  }, [traderData, isEditMode, availableModels, availableExchanges])
 
   if (!isOpen) return null
 
@@ -166,18 +170,19 @@ export function TraderConfigModal({
     if (!onSave) return
 
     setIsSaving(true)
-    try {
-	      const saveData: CreateTraderRequest = {
-	        name: formData.trader_name,
-	        ai_model_id: formData.ai_model,
-	        analysis_ai_model_id: formData.analysis_ai_model_id || '',
-	        vision_ai_model_id: formData.vision_ai_model_id || '',
-	        exchange_id: formData.exchange_id,
-	        strategy_id: formData.strategy_id,
-	        is_cross_margin: formData.is_cross_margin,
-	        show_in_competition: formData.show_in_competition,
-        scan_interval_minutes: formData.scan_interval_minutes,
-      }
+	    try {
+		      const saveData: CreateTraderRequest = {
+		        name: formData.trader_name,
+		        ai_model_id: formData.ai_model,
+		        analysis_ai_model_id: formData.analysis_ai_model_id || '',
+		        enable_analysis_layer: formData.enable_analysis_layer,
+		        vision_ai_model_id: formData.vision_ai_model_id || '',
+		        exchange_id: formData.exchange_id,
+		        strategy_id: formData.strategy_id,
+		        is_cross_margin: formData.is_cross_margin,
+		        show_in_competition: formData.show_in_competition,
+	        scan_interval_minutes: formData.scan_interval_minutes,
+		      }
 
       // 只在编辑模式时包含initial_balance
       if (isEditMode && formData.initial_balance !== undefined) {
@@ -340,6 +345,24 @@ export function TraderConfigModal({
                     </option>
                   ))}
                 </select>
+                <div className="mt-3 flex items-center justify-between rounded px-3 py-2 border border-[#2B3139] bg-[#0B0E11]">
+                  <div className="flex flex-col">
+                    <span className="text-xs font-semibold text-[#EAECEF]">启用分析层</span>
+                    <span className="text-[11px] text-[#848E9C]">
+                      关闭后将跳过分析模型调用（即使选择了分析模型），也不会追加 Analysis Notes
+                    </span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={formData.enable_analysis_layer}
+                      onChange={(e) => handleInputChange('enable_analysis_layer', e.target.checked)}
+                    />
+                    <div className="w-10 h-5 bg-[#2B3139] peer-focus:outline-none rounded-full peer peer-checked:bg-[#0ECB81] transition-colors" />
+                    <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5" />
+                  </label>
+                </div>
                 <p className="mt-2 text-xs text-[#848E9C]">
                   提示：分析层只输出文本要点（不输出决策 JSON），随后再由决策模型输出最终 JSON；会额外消耗一次 AI 调用。
                 </p>
