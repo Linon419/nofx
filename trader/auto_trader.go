@@ -21,6 +21,7 @@ type AutoTraderConfig struct {
 	ID      string // Trader unique identifier (for log directory, etc.)
 	Name    string // Trader display name
 	AIModel string // AI model: "qwen" or "deepseek"
+	AIModelID string // AI model identifier (from DB/config)
 
 	// Trading platform selection
 	Exchange   string // Exchange type: "binance", "bybit", "okx", "bitget", "hyperliquid", "aster" or "lighter"
@@ -71,6 +72,18 @@ type AutoTraderConfig struct {
 	CustomAPIKey    string
 	CustomModelName string
 
+	// Optional: analysis stage AI configuration (separate model/provider)
+	AnalysisAIModel         string
+	AnalysisAPIKey          string
+	AnalysisCustomAPIURL    string
+	AnalysisCustomModelName string
+
+	// Optional: vision stage AI configuration (separate model/provider)
+	VisionAIModel         string
+	VisionAPIKey          string
+	VisionCustomAPIURL    string
+	VisionCustomModelName string
+
 	// Scan configuration
 	ScanInterval time.Duration // Scan interval (recommended 3 minutes)
 
@@ -97,14 +110,20 @@ type AutoTrader struct {
 	id                    string // Trader unique identifier
 	name                  string // Trader display name
 	aiModel               string // AI model name
+	aiModelID             string // AI model identifier
 	exchange              string // Trading platform type (binance/bybit/etc)
 	exchangeID            string // Exchange account UUID
 	showInCompetition     bool   // Whether to show in competition page
 	config                AutoTraderConfig
 	trader                Trader // Use Trader interface (supports multiple platforms)
 	mcpClient             mcp.AIClient
+	analysisClient         mcp.AIClient
+	visionClient           mcp.AIClient
 	store                 *store.Store             // Data storage (decision records, etc.)
 	strategyEngine        *kernel.StrategyEngine // Strategy engine (uses strategy configuration)
+	pendingStrategyMu      sync.Mutex
+	pendingStrategyConfig  *store.StrategyConfig
+	pendingStrategyReason  string
 	cycleNumber           int                      // Current cycle number
 	initialBalance        float64
 	dailyPnL              float64
@@ -121,6 +140,10 @@ type AutoTrader struct {
 	monitorWg             sync.WaitGroup     // Used to wait for monitoring goroutine to finish
 	peakPnLCache          map[string]float64 // Peak profit cache (symbol -> peak P&L percentage)
 	peakPnLCacheMutex     sync.RWMutex       // Cache read-write lock
+	pendingExitPlansMu    sync.Mutex
+	pendingExitPlans      map[string]pendingExitPlan
+	exitPlanLocksMu       sync.Mutex
+	exitPlanLocks         map[string]*sync.Mutex
 	lastBalanceSyncTime   time.Time          // Last balance sync time
 	userID                string             // User ID
 }
@@ -202,6 +225,56 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 
 	if config.CustomAPIURL != "" || config.CustomModelName != "" {
 		logger.Infof("🔧 [%s] Custom config - URL: %s, Model: %s", config.Name, config.CustomAPIURL, config.CustomModelName)
+	}
+
+	// Optional: separate analysis-stage AI client
+	var analysisClient mcp.AIClient
+	if strings.TrimSpace(config.AnalysisAIModel) != "" {
+		switch strings.TrimSpace(strings.ToLower(config.AnalysisAIModel)) {
+		case "claude":
+			analysisClient = mcp.NewClaudeClient()
+		case "kimi":
+			analysisClient = mcp.NewKimiClient()
+		case "gemini":
+			analysisClient = mcp.NewGeminiClient()
+		case "grok":
+			analysisClient = mcp.NewGrokClient()
+		case "openai":
+			analysisClient = mcp.NewOpenAIClient()
+		case "qwen":
+			analysisClient = mcp.NewQwenClient()
+		case "custom":
+			analysisClient = mcp.New()
+		default:
+			analysisClient = mcp.NewDeepSeekClient()
+		}
+		analysisClient.SetAPIKey(config.AnalysisAPIKey, config.AnalysisCustomAPIURL, config.AnalysisCustomModelName)
+		logger.Infof("🧠 [%s] Analysis model enabled: %s", config.Name, config.AnalysisAIModel)
+	}
+
+	// Optional: separate vision-stage AI client
+	var visionClient mcp.AIClient
+	if strings.TrimSpace(config.VisionAIModel) != "" {
+		switch strings.TrimSpace(strings.ToLower(config.VisionAIModel)) {
+		case "claude":
+			visionClient = mcp.NewClaudeClient()
+		case "kimi":
+			visionClient = mcp.NewKimiClient()
+		case "gemini":
+			visionClient = mcp.NewGeminiClient()
+		case "grok":
+			visionClient = mcp.NewGrokClient()
+		case "openai":
+			visionClient = mcp.NewOpenAIClient()
+		case "qwen":
+			visionClient = mcp.NewQwenClient()
+		case "custom":
+			visionClient = mcp.New()
+		default:
+			visionClient = mcp.NewDeepSeekClient()
+		}
+		visionClient.SetAPIKey(config.VisionAPIKey, config.VisionCustomAPIURL, config.VisionCustomModelName)
+		logger.Infof("👁️ [%s] Vision model enabled: %s", config.Name, config.VisionAIModel)
 	}
 
 	// Set default trading platform
@@ -317,12 +390,15 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		id:                    config.ID,
 		name:                  config.Name,
 		aiModel:               config.AIModel,
+		aiModelID:             config.AIModelID,
 		exchange:              config.Exchange,
 		exchangeID:            config.ExchangeID,
 		showInCompetition:     config.ShowInCompetition,
 		config:                config,
 		trader:                trader,
 		mcpClient:             mcpClient,
+		analysisClient:         analysisClient,
+		visionClient:           visionClient,
 		store:                 st,
 		strategyEngine:        strategyEngine,
 		cycleNumber:           cycleNumber,
@@ -336,6 +412,10 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		monitorWg:             sync.WaitGroup{},
 		peakPnLCache:          make(map[string]float64),
 		peakPnLCacheMutex:     sync.RWMutex{},
+		pendingExitPlansMu:    sync.Mutex{},
+		pendingExitPlans:      make(map[string]pendingExitPlan),
+		exitPlanLocksMu:       sync.Mutex{},
+		exitPlanLocks:         make(map[string]*sync.Mutex),
 		lastBalanceSyncTime:   time.Now(),
 		userID:                userID,
 	}, nil
@@ -479,6 +559,8 @@ func (at *AutoTrader) runCycle() error {
 		return nil
 	}
 
+	at.applyQueuedStrategyConfigUpdateIfAny()
+
 	// Create decision record
 	record := &store.DecisionRecord{
 		ExecutionLog: []string{},
@@ -524,7 +606,13 @@ func (at *AutoTrader) runCycle() error {
 
 	// 5. Use strategy engine to call AI for decision
 	logger.Infof("🤖 Requesting AI analysis and decision... [Strategy Engine]")
-	aiDecision, err := kernel.GetFullDecisionWithStrategy(ctx, at.mcpClient, at.strategyEngine, "balanced")
+	nextCycleNumber := at.cycleNumber + 1
+	var aiDecision *kernel.FullDecision
+	if at.analysisClient != nil {
+		aiDecision, err = kernel.GetFullDecisionWithStrategyWithAnalysis(ctx, at.mcpClient, at.analysisClient, at.strategyEngine, "balanced", at.id, nextCycleNumber)
+	} else {
+		aiDecision, err = kernel.GetFullDecisionWithStrategy(ctx, at.mcpClient, at.strategyEngine, "balanced", at.id, nextCycleNumber)
+	}
 
 	if aiDecision != nil && aiDecision.AIRequestDurationMs > 0 {
 		record.AIRequestDurationMs = aiDecision.AIRequestDurationMs

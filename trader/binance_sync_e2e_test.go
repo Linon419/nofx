@@ -89,10 +89,14 @@ func TestBinanceSyncE2E(t *testing.T) {
 	if len(sampleOrders) > 0 {
 		t.Logf("\n📝 Sample orders:")
 		for i, order := range sampleOrders {
+			filledAt := "N/A"
+			if order.FilledAt > 0 {
+				filledAt = time.UnixMilli(order.FilledAt).UTC().Format(time.RFC3339)
+			}
 			t.Logf("   [%d] %s %s %s qty=%.6f price=%.4f action=%s time=%s",
 				i+1, order.ExchangeOrderID, order.Symbol, order.Side,
 				order.Quantity, order.Price, order.OrderAction,
-				order.FilledAt.Format(time.RFC3339))
+				filledAt)
 		}
 	}
 
@@ -122,11 +126,11 @@ func TestBinanceSyncE2E(t *testing.T) {
 	if err != nil {
 		t.Logf("   ⚠️ GetLastFillTimeByExchange error: %v", err)
 	} else {
-		t.Logf("\n📅 Last fill time from DB: %s", lastFillTime.Format(time.RFC3339))
+		t.Logf("\n📅 Last fill time from DB: %s", time.UnixMilli(lastFillTime).UTC().Format(time.RFC3339))
 
 		// Check if it would be in the future (the bug we fixed)
 		now := time.Now().UTC()
-		if lastFillTime.After(now) {
+		if lastFillTime > now.UnixMilli() {
 			t.Logf("   ❌ BUG: Last fill time is in the future! (now: %s)", now.Format(time.RFC3339))
 		} else {
 			t.Logf("   ✅ Last fill time is in the past (correct)")
@@ -175,7 +179,7 @@ func TestBinanceSyncWithExistingData(t *testing.T) {
 		Price:           50000,
 		Quantity:        0.001,
 		QuoteQuantity:   50,
-		CreatedAt:       localTime, // This time is "in the future" if interpreted as UTC
+		CreatedAt:       localTime.UnixMilli(), // This time is "in the future" if interpreted as UTC
 	}
 	if err := orderStore.CreateFill(fakeFill); err != nil {
 		t.Fatalf("Failed to create fake fill: %v", err)
@@ -187,9 +191,9 @@ func TestBinanceSyncWithExistingData(t *testing.T) {
 
 	// Check GetLastFillTimeByExchange
 	lastFillTime, _ := orderStore.GetLastFillTimeByExchange(exchangeID)
-	t.Logf("   GetLastFillTimeByExchange returned: %s", lastFillTime.Format(time.RFC3339))
+	t.Logf("   GetLastFillTimeByExchange returned: %s", time.UnixMilli(lastFillTime).UTC().Format(time.RFC3339))
 
-	if lastFillTime.After(time.Now().UTC()) {
+	if lastFillTime > time.Now().UTC().UnixMilli() {
 		t.Logf("   ⚠️ Last fill time is in the future - this is the bug scenario!")
 	}
 

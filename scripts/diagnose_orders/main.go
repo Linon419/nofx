@@ -7,6 +7,7 @@ import (
 	"nofx/store"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 func main() {
@@ -73,7 +74,7 @@ func main() {
 		if order.Status == "FILLED" {
 			filledOrders++
 
-			if !order.FilledAt.IsZero() {
+			if order.FilledAt > 0 {
 				withFilledAt++
 			} else {
 				missingFilledAt++
@@ -107,8 +108,8 @@ func main() {
 		}
 
 		filledAtStr := "N/A"
-		if !order.FilledAt.IsZero() {
-			filledAtStr = order.FilledAt.Format("01-02 15:04")
+		if order.FilledAt > 0 {
+			filledAtStr = time.UnixMilli(order.FilledAt).UTC().Format("01-02 15:04")
 		}
 
 		orderID := order.ExchangeOrderID

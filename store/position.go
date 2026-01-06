@@ -293,6 +293,50 @@ func (s *PositionStore) GetOpenPositionBySymbol(traderID, symbol, side string) (
 	return nil, err
 }
 
+// UpdateExitPlanForOpenPosition updates exit-plan snapshot/state for an existing open position.
+// Returns updated=false when the matching open position doesn't exist (caller can retry later).
+func (s *PositionStore) UpdateExitPlanForOpenPosition(traderID, symbol, side, snapshotJSON, stateJSON string) (bool, error) {
+	pos, err := s.GetOpenPositionBySymbol(traderID, symbol, side)
+	if err != nil {
+		return false, err
+	}
+	if pos == nil {
+		return false, nil
+	}
+
+	// Already persisted.
+	if strings.TrimSpace(pos.ExitPlanSnapshot) != "" {
+		return true, nil
+	}
+
+	nowMs := time.Now().UTC().UnixMilli()
+	if err := s.db.Model(&TraderPosition{}).Where("id = ?", pos.ID).Updates(map[string]interface{}{
+		"exit_plan_snapshot": snapshotJSON,
+		"exit_plan_state":    stateJSON,
+		"updated_at":         nowMs,
+	}).Error; err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *PositionStore) UpdateExitPlanSnapshotAndState(id int64, snapshotJSON, stateJSON string) error {
+	nowMs := time.Now().UTC().UnixMilli()
+	return s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"exit_plan_snapshot": snapshotJSON,
+		"exit_plan_state":    stateJSON,
+		"updated_at":         nowMs,
+	}).Error
+}
+
+func (s *PositionStore) UpdateExitPlanState(id int64, stateJSON string) error {
+	nowMs := time.Now().UTC().UnixMilli()
+	return s.db.Model(&TraderPosition{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"exit_plan_state": stateJSON,
+		"updated_at":      nowMs,
+	}).Error
+}
+
 // GetClosedPositions gets closed positions
 func (s *PositionStore) GetClosedPositions(traderID string, limit int) ([]*TraderPosition, error) {
 	var positions []*TraderPosition
