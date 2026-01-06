@@ -1116,17 +1116,73 @@ func (e *StrategyEngine) GetCandidateCoinsWithWarnings() ([]CandidateCoin, []str
 		if len(candidates) == 0 {
 			warnings = append(warnings, "coin_source: mixed produced 0 candidate coins")
 		}
+	case "static":
+		var ignored []string
+		if cs.UseAI500 {
+			ignored = append(ignored, "use_ai500")
+		}
+		if cs.UseOITop {
+			ignored = append(ignored, "use_oi_top")
+		}
+		if cs.UseOTCTop {
+			ignored = append(ignored, "use_otc_top")
+		}
+		if len(ignored) > 0 {
+			warnings = append(warnings, fmt.Sprintf(
+				"coin_source: source_type=static ignores %s; set source_type=mixed to combine sources",
+				strings.Join(ignored, ","),
+			))
+		}
 	case "ai500", "coinpool":
 		if !cs.UseAI500 {
 			warnings = append(warnings, "coin_source: source_type=ai500 but use_ai500=false; falling back to static_coins")
+		}
+		var ignored []string
+		if cs.UseOITop {
+			ignored = append(ignored, "use_oi_top")
+		}
+		if cs.UseOTCTop {
+			ignored = append(ignored, "use_otc_top")
+		}
+		if len(ignored) > 0 {
+			warnings = append(warnings, fmt.Sprintf(
+				"coin_source: source_type=ai500 ignores %s; set source_type=mixed to combine sources",
+				strings.Join(ignored, ","),
+			))
 		}
 	case "oi_top":
 		if !cs.UseOITop {
 			warnings = append(warnings, "coin_source: source_type=oi_top but use_oi_top=false; falling back to static_coins")
 		}
+		var ignored []string
+		if cs.UseAI500 {
+			ignored = append(ignored, "use_ai500")
+		}
+		if cs.UseOTCTop {
+			ignored = append(ignored, "use_otc_top")
+		}
+		if len(ignored) > 0 {
+			warnings = append(warnings, fmt.Sprintf(
+				"coin_source: source_type=oi_top ignores %s; set source_type=mixed to combine sources",
+				strings.Join(ignored, ","),
+			))
+		}
 	case "otc_top":
 		if !cs.UseOTCTop {
 			warnings = append(warnings, "coin_source: source_type=otc_top but use_otc_top=false; falling back to static_coins")
+		}
+		var ignored []string
+		if cs.UseAI500 {
+			ignored = append(ignored, "use_ai500")
+		}
+		if cs.UseOITop {
+			ignored = append(ignored, "use_oi_top")
+		}
+		if len(ignored) > 0 {
+			warnings = append(warnings, fmt.Sprintf(
+				"coin_source: source_type=otc_top ignores %s; set source_type=mixed to combine sources",
+				strings.Join(ignored, ","),
+			))
 		}
 	}
 

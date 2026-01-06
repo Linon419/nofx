@@ -19,6 +19,42 @@ export function CoinSourceEditor({
   const [newCoin, setNewCoin] = useState('')
   const [newExcludedCoin, setNewExcludedCoin] = useState('')
 
+  const normalizedUseAI500 = config.use_ai500 ?? false
+  const normalizedUseOITop = config.use_oi_top ?? false
+  const normalizedUseOTCTop = config.use_otc_top ?? false
+
+  const setSourceType = (nextType: CoinSourceConfig['source_type']) => {
+    if (disabled) return
+
+    const next: CoinSourceConfig = { ...config, source_type: nextType }
+
+    // Keep user lists (static_coins/excluded_coins) intact, but prevent inconsistent enabled flags.
+    // This avoids confusing configs like: source_type=static but use_ai500=true.
+    if (nextType === 'static') {
+      next.use_ai500 = false
+      next.use_oi_top = false
+      next.use_otc_top = false
+    } else if (nextType === 'ai500' || nextType === 'coinpool') {
+      next.use_ai500 = true
+      next.use_oi_top = false
+      next.use_otc_top = false
+    } else if (nextType === 'oi_top') {
+      next.use_ai500 = false
+      next.use_oi_top = true
+      next.use_otc_top = false
+    } else if (nextType === 'otc_top') {
+      next.use_ai500 = false
+      next.use_oi_top = false
+      next.use_otc_top = true
+    } else if (nextType === 'mixed') {
+      next.use_ai500 = !!next.use_ai500
+      next.use_oi_top = !!next.use_oi_top
+      next.use_otc_top = !!next.use_otc_top
+    }
+
+    onChange(next)
+  }
+
   const t = (key: string) => {
     const translations: Record<string, Record<string, string>> = {
       sourceType: { zh: '数据来源类型', en: 'Source Type' },
@@ -172,10 +208,7 @@ export function CoinSourceEditor({
           {sourceTypes.map(({ value, icon: Icon, color }) => (
             <button
               key={value}
-              onClick={() =>
-                !disabled &&
-                onChange({ ...config, source_type: value as CoinSourceConfig['source_type'] })
-              }
+              onClick={() => setSourceType(value as CoinSourceConfig['source_type'])}
               disabled={disabled}
               className={`p-4 rounded-lg border transition-all ${config.source_type === value
                 ? 'ring-2 ring-nofx-gold bg-nofx-gold/10'
@@ -314,7 +347,7 @@ export function CoinSourceEditor({
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
-                checked={config.use_ai500}
+                checked={normalizedUseAI500}
                 onChange={(e) =>
                   !disabled && onChange({ ...config, use_ai500: e.target.checked })
                 }
@@ -324,7 +357,7 @@ export function CoinSourceEditor({
               <span className="text-nofx-text">{t('useAI500')}</span>
             </label>
 
-            {config.use_ai500 && (
+            {normalizedUseAI500 && (
               <div className="flex items-center gap-3 pl-8">
                 <span className="text-sm text-nofx-text-muted">
                   {t('ai500Limit')}:
@@ -371,7 +404,7 @@ export function CoinSourceEditor({
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
-                checked={config.use_oi_top}
+                checked={normalizedUseOITop}
                 onChange={(e) =>
                   !disabled && onChange({ ...config, use_oi_top: e.target.checked })
                 }
@@ -381,7 +414,7 @@ export function CoinSourceEditor({
               <span className="text-nofx-text">{t('useOITop')}</span>
             </label>
 
-            {config.use_oi_top && (
+            {normalizedUseOITop && (
               <div className="flex items-center gap-3 pl-8">
                 <span className="text-sm text-nofx-text-muted">
                   {t('oiTopLimit')}:
@@ -424,7 +457,7 @@ export function CoinSourceEditor({
               <label className="flex items-center gap-3 mb-3 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={config.use_otc_top}
+                  checked={normalizedUseOTCTop}
                   onChange={(e) =>
                     !disabled && onChange({ ...config, use_otc_top: e.target.checked })
                   }
@@ -436,7 +469,7 @@ export function CoinSourceEditor({
             </div>
           </div>
 
-          {config.use_otc_top && (
+          {normalizedUseOTCTop && (
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm" style={{ color: '#848E9C' }}>
