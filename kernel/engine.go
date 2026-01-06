@@ -922,7 +922,8 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 		// Liquidity filter (skip for xyz dex assets - they don't have OI data from Binance)
 		isExistingPosition := positionSymbols[coin.Symbol]
 		isXyzAsset := market.IsXyzDexAsset(coin.Symbol)
-		if minOIThresholdMillions > 0 && !isExistingPosition && !isXyzAsset && data.OpenInterest != nil && data.CurrentPrice > 0 {
+		isManualCandidate := hasSource(coin.Sources, "static")
+		if minOIThresholdMillions > 0 && !isExistingPosition && !isXyzAsset && !isManualCandidate && data.OpenInterest != nil && data.OpenInterest.Latest > 0 && data.CurrentPrice > 0 {
 			oiValue := data.OpenInterest.Latest * data.CurrentPrice
 			oiValueInMillions := oiValue / 1_000_000
 			if oiValueInMillions < minOIThresholdMillions {
@@ -1973,37 +1974,48 @@ func (e *StrategyEngine) BuildUserPromptWithOptions(ctx *Context, opts UserPromp
 		positionSymbols[normalizedSymbol] = true
 	}
 
-	candidateCount := len(ctx.MarketDataMap)
-	if len(allowedCandidates) > 0 {
-		candidateCount = len(allowedCandidates)
-	}
-	sb.WriteString(fmt.Sprintf("## Candidate Coins (%d coins)\n\n", candidateCount))
-	displayedCount := 0
+	filteredCandidates := make([]CandidateCoin, 0, len(ctx.CandidateCoins))
 	for _, coin := range ctx.CandidateCoins {
-		// Skip if this coin is already a position (data already shown in positions section)
 		normalizedCoinSymbol := market.Normalize(coin.Symbol)
+		if normalizedCoinSymbol == "" {
+			continue
+		}
+		// Skip if this coin is already a position (data already shown in positions section)
 		if positionSymbols[normalizedCoinSymbol] {
 			continue
 		}
 		if len(allowedCandidates) > 0 && !allowedCandidates[normalizedCoinSymbol] {
 			continue
 		}
+		filteredCandidates = append(filteredCandidates, coin)
+	}
 
-		marketData, hasData := ctx.MarketDataMap[coin.Symbol]
-		if !hasData {
+	sb.WriteString(fmt.Sprintf("## Candidate Coins (%d coins)\n\n", len(filteredCandidates)))
+	displayedCount := 0
+	for _, coin := range filteredCandidates {
+		normalizedCoinSymbol := market.Normalize(coin.Symbol)
+		if normalizedCoinSymbol == "" {
 			continue
 		}
+
 		displayedCount++
 
 		sourceTags := e.formatCoinSourceTag(coin.Sources)
-		sb.WriteString(fmt.Sprintf("### %d. %s%s\n\n", displayedCount, coin.Symbol, sourceTags))
+		sb.WriteString(fmt.Sprintf("### %d. %s%s\n\n", displayedCount, normalizedCoinSymbol, sourceTags))
 		if line := formatOTCPeriodQualityLine(coin); line != "" {
 			sb.WriteString(line + "\n\n")
 		}
+
+		marketData, hasData := ctx.MarketDataMap[normalizedCoinSymbol]
+		if !hasData || marketData == nil {
+			sb.WriteString("Market Data: unavailable for this symbol in this cycle (treat all technical/quant data as unknown; do not open new positions based on missing data).\n\n")
+			continue
+		}
+
 		sb.WriteString(e.formatMarketData(marketData))
 
 		if ctx.QuantDataMap != nil {
-			if quantData, hasQuant := ctx.QuantDataMap[coin.Symbol]; hasQuant {
+			if quantData, hasQuant := ctx.QuantDataMap[normalizedCoinSymbol]; hasQuant {
 				sb.WriteString(e.formatQuantData(quantData))
 			} else if e.config.Indicators.EnableQuantData {
 				sb.WriteString("Quantitative Data: unavailable for this symbol in this cycle (treat fund flow / OI deltas as unknown).\n")
