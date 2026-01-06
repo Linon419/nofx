@@ -56,6 +56,8 @@ type VisionIndicatorsConfig struct {
 	ShowEMA *bool `json:"show_ema,omitempty"`
 	// ShowMACD controls whether a MACD panel is rendered.
 	ShowMACD *bool `json:"show_macd,omitempty"`
+	// ShowCVD controls whether a CVD (cumulative volume delta) panel is rendered.
+	ShowCVD *bool `json:"show_cvd,omitempty"`
 	// ShowWaveTrend controls whether a WaveTrend panel is rendered.
 	ShowWaveTrend *bool `json:"show_wavetrend,omitempty"`
 	// ShowSqueeze controls whether squeeze state is annotated.
@@ -444,6 +446,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			Indicators: VisionIndicatorsConfig{
 				ShowEMA:        &boolTrue,
 				ShowMACD:       &boolTrue,
+				ShowCVD:        &boolTrue,
 				ShowWaveTrend:  &boolTrue,
 				ShowSqueeze:    &boolFalse,
 				ShowDivergence: &boolTrue,

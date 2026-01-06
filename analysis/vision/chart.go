@@ -24,6 +24,7 @@ import (
 type IndicatorRenderConfig struct {
 	ShowEMA        bool
 	ShowMACD       bool
+	ShowCVD        bool
 	ShowWaveTrend  bool
 	ShowSqueeze    bool
 	ShowDivergence bool
@@ -54,6 +55,7 @@ func DefaultRenderConfig() RenderConfig {
 		Indicators: IndicatorRenderConfig{
 			ShowEMA:        true,
 			ShowMACD:       true,
+			ShowCVD:        true,
 			ShowWaveTrend:  true,
 			ShowSqueeze:    false,
 			ShowDivergence: true,
@@ -137,10 +139,11 @@ func RenderTimeframeChartPNG(symbol, timeframe string, tf *market.TimeframeSerie
 
 	hasWT := cfg.Indicators.ShowWaveTrend
 	hasMACD := cfg.Indicators.ShowMACD
+	hasCVD := cfg.Indicators.ShowCVD && hasAnyCVDData(klinesAll)
 	// Squeeze is supported as an optional overlay/panel, but BRALE-style default is off.
 	hasSqueezePanel := cfg.Indicators.ShowSqueeze
 
-	// Layout (BRALE-ish: Price + Volume + MACD + WT+MFI)
+	// Layout (BRALE-ish: Price + Volume + CVD + MACD + WT+MFI)
 	left := 88
 	right := 18
 	headerH := 54
@@ -157,10 +160,13 @@ func RenderTimeframeChartPNG(symbol, timeframe string, tf *market.TimeframeSerie
 		return nil, fmt.Errorf("invalid image height")
 	}
 
-	// Panel layout: Price + Volume + (optional) MACD + (optional) WT+MFI.
+	// Panel layout: Price + Volume + (optional) CVD + (optional) MACD + (optional) WT+MFI.
 	hasVolume := true
 	subCount := 0
 	if hasVolume {
+		subCount++
+	}
+	if hasCVD {
 		subCount++
 	}
 	if hasMACD {
@@ -178,10 +184,14 @@ func RenderTimeframeChartPNG(symbol, timeframe string, tf *market.TimeframeSerie
 
 	wPrice := 52.0
 	wVol := 18.0
+	wCVD := 15.0
 	wMACD := 15.0
 	wWT := 15.0
 	if !hasVolume {
 		wVol = 0
+	}
+	if !hasCVD {
+		wCVD = 0
 	}
 	if !hasMACD {
 		wMACD = 0
@@ -189,15 +199,16 @@ func RenderTimeframeChartPNG(symbol, timeframe string, tf *market.TimeframeSerie
 	if !hasWT {
 		wWT = 0
 	}
-	sumW := wPrice + wVol + wMACD + wWT
+	sumW := wPrice + wVol + wCVD + wMACD + wWT
 	if sumW <= 0 {
 		sumW = 1
 	}
 
 	priceH := int(math.Round(float64(remainingH) * wPrice / sumW))
 	volH := int(math.Round(float64(remainingH) * wVol / sumW))
+	cvdH := int(math.Round(float64(remainingH) * wCVD / sumW))
 	macdH := int(math.Round(float64(remainingH) * wMACD / sumW))
-	wtH := remainingH - priceH - volH - macdH
+	wtH := remainingH - priceH - volH - cvdH - macdH
 	if wtH < 0 {
 		wtH = 0
 	}
@@ -209,6 +220,11 @@ func RenderTimeframeChartPNG(symbol, timeframe string, tf *market.TimeframeSerie
 	if hasVolume {
 		volumePanel = rect(left, nextY, cfg.Width-right, nextY+volH)
 		nextY = volumePanel.Max.Y + panelGap
+	}
+	cvdPanel := image.Rectangle{}
+	if hasCVD {
+		cvdPanel = rect(left, nextY, cfg.Width-right, nextY+cvdH)
+		nextY = cvdPanel.Max.Y + panelGap
 	}
 	macdPanel := image.Rectangle{}
 	if hasMACD {
@@ -245,6 +261,20 @@ func RenderTimeframeChartPNG(symbol, timeframe string, tf *market.TimeframeSerie
 		macdHist = allHist[start:end]
 	}
 
+	var cvdSeries []float64
+	if hasCVD {
+		allCVD := cvdSeriesFromBars(klinesAll)
+		if len(allCVD) >= end {
+			cvdSeries = allCVD[start:end]
+			if len(cvdSeries) > 0 {
+				base := cvdSeries[0]
+				for i := range cvdSeries {
+					cvdSeries[i] -= base
+				}
+			}
+		}
+	}
+
 	var wtSeries []float64
 	var squeezeSeries squeezeSeriesData
 	var divEvents []indicator.DivergenceChartEvent
@@ -278,16 +308,16 @@ func RenderTimeframeChartPNG(symbol, timeframe string, tf *market.TimeframeSerie
 	downColor := color.RGBA{R: 246, G: 70, B: 93, A: 255} // Binance red
 	wickColor := color.RGBA{R: 107, G: 114, B: 128, A: 255}
 
-	ema21C := color.RGBA{R: 125, G: 211, B: 252, A: 255} // light blue
-	ema55C := color.RGBA{R: 110, G: 231, B: 183, A: 255} // light green
+	ema21C := color.RGBA{R: 125, G: 211, B: 252, A: 255}  // light blue
+	ema55C := color.RGBA{R: 110, G: 231, B: 183, A: 255}  // light green
 	ema100C := color.RGBA{R: 244, G: 114, B: 182, A: 255} // pink
-	ema200C := color.RGBA{R: 34, G: 211, B: 238, A: 255} // cyan
+	ema200C := color.RGBA{R: 34, G: 211, B: 238, A: 255}  // cyan
 
 	// User-specified EMA palette (match BRALE preference):
 	// EMA21 red, EMA55 yellow, EMA100 green, EMA200 white.
-	ema21C = color.RGBA{R: 246, G: 70, B: 93, A: 255}   // red
-	ema55C = color.RGBA{R: 240, G: 185, B: 11, A: 255}  // yellow
-	ema100C = color.RGBA{R: 14, G: 203, B: 129, A: 255} // green
+	ema21C = color.RGBA{R: 246, G: 70, B: 93, A: 255}    // red
+	ema55C = color.RGBA{R: 240, G: 185, B: 11, A: 255}   // yellow
+	ema100C = color.RGBA{R: 14, G: 203, B: 129, A: 255}  // green
 	ema200C = color.RGBA{R: 234, G: 236, B: 239, A: 255} // white-ish
 
 	img := image.NewRGBA(image.Rect(0, 0, cfg.Width, cfg.Height))
@@ -295,6 +325,9 @@ func RenderTimeframeChartPNG(symbol, timeframe string, tf *market.TimeframeSerie
 	draw.Draw(img, pricePanel, &image.Uniform{C: panelBg}, image.Point{}, draw.Src)
 	if volumePanel.Dx() > 0 && volumePanel.Dy() > 0 {
 		draw.Draw(img, volumePanel, &image.Uniform{C: panelBg}, image.Point{}, draw.Src)
+	}
+	if cvdPanel.Dx() > 0 && cvdPanel.Dy() > 0 {
+		draw.Draw(img, cvdPanel, &image.Uniform{C: panelBg}, image.Point{}, draw.Src)
 	}
 	if macdPanel.Dx() > 0 && macdPanel.Dy() > 0 {
 		draw.Draw(img, macdPanel, &image.Uniform{C: panelBg}, image.Point{}, draw.Src)
@@ -352,6 +385,9 @@ func RenderTimeframeChartPNG(symbol, timeframe string, tf *market.TimeframeSerie
 	overallBottom := pricePanel.Max.Y
 	if volumePanel.Max.Y > overallBottom {
 		overallBottom = volumePanel.Max.Y
+	}
+	if cvdPanel.Max.Y > overallBottom {
+		overallBottom = cvdPanel.Max.Y
 	}
 	if macdPanel.Max.Y > overallBottom {
 		overallBottom = macdPanel.Max.Y
@@ -454,6 +490,9 @@ func RenderTimeframeChartPNG(symbol, timeframe string, tf *market.TimeframeSerie
 			drawVolumePanel(img, volumePanel, indexToX, bodyW, opens, closes, volumes, grid, text, muted, timeframe)
 		}
 	}
+	if cvdPanel.Dx() > 0 && cvdPanel.Dy() > 0 && hasCVD {
+		drawCVDPanelBrale(img, cvdPanel, indexToX, cvdSeries, grid, text, muted, timeframe)
+	}
 	if macdPanel.Dx() > 0 && macdPanel.Dy() > 0 && hasMACD {
 		drawMACDPanelBrale(img, macdPanel, indexToX, macdLine, macdSignal, macdHist, grid, text, muted, timeframe)
 	}
@@ -478,6 +517,9 @@ func buildLegend(ind IndicatorRenderConfig) string {
 	}
 	if ind.ShowMACD {
 		items = append(items, "MACD")
+	}
+	if ind.ShowCVD {
+		items = append(items, "CVD")
 	}
 	if ind.ShowSqueeze {
 		items = append(items, "SQZ+VOL")
@@ -569,6 +611,9 @@ func drawBraleLegendRow(img *image.RGBA, x0, y, x1 int, timeframe string, ind In
 	}
 	if ind.ShowDivergence {
 		items = append(items, item{Label: "Div.", Color: color.RGBA{R: 125, G: 211, B: 252, A: 255}})
+	}
+	if ind.ShowCVD {
+		items = append(items, item{Label: "CVD", Color: color.RGBA{R: 34, G: 211, B: 238, A: 255}})
 	}
 
 	x := x0
@@ -784,6 +829,75 @@ func drawVolumePanel(img *image.RGBA, r image.Rectangle, indexToX func(int) int,
 		}
 		drawRect(img, x0, y0, x1, y1, c)
 	}
+}
+
+func drawCVDPanelBrale(img *image.RGBA, r image.Rectangle, indexToX func(int) int, cvd []float64, grid, text, muted color.RGBA, timeframe string) {
+	drawLine(img, r.Min.X, r.Min.Y, r.Max.X, r.Min.Y, grid)
+	drawLine(img, r.Min.X, r.Max.Y, r.Max.X, r.Max.Y, grid)
+	drawText(img, r.Min.X+6, r.Min.Y+14, "CVD "+timeframe, text)
+
+	cvdC := color.RGBA{R: 34, G: 211, B: 238, A: 255}
+
+	// Legend centered-ish
+	legendY := r.Min.Y + 14
+	legendX := r.Min.X + 520
+	drawRect(img, legendX, legendY-9, legendX+10, legendY+1, cvdC)
+	drawText(img, legendX+14, legendY, "CVD (quote)", muted)
+
+	minV := 0.0
+	maxV := 0.0
+	ok := false
+	for _, v := range cvd {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			continue
+		}
+		if !ok {
+			minV, maxV = v, v
+			ok = true
+			continue
+		}
+		if v < minV {
+			minV = v
+		}
+		if v > maxV {
+			maxV = v
+		}
+	}
+	if !ok {
+		return
+	}
+	if minV == maxV {
+		maxV = minV + 1
+	}
+	minV = math.Min(minV, 0)
+	maxV = math.Max(maxV, 0)
+	pad := (maxV - minV) * 0.12
+	if pad <= 0 {
+		pad = 1
+	}
+	minV -= pad
+	maxV += pad
+
+	toY := func(v float64) int {
+		y := float64(r.Min.Y) + (maxV-v)/(maxV-minV)*float64(r.Dy())
+		return clampInt(int(math.Round(y)), r.Min.Y, r.Max.Y)
+	}
+
+	// Y grid + labels
+	for j := 0; j <= 4; j++ {
+		y := r.Min.Y + int(float64(j)/4.0*float64(r.Dy()))
+		drawLine(img, r.Min.X, y, r.Max.X, y, grid)
+		v := maxV - float64(j)/4.0*(maxV-minV)
+		drawText(img, 6, y+4, formatAxisSignedVolume(v), muted)
+	}
+
+	// Zero line
+	drawLine(img, r.Min.X, toY(0), r.Max.X, toY(0), color.RGBA{R: 148, G: 163, B: 184, A: 120})
+
+	if len(cvd) < 2 {
+		return
+	}
+	drawSeriesDots(img, indexToX, toY, cvd, cvdC, 2)
 }
 
 type squeezeSeriesData struct {
@@ -1423,14 +1537,41 @@ func toMarketKlines(bars []market.KlineBar) []market.Kline {
 	out := make([]market.Kline, 0, len(bars))
 	for _, b := range bars {
 		out = append(out, market.Kline{
-			OpenTime:  b.Time,
-			Open:      b.Open,
-			High:      b.High,
-			Low:       b.Low,
-			Close:     b.Close,
-			Volume:    b.Volume,
-			CloseTime: b.Time,
+			OpenTime:            b.Time,
+			Open:                b.Open,
+			High:                b.High,
+			Low:                 b.Low,
+			Close:               b.Close,
+			Volume:              b.Volume,
+			CloseTime:           b.Time,
+			QuoteVolume:         b.QuoteVolume,
+			TakerBuyQuoteVolume: b.TakerBuyQuoteVolume,
 		})
+	}
+	return out
+}
+
+func hasAnyCVDData(bars []market.KlineBar) bool {
+	for _, b := range bars {
+		if b.QuoteVolume > 0 && b.TakerBuyQuoteVolume > 0 && b.TakerBuyQuoteVolume <= b.QuoteVolume {
+			return true
+		}
+	}
+	return false
+}
+
+func cvdSeriesFromBars(bars []market.KlineBar) []float64 {
+	out := make([]float64, len(bars))
+	var sum float64
+	for i, b := range bars {
+		qv := b.QuoteVolume
+		tbq := b.TakerBuyQuoteVolume
+		if qv <= 0 || tbq <= 0 || tbq > qv || math.IsNaN(qv) || math.IsNaN(tbq) || math.IsInf(qv, 0) || math.IsInf(tbq, 0) {
+			out[i] = sum
+			continue
+		}
+		sum += (2 * tbq) - qv
+		out[i] = sum
 	}
 	return out
 }
@@ -1466,6 +1607,13 @@ func formatAxisPrice(p float64) string {
 func formatAxisVolume(v float64) string {
 	if v < 0 {
 		v = -v
+	}
+	return formatWithCommas(int64(math.Round(v)))
+}
+
+func formatAxisSignedVolume(v float64) string {
+	if v < 0 {
+		return "-" + formatWithCommas(int64(math.Round(-v)))
 	}
 	return formatWithCommas(int64(math.Round(v)))
 }
@@ -1756,7 +1904,7 @@ func drawDivergenceBubbles(img *image.RGBA, plot image.Rectangle, indexToX func(
 	sort.Ints(idxs)
 
 	// Bear (top divergence): keep the original indigo style.
-	bearFill := color.RGBA{R: 30, G: 27, B: 75, A: 230}   // indigo-ish
+	bearFill := color.RGBA{R: 30, G: 27, B: 75, A: 230} // indigo-ish
 	bearBorder := color.RGBA{R: 99, G: 102, B: 241, A: 220}
 	bearText := color.RGBA{R: 234, G: 236, B: 239, A: 255}
 	bearStem := color.RGBA{R: 246, G: 70, B: 93, A: 255}

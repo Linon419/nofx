@@ -31,6 +31,9 @@ type AnalysisResult struct {
 
 	// Trend analysis results (structure points, key levels)
 	Trend *trend.TrendResult `json:"trend,omitempty"`
+
+	// CVD (cumulative volume delta) results (quote currency, taker buy/sell proxy)
+	CVD *indicator.CVDResult `json:"cvd,omitempty"`
 }
 
 // Config holds configuration for the analysis module.
@@ -50,6 +53,9 @@ type Config struct {
 	// EnableTrend enables trend/structure analysis
 	EnableTrend bool `json:"enable_trend"`
 
+	// EnableCVD enables CVD calculation (requires quoteVolume + takerBuyQuoteVolume)
+	EnableCVD bool `json:"enable_cvd"`
+
 	// WaveTrend specific settings
 	WaveTrend indicator.WaveTrendConfig `json:"wavetrend_config,omitempty"`
 
@@ -68,6 +74,7 @@ func DefaultConfig() Config {
 		EnableDivergence:        true,
 		EnableVolatilityWarning: true,
 		EnableTrend:             true,
+		EnableCVD:               true,
 		WaveTrend:               indicator.DefaultWaveTrendConfig(),
 		Divergence:              indicator.DefaultDivergenceConfig(),
 		VolatilityWarning:       indicator.DefaultVolatilityWarningConfig(),
@@ -106,6 +113,11 @@ func Analyze(klines []market.Kline, cfg Config) *AnalysisResult {
 	// Trend/structure analysis
 	if cfg.EnableTrend {
 		result.Trend = trend.Analyze(klines)
+	}
+
+	// CVD (quote currency cumulative delta)
+	if cfg.EnableCVD {
+		result.CVD = indicator.CalculateCVD(klines)
 	}
 
 	return result

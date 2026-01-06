@@ -10,6 +10,7 @@ import (
 	"nofx/provider/coinank/coinank_api"
 	"nofx/provider/coinank/coinank_enum"
 	"nofx/provider/hyperliquid"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -93,7 +94,70 @@ func getKlinesFromCoinAnk(symbol, interval string, limit int) ([]Kline, error) {
 		}
 	}
 
+	// Best-effort enrichment: CoinAnk open klines don't include quote volume nor taker-buy volumes.
+	// For CVD calculation we need Binance futures kline fields (quoteVolume, takerBuyQuoteVolume).
+	enrichKlinesWithBinanceVolumes(symbol, interval, limit, klines)
+
 	return klines, nil
+}
+
+const enableCVDEnv = "NOFX_ENABLE_CVD"
+
+func isCVDEnabled() bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv(enableCVDEnv)))
+	if raw == "" {
+		return true
+	}
+	switch raw {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
+func enrichKlinesWithBinanceVolumes(symbol, interval string, limit int, klines []Kline) {
+	if !isCVDEnabled() {
+		return
+	}
+	if strings.TrimSpace(symbol) == "" || strings.TrimSpace(interval) == "" || len(klines) == 0 {
+		return
+	}
+
+	// If quote volume already exists, skip.
+	hasAnyQuote := false
+	for _, k := range klines {
+		if k.QuoteVolume > 0 || k.TakerBuyQuoteVolume > 0 {
+			hasAnyQuote = true
+			break
+		}
+	}
+	if hasAnyQuote {
+		return
+	}
+
+	// Binance futures public klines (no auth) provide quoteVolume + takerBuyQuoteVolume.
+	client := NewAPIClient()
+	binanceKlines, err := client.GetKlines(symbol, interval, limit)
+	if err != nil || len(binanceKlines) == 0 {
+		return
+	}
+
+	byOpen := make(map[int64]Kline, len(binanceKlines))
+	for _, bk := range binanceKlines {
+		byOpen[bk.OpenTime] = bk
+	}
+
+	for i := range klines {
+		if bk, ok := byOpen[klines[i].OpenTime]; ok {
+			klines[i].QuoteVolume = bk.QuoteVolume
+			klines[i].TakerBuyQuoteVolume = bk.TakerBuyQuoteVolume
+			klines[i].TakerBuyBaseVolume = bk.TakerBuyBaseVolume
+			if klines[i].Trades == 0 {
+				klines[i].Trades = bk.Trades
+			}
+		}
+	}
 }
 
 // getKlinesFromHyperliquid fetches kline data from Hyperliquid API for xyz dex assets
@@ -410,12 +474,14 @@ func calculateTimeframeSeries(klines []Kline, timeframe string, count int) *Time
 	for i := start; i < len(klines); i++ {
 		// Store full OHLCV kline data
 		data.Klines = append(data.Klines, KlineBar{
-			Time:   klines[i].OpenTime,
-			Open:   klines[i].Open,
-			High:   klines[i].High,
-			Low:    klines[i].Low,
-			Close:  klines[i].Close,
-			Volume: klines[i].Volume,
+			Time:                klines[i].OpenTime,
+			Open:                klines[i].Open,
+			High:                klines[i].High,
+			Low:                 klines[i].Low,
+			Close:               klines[i].Close,
+			Volume:              klines[i].Volume,
+			QuoteVolume:         klines[i].QuoteVolume,
+			TakerBuyQuoteVolume: klines[i].TakerBuyQuoteVolume,
 		})
 
 		// Keep MidPrices and Volume for backward compatibility

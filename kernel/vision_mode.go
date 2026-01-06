@@ -340,6 +340,7 @@ func (e *StrategyEngine) collectVisionNotes(ctx *Context, mcpClient mcp.AIClient
 		Indicators: vision.IndicatorRenderConfig{
 			ShowEMA:        boolOrDefault(vcfg.Indicators.ShowEMA, true),
 			ShowMACD:       boolOrDefault(vcfg.Indicators.ShowMACD, true),
+			ShowCVD:        boolOrDefault(vcfg.Indicators.ShowCVD, true),
 			ShowWaveTrend:  boolOrDefault(vcfg.Indicators.ShowWaveTrend, true),
 			ShowSqueeze:    boolOrDefault(vcfg.Indicators.ShowSqueeze, true),
 			ShowDivergence: boolOrDefault(vcfg.Indicators.ShowDivergence, true),

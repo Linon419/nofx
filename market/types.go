@@ -30,6 +30,10 @@ type KlineBar struct {
 	Low    float64 `json:"low"`    // Low price
 	Close  float64 `json:"close"`  // Close price
 	Volume float64 `json:"volume"` // Volume
+	// QuoteVolume is the trade volume in quote currency for this bar (e.g., USDT).
+	QuoteVolume float64 `json:"quote_volume,omitempty"`
+	// TakerBuyQuoteVolume is the taker buy volume in quote currency for this bar (e.g., USDT).
+	TakerBuyQuoteVolume float64 `json:"taker_buy_quote_volume,omitempty"`
 }
 
 // TimeframeSeriesData series data for a single timeframe

@@ -2662,13 +2662,15 @@ func convertKlineBarsToKlines(timeframe string, bars []market.KlineBar) []market
 	klines := make([]market.Kline, len(bars))
 	for i, bar := range bars {
 		klines[i] = market.Kline{
-			OpenTime:  bar.Time,
-			Open:      bar.Open,
-			High:      bar.High,
-			Low:       bar.Low,
-			Close:     bar.Close,
-			Volume:    bar.Volume,
-			CloseTime: bar.Time + stepMillis, // Approximate close time based on timeframe
+			OpenTime:            bar.Time,
+			Open:                bar.Open,
+			High:                bar.High,
+			Low:                 bar.Low,
+			Close:               bar.Close,
+			Volume:              bar.Volume,
+			QuoteVolume:         bar.QuoteVolume,
+			TakerBuyQuoteVolume: bar.TakerBuyQuoteVolume,
+			CloseTime:           bar.Time + stepMillis, // Approximate close time based on timeframe
 		}
 	}
 	return klines
