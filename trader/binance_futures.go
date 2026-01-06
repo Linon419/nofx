@@ -872,6 +872,7 @@ func (t *FuturesTrader) SetStopLoss(symbol string, positionSide string, quantity
 // SetTakeProfit sets take-profit order using new Algo Order API
 // Binance has migrated stop orders to Algo Order system (error -4120 STOP_ORDER_SWITCH_ALGO)
 func (t *FuturesTrader) SetTakeProfit(symbol string, positionSide string, quantity, takeProfitPrice float64) error {
+	internalSymbol := symbol
 	symbol = market.ToBinanceFuturesSymbol(symbol)
 	var side futures.SideType
 	var posSide futures.PositionSideType
@@ -884,17 +885,25 @@ func (t *FuturesTrader) SetTakeProfit(symbol string, positionSide string, quanti
 		posSide = futures.PositionSideTypeShort
 	}
 
+	qtyStr, _ := t.FormatQuantity(internalSymbol, quantity)
+
 	// Use new Algo Order API
-	_, err := t.client.NewCreateAlgoOrderService().
+	svc := t.client.NewCreateAlgoOrderService().
 		Symbol(symbol).
 		Side(side).
 		PositionSide(posSide).
 		Type(futures.AlgoOrderTypeTakeProfitMarket).
 		TriggerPrice(fmt.Sprintf("%.8f", takeProfitPrice)).
 		WorkingType(futures.WorkingTypeContractPrice).
-		ClosePosition(true).
-		ClientAlgoId(getBrOrderID()).
-		Do(context.Background())
+		ReduceOnly(true).
+		ClientAlgoId(getBrOrderID())
+
+	// For tiered take profit, we must set quantity (ClosePosition would close full position).
+	if strings.TrimSpace(qtyStr) != "" {
+		svc = svc.Quantity(qtyStr)
+	}
+
+	_, err := svc.Do(context.Background())
 
 	if err != nil {
 		return fmt.Errorf("failed to set take-profit: %w", err)

@@ -8,6 +8,7 @@ import (
 	"nofx/logger"
 	"nofx/market"
 	"nofx/store"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,7 @@ import (
 
 type pendingExitPlan struct {
 	Snapshot string
+	State    string
 }
 
 type exitPlanTierState struct {
@@ -66,9 +68,19 @@ func (at *AutoTrader) applyExitPlanOnOpen(decision *decision.Decision, positionS
 		return false
 	}
 
+	// Align quantities with exchange precision to avoid mismatch between position qty and TP tier sizes.
+	normalizedQty := quantity
+	if at.trader != nil {
+		if qtyStr, err := at.trader.FormatQuantity(decision.Symbol, quantity); err == nil {
+			if q, err := strconv.ParseFloat(strings.TrimSpace(qtyStr), 64); err == nil && q > 0 {
+				normalizedQty = q
+			}
+		}
+	}
+
 	stopLossPrice := resolveStopLossFromPlan(decision.ExitPlan, decision.StopLoss, decision.Symbol, positionSide, entryPrice)
 	if stopLossPrice > 0 {
-		if err := at.trader.SetStopLoss(decision.Symbol, positionSide, quantity, stopLossPrice); err != nil {
+		if err := at.trader.SetStopLoss(decision.Symbol, positionSide, normalizedQty, stopLossPrice); err != nil {
 			logger.Infof("  Failed to set stop loss (exit plan): %v", err)
 		}
 	}
@@ -79,9 +91,14 @@ func (at *AutoTrader) applyExitPlanOnOpen(decision *decision.Decision, positionS
 		return true
 	}
 
-	state, err := buildExitPlanState(decision.Symbol, positionSide, entryPrice, quantity, decision.ExitPlan)
+	state, err := buildExitPlanState(decision.Symbol, positionSide, entryPrice, normalizedQty, decision.ExitPlan)
 	if err != nil {
 		logger.Infof("  Failed to build exit plan state: %v", err)
+	}
+
+	// Option B: place exchange-native TP trigger orders for tiers, fallback to internal close-on-trigger if placement fails.
+	if state != nil {
+		at.applyTakeProfitTiersOnOpen(decision.Symbol, positionSide, state)
 	}
 
 	stateJSON := ""
@@ -93,6 +110,70 @@ func (at *AutoTrader) applyExitPlanOnOpen(decision *decision.Decision, positionS
 
 	at.persistExitPlanSnapshot(decision.Symbol, positionSide, string(snapshotJSON), stateJSON)
 	return true
+}
+
+func (at *AutoTrader) applyTakeProfitTiersOnOpen(symbol string, positionSide string, state *exitPlanState) {
+	if at == nil || at.trader == nil || state == nil {
+		return
+	}
+	if state.InitialQuantity <= 0 || len(state.Tiers) == 0 {
+		return
+	}
+
+	// Only handle TP components here. Stop-loss is managed separately (exchange-native).
+	var tpTiers []*exitPlanTierState
+	for i := range state.Tiers {
+		tier := &state.Tiers[i]
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(tier.Component)), "tp_") {
+			tpTiers = append(tpTiers, tier)
+		}
+	}
+	if len(tpTiers) == 0 {
+		return
+	}
+
+	// Avoid duplicated TP orders (e.g. restart / retry).
+	if err := at.trader.CancelTakeProfitOrders(symbol); err != nil {
+		logger.Infof("  Failed to cancel existing take-profit orders: %v", err)
+	}
+
+	placedAll := true
+	for _, tier := range tpTiers {
+		// Preserve backward-compatible state: only place tiers that are pending.
+		if strings.TrimSpace(strings.ToLower(tier.Status)) != "pending" {
+			continue
+		}
+		if tier.TargetPrice <= 0 || tier.Ratio <= 0 {
+			placedAll = false
+			break
+		}
+
+		tierQty := state.InitialQuantity * tier.Ratio
+		if tierQty <= 0 {
+			placedAll = false
+			break
+		}
+
+		if err := at.trader.SetTakeProfit(symbol, strings.ToUpper(normalizeSide(positionSide)), tierQty, tier.TargetPrice); err != nil {
+			logger.Infof("  Failed to set take profit (tier target=%.8f ratio=%.4f): %v", tier.TargetPrice, tier.Ratio, err)
+			placedAll = false
+			break
+		}
+	}
+
+	if !placedAll {
+		// Fallback (A): keep exit-plan internal TP execution; cleanup any partially placed orders.
+		if err := at.trader.CancelTakeProfitOrders(symbol); err != nil {
+			logger.Infof("  Failed to cleanup take-profit orders after partial placement: %v", err)
+		}
+		return
+	}
+
+	for _, tier := range tpTiers {
+		if strings.TrimSpace(strings.ToLower(tier.Status)) == "pending" {
+			tier.Status = "placed"
+		}
+	}
 }
 
 func (at *AutoTrader) persistExitPlanSnapshot(symbol, positionSide, snapshotJSON, stateJSON string) {
@@ -112,7 +193,7 @@ func (at *AutoTrader) persistExitPlanSnapshot(symbol, positionSide, snapshotJSON
 
 	key := exitPlanKey(normalizedSymbol, side)
 	at.pendingExitPlansMu.Lock()
-	at.pendingExitPlans[key] = pendingExitPlan{Snapshot: snapshotJSON}
+	at.pendingExitPlans[key] = pendingExitPlan{Snapshot: snapshotJSON, State: stateJSON}
 	at.pendingExitPlansMu.Unlock()
 }
 
@@ -170,16 +251,17 @@ func (at *AutoTrader) applyPendingExitPlans(positions []*store.TraderPosition) {
 			continue
 		}
 
-		state, err := buildExitPlanState(pos.Symbol, pos.Side, pos.EntryPrice, pos.Quantity, plan)
-		if err != nil {
-			logger.Infof("Exit plan state build failed (%s): %v", key, err)
-			continue
-		}
-
-		stateJSON := ""
-		if state != nil {
-			if data, err := json.Marshal(state); err == nil {
-				stateJSON = string(data)
+		stateJSON := strings.TrimSpace(pending.State)
+		if stateJSON == "" {
+			state, err := buildExitPlanState(pos.Symbol, pos.Side, pos.EntryPrice, pos.Quantity, plan)
+			if err != nil {
+				logger.Infof("Exit plan state build failed (%s): %v", key, err)
+				continue
+			}
+			if state != nil {
+				if data, err := json.Marshal(state); err == nil {
+					stateJSON = string(data)
+				}
 			}
 		}
 
@@ -211,8 +293,33 @@ func (at *AutoTrader) processExitPlanPosition(pos *store.TraderPosition) error {
 			state.InitialQuantity = pos.Quantity
 		}
 	}
-	if pos.Quantity > 0 && (state.RemainingQuantity <= 0 || pos.Quantity < state.RemainingQuantity) {
-		state.RemainingQuantity = pos.Quantity
+
+	if pos.Quantity > 0 {
+		if state.RemainingQuantity <= 0 {
+			state.RemainingQuantity = pos.Quantity
+		} else {
+			prevRemaining := state.RemainingQuantity
+			if pos.Quantity < prevRemaining-exitPlanQuantityEpsilon(prevRemaining) {
+				// External close detected (e.g. exchange-native TP orders).
+				if at.reconcileExitPlanTiersFromQuantity(state, pos.Quantity) {
+					if err := at.replaceStopLoss(pos, state); err != nil {
+						state.ErrorCount++
+						state.LastError = err.Error()
+						if state.ErrorCount >= 3 {
+							state.Status = "paused"
+							_ = at.emergencyClosePosition(pos.Symbol, normalizeSide(pos.Side))
+						}
+						return at.store.Position().UpdateExitPlanState(pos.ID, mustMarshalState(state))
+					}
+				}
+			} else if pos.Quantity > prevRemaining+exitPlanQuantityEpsilon(prevRemaining) {
+				// Position increased externally (rare). Keep state aligned to avoid over-closing.
+				state.RemainingQuantity = pos.Quantity
+				if state.InitialQuantity < pos.Quantity {
+					state.InitialQuantity = pos.Quantity
+				}
+			}
+		}
 	}
 
 	price, err := at.trader.GetMarketPrice(pos.Symbol)
@@ -237,9 +344,11 @@ func (at *AutoTrader) processExitPlanPosition(pos *store.TraderPosition) error {
 	isLong := normalizeSide(pos.Side) == "long"
 	for i := range state.Tiers {
 		tier := &state.Tiers[i]
-		if tier.Status != "pending" {
+		status := strings.TrimSpace(strings.ToLower(tier.Status))
+		if status != "pending" {
 			continue
 		}
+		// "pending" is the internal execution mode (fallback). For exchange-native TP orders we set "placed".
 		if !tierTriggered(isLong, price, tier.TargetPrice) {
 			continue
 		}
@@ -326,6 +435,72 @@ func (at *AutoTrader) replaceStopLoss(pos *store.TraderPosition, state *exitPlan
 		time.Sleep(500 * time.Millisecond)
 	}
 	return err
+}
+
+func exitPlanQuantityEpsilon(ref float64) float64 {
+	if ref <= 0 {
+		return 0.000001
+	}
+	// 0.1% or a tiny absolute fallback for integer-qty symbols.
+	return math.Max(0.000001, ref*0.001)
+}
+
+func (at *AutoTrader) reconcileExitPlanTiersFromQuantity(state *exitPlanState, newRemaining float64) bool {
+	if state == nil || newRemaining < 0 {
+		return false
+	}
+	prevRemaining := state.RemainingQuantity
+	if prevRemaining <= 0 || newRemaining >= prevRemaining-exitPlanQuantityEpsilon(prevRemaining) {
+		return false
+	}
+
+	closedQty := prevRemaining - newRemaining
+	if closedQty <= 0 {
+		return false
+	}
+
+	updated := false
+	for i := range state.Tiers {
+		tier := &state.Tiers[i]
+		if closedQty <= exitPlanQuantityEpsilon(prevRemaining) {
+			break
+		}
+
+		status := strings.TrimSpace(strings.ToLower(tier.Status))
+		// Only reconcile exchange-native tiers (placed). Internal tiers update their state when we execute closes.
+		if status != "placed" {
+			continue
+		}
+
+		tierQty := state.InitialQuantity * tier.Ratio
+		if tierQty <= 0 {
+			continue
+		}
+		remainingForTier := tierQty - tier.FilledQty
+		if remainingForTier <= 0 {
+			tier.Status = "filled"
+			continue
+		}
+
+		fill := math.Min(remainingForTier, closedQty)
+		if fill <= 0 {
+			continue
+		}
+		tier.FilledQty += fill
+		updated = true
+		closedQty -= fill
+
+		if tierQty-tier.FilledQty <= exitPlanQuantityEpsilon(tierQty) {
+			tier.Status = "filled"
+			tier.FilledAt = time.Now().Format(time.RFC3339)
+		}
+	}
+
+	state.RemainingQuantity = newRemaining
+	if state.RemainingQuantity <= 0 {
+		state.Status = "completed"
+	}
+	return updated
 }
 
 func (at *AutoTrader) withExitPlanLock(key string, fn func()) {
