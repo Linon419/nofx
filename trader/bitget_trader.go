@@ -803,8 +803,7 @@ func (t *BitgetTrader) SetStopLoss(symbol string, positionSide string, quantity,
 
 	qtyStr, _ := t.FormatQuantity(symbol, quantity)
 
-	body := map[string]interface{}{
-		"planType":     "loss_plan",
+	err := t.placePlanOrderWithFallback(symbol, map[string]interface{}{
 		"symbol":       symbol,
 		"productType":  "USDT-FUTURES",
 		"marginMode":   t.getMarginMode(symbol),
@@ -817,9 +816,7 @@ func (t *BitgetTrader) SetStopLoss(symbol string, positionSide string, quantity,
 		"size":         qtyStr,
 		"holdSide":     holdSide,
 		"clientOid":    genBitgetClientOid(),
-	}
-
-	_, err := t.doRequest("POST", "/api/v2/mix/order/place-plan-order", body)
+	}, []string{"loss_plan", "normal_plan"})
 	if err != nil {
 		return fmt.Errorf("failed to set stop loss (symbol=%s marginMode=%s): %w", symbol, t.getMarginMode(symbol), err)
 	}
@@ -842,8 +839,7 @@ func (t *BitgetTrader) SetTakeProfit(symbol string, positionSide string, quantit
 
 	qtyStr, _ := t.FormatQuantity(symbol, quantity)
 
-	body := map[string]interface{}{
-		"planType":     "profit_plan",
+	err := t.placePlanOrderWithFallback(symbol, map[string]interface{}{
 		"symbol":       symbol,
 		"productType":  "USDT-FUTURES",
 		"marginMode":   t.getMarginMode(symbol),
@@ -856,9 +852,7 @@ func (t *BitgetTrader) SetTakeProfit(symbol string, positionSide string, quantit
 		"size":         qtyStr,
 		"holdSide":     holdSide,
 		"clientOid":    genBitgetClientOid(),
-	}
-
-	_, err := t.doRequest("POST", "/api/v2/mix/order/place-plan-order", body)
+	}, []string{"profit_plan", "normal_plan"})
 	if err != nil {
 		return fmt.Errorf("failed to set take profit (symbol=%s marginMode=%s): %w", symbol, t.getMarginMode(symbol), err)
 	}
@@ -867,14 +861,169 @@ func (t *BitgetTrader) SetTakeProfit(symbol string, positionSide string, quantit
 	return nil
 }
 
+func (t *BitgetTrader) placePlanOrderWithFallback(symbol string, baseBody map[string]interface{}, planTypes []string) error {
+	var lastErr error
+	for _, planType := range planTypes {
+		body := make(map[string]interface{}, len(baseBody)+1)
+		for k, v := range baseBody {
+			body[k] = v
+		}
+		body["planType"] = planType
+
+		_, err := t.doRequest("POST", "/api/v2/mix/order/place-plan-order", body)
+		if err == nil {
+			if len(planTypes) > 1 && planType != planTypes[0] {
+				logger.Infof("  ⚠️ [Bitget] planType=%s accepted; fallback from %s", planType, planTypes[0])
+			}
+			return nil
+		}
+		lastErr = err
+		if !isBitgetPlanTypeIllegal(err) {
+			return err
+		}
+	}
+	return lastErr
+}
+
+func isBitgetPlanTypeIllegal(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "code=400172") || strings.Contains(strings.ToLower(msg), "plantype illegal")
+}
+
 // CancelStopLossOrders cancels stop loss orders
 func (t *BitgetTrader) CancelStopLossOrders(symbol string) error {
-	return t.cancelPlanOrders(symbol, "loss_plan")
+	return t.cancelPlanOrdersWithFallback(symbol, []string{"loss_plan", "normal_plan"}, cancelStopLoss)
 }
 
 // CancelTakeProfitOrders cancels take profit orders
 func (t *BitgetTrader) CancelTakeProfitOrders(symbol string) error {
-	return t.cancelPlanOrders(symbol, "profit_plan")
+	return t.cancelPlanOrdersWithFallback(symbol, []string{"profit_plan", "normal_plan"}, cancelTakeProfit)
+}
+
+type bitgetPlanOrder struct {
+	OrderId      string `json:"orderId"`
+	TriggerPrice string `json:"triggerPrice"`
+	Side         string `json:"side,omitempty"`
+	HoldSide     string `json:"holdSide,omitempty"`
+}
+
+type bitgetCancelKind int
+
+const (
+	cancelAll bitgetCancelKind = iota
+	cancelStopLoss
+	cancelTakeProfit
+)
+
+func (t *BitgetTrader) cancelPlanOrdersWithFallback(symbol string, planTypes []string, kind bitgetCancelKind) error {
+	symbol = t.convertSymbol(symbol)
+
+	positionSide := ""
+	if kind != cancelAll {
+		positionSide = t.findPositionSide(symbol)
+	}
+	markPrice := 0.0
+	if positionSide != "" && kind != cancelAll {
+		if p, err := t.GetMarketPrice(symbol); err == nil && p > 0 {
+			markPrice = p
+		}
+	}
+
+	var lastErr error
+	for _, planType := range planTypes {
+		orders, err := t.listPlanOrders(symbol, planType)
+		if err != nil {
+			lastErr = err
+			if isBitgetPlanTypeIllegal(err) {
+				continue
+			}
+			return err
+		}
+
+		for _, o := range orders {
+			if kind != cancelAll && !shouldCancelPlanOrder(kind, positionSide, markPrice, o) {
+				continue
+			}
+			body := map[string]interface{}{
+				"symbol":      symbol,
+				"productType": "USDT-FUTURES",
+				"marginCoin":  "USDT",
+				"orderId":     o.OrderId,
+			}
+			_, _ = t.doRequest("POST", "/api/v2/mix/order/cancel-plan-order", body)
+		}
+
+		return nil
+	}
+	return lastErr
+}
+
+func (t *BitgetTrader) listPlanOrders(symbol string, planType string) ([]bitgetPlanOrder, error) {
+	params := map[string]interface{}{
+		"symbol":      symbol,
+		"productType": "USDT-FUTURES",
+		"planType":    planType,
+	}
+
+	data, err := t.doRequest("GET", "/api/v2/mix/order/orders-plan-pending", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var orders struct {
+		EntrustedList []bitgetPlanOrder `json:"entrustedList"`
+	}
+	if err := json.Unmarshal(data, &orders); err != nil {
+		return nil, err
+	}
+	return orders.EntrustedList, nil
+}
+
+func (t *BitgetTrader) findPositionSide(symbol string) string {
+	positions, err := t.GetPositions()
+	if err != nil {
+		return ""
+	}
+	for _, p := range positions {
+		sym, _ := p["symbol"].(string)
+		if t.convertSymbol(sym) != symbol {
+			continue
+		}
+		side, _ := p["side"].(string)
+		return strings.ToLower(strings.TrimSpace(side))
+	}
+	return ""
+}
+
+func shouldCancelPlanOrder(kind bitgetCancelKind, positionSide string, markPrice float64, o bitgetPlanOrder) bool {
+	if kind == cancelAll {
+		return true
+	}
+	if positionSide != "long" && positionSide != "short" {
+		return true
+	}
+	if markPrice <= 0 {
+		return true
+	}
+	trigger, err := strconv.ParseFloat(strings.TrimSpace(o.TriggerPrice), 64)
+	if err != nil || trigger <= 0 {
+		return true
+	}
+
+	if positionSide == "long" {
+		if kind == cancelStopLoss {
+			return trigger < markPrice
+		}
+		return trigger > markPrice
+	}
+	// short
+	if kind == cancelStopLoss {
+		return trigger > markPrice
+	}
+	return trigger < markPrice
 }
 
 // cancelPlanOrders cancels plan orders
@@ -894,9 +1043,7 @@ func (t *BitgetTrader) cancelPlanOrders(symbol string, planType string) error {
 	}
 
 	var orders struct {
-		EntrustedList []struct {
-			OrderId string `json:"orderId"`
-		} `json:"entrustedList"`
+		EntrustedList []bitgetPlanOrder `json:"entrustedList"`
 	}
 
 	if err := json.Unmarshal(data, &orders); err != nil {
