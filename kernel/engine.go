@@ -1584,6 +1584,11 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	sb.WriteString(fmt.Sprintf("- Trading Leverage: Altcoins max %dx | BTC/ETH max %dx\n",
 		riskControl.AltcoinMaxLeverage, riskControl.BTCETHMaxLeverage))
 	sb.WriteString(fmt.Sprintf("- Risk-Reward Ratio: >=1:%.1f (take_profit / stop_loss)\n", riskControl.MinRiskRewardRatio))
+	if lang == LangChinese {
+		sb.WriteString("- RR 不足时：直接输出 wait；不要为了满足 RR 去移动止损/止盈（SL/TP）。优先保持结构失效位的止损与合理目标位。\n")
+	} else {
+		sb.WriteString("- If RR is insufficient: output wait; do NOT move SL/TP just to satisfy the RR constraint. Keep SL at the structural invalidation level and TP at a realistic target.\n")
+	}
 	sb.WriteString(fmt.Sprintf("- Min Confidence: >=%d to open position\n\n", riskControl.MinConfidence))
 
 	// Data integrity / anti-hallucination rules

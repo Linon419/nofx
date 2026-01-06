@@ -78,6 +78,14 @@ func (at *AutoTrader) applyExitPlanOnOpen(decision *decision.Decision, positionS
 		}
 	}
 
+	// Some exchanges (e.g. Hyperliquid) cannot cancel TP/SL separately. Do an atomic replace up front to avoid
+	// deleting a freshly placed stop-loss order while de-duplicating TP orders.
+	if at.exitPlanRequiresAtomicStopOrderReplace() {
+		if err := at.trader.CancelStopOrders(decision.Symbol); err != nil {
+			logger.Infof("  Failed to cancel existing stop orders before placing exit plan: %v", err)
+		}
+	}
+
 	stopLossPrice := resolveStopLossFromPlan(decision.ExitPlan, decision.StopLoss, decision.Symbol, positionSide, entryPrice)
 	if stopLossPrice > 0 {
 		if err := at.trader.SetStopLoss(decision.Symbol, positionSide, normalizedQty, stopLossPrice); err != nil {
@@ -112,6 +120,13 @@ func (at *AutoTrader) applyExitPlanOnOpen(decision *decision.Decision, positionS
 	return true
 }
 
+func (at *AutoTrader) exitPlanRequiresAtomicStopOrderReplace() bool {
+	if at == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(at.exchange), "hyperliquid")
+}
+
 func (at *AutoTrader) applyTakeProfitTiersOnOpen(symbol string, positionSide string, state *exitPlanState) {
 	if at == nil || at.trader == nil || state == nil {
 		return
@@ -133,8 +148,10 @@ func (at *AutoTrader) applyTakeProfitTiersOnOpen(symbol string, positionSide str
 	}
 
 	// Avoid duplicated TP orders (e.g. restart / retry).
-	if err := at.trader.CancelTakeProfitOrders(symbol); err != nil {
-		logger.Infof("  Failed to cancel existing take-profit orders: %v", err)
+	if !at.exitPlanRequiresAtomicStopOrderReplace() {
+		if err := at.trader.CancelTakeProfitOrders(symbol); err != nil {
+			logger.Infof("  Failed to cancel existing take-profit orders: %v", err)
+		}
 	}
 
 	placedAll := true
@@ -163,8 +180,20 @@ func (at *AutoTrader) applyTakeProfitTiersOnOpen(symbol string, positionSide str
 
 	if !placedAll {
 		// Fallback (A): keep exit-plan internal TP execution; cleanup any partially placed orders.
-		if err := at.trader.CancelTakeProfitOrders(symbol); err != nil {
-			logger.Infof("  Failed to cleanup take-profit orders after partial placement: %v", err)
+		if at.exitPlanRequiresAtomicStopOrderReplace() {
+			if err := at.trader.CancelStopOrders(symbol); err != nil {
+				logger.Infof("  Failed to cleanup stop orders after partial TP placement: %v", err)
+			}
+			// Re-apply stop-loss so position stays protected even if we fallback to internal TP.
+			if state.StopLossPrice > 0 && state.InitialQuantity > 0 {
+				if err := at.trader.SetStopLoss(symbol, strings.ToUpper(normalizeSide(positionSide)), state.InitialQuantity, state.StopLossPrice); err != nil {
+					logger.Infof("  Failed to re-set stop loss after TP placement failure: %v", err)
+				}
+			}
+		} else {
+			if err := at.trader.CancelTakeProfitOrders(symbol); err != nil {
+				logger.Infof("  Failed to cleanup take-profit orders after partial placement: %v", err)
+			}
 		}
 		return
 	}
