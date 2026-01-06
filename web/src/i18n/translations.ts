@@ -67,6 +67,8 @@ export const translations = {
     failed: 'Failed',
     inputPrompt: 'Input Prompt',
     aiThinking: 'AI Chain of Thought',
+    visionLayerResult: 'Vision Layer Result',
+    analysisLayerResult: 'Analysis Layer Result',
     collapse: 'Collapse',
     expand: 'Expand',
 
@@ -1310,6 +1312,8 @@ export const translations = {
     failed: '失败',
     inputPrompt: '输入提示',
     aiThinking: '💭 AI思维链分析',
+    visionLayerResult: '👁️ 读图层结果',
+    analysisLayerResult: '🧾 分析层结果',
     collapse: '▼ 收起',
     expand: '▶ 展开',
 

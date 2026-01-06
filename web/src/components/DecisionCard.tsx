@@ -3,6 +3,27 @@ import type { DecisionRecord, DecisionAction, VisionImageMeta } from '../types'
 import { t, type Language } from '../i18n/translations'
 import { api } from '../lib/api'
 
+function extractPromptSection(prompt: string, headings: string[]): string | null {
+  if (!prompt) return null
+
+  let start = -1
+  let matchedHeading = ''
+  for (const heading of headings) {
+    const idx = prompt.indexOf(heading)
+    if (idx >= 0 && (start === -1 || idx < start)) {
+      start = idx
+      matchedHeading = heading
+    }
+  }
+  if (start === -1) return null
+
+  const afterHeading = start + matchedHeading.length
+  const nextHeadingIdx = prompt.indexOf('\n## ', afterHeading)
+  const end = nextHeadingIdx >= 0 ? nextHeadingIdx : prompt.length
+  const section = prompt.slice(start, end).trim()
+  return section ? section : null
+}
+
 interface DecisionCardProps {
   decision: DecisionRecord
   language: Language
@@ -221,6 +242,8 @@ function ActionCard({ action, language, onSymbolClick }: { action: DecisionActio
 export function DecisionCard({ decision, language, onSymbolClick }: DecisionCardProps) {
   const [showSystemPrompt, setShowSystemPrompt] = useState(false)
   const [showInputPrompt, setShowInputPrompt] = useState(false)
+  const [showVisionLayer, setShowVisionLayer] = useState(false)
+  const [showAnalysisLayer, setShowAnalysisLayer] = useState(false)
   const [showCoT, setShowCoT] = useState(false)
   const [showVisionCharts, setShowVisionCharts] = useState(false)
   const [visionThumbs, setVisionThumbs] = useState<Record<string, string>>({})
@@ -235,6 +258,15 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
 
   const visionImages: VisionImageMeta[] = decision.vision_images || []
   const decisionId = decision.id
+
+  const visionLayerSection = extractPromptSection(decision.input_prompt || '', [
+    '## Chart Vision Notes (from images)',
+  ])
+  const analysisLayerSection = extractPromptSection(decision.input_prompt || '', [
+    '## AI Analysis Notes',
+    '## AI 分析要点',
+    '## AI åˆ†æžè¦ç‚¹',
+  ])
 
   useEffect(() => {
     visionLoadAbortRef.current.aborted = false
@@ -560,6 +592,76 @@ export function DecisionCard({ decision, language, onSymbolClick }: DecisionCard
                 }}
               >
                 {decision.input_prompt}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Vision Layer (from Input Prompt) */}
+        {visionLayerSection && (
+          <div>
+            <button
+              onClick={() => setShowVisionLayer(!showVisionLayer)}
+              className="flex items-center gap-2 text-sm transition-colors w-full justify-between p-2 rounded hover:bg-white/5"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-base">👁️</span>
+                <span className="font-semibold" style={{ color: '#A78BFA' }}>
+                  {t('visionLayerResult', language)}
+                </span>
+              </div>
+              <span
+                className="text-xs px-2 py-0.5 rounded"
+                style={{ background: 'rgba(167, 139, 250, 0.15)', color: '#A78BFA' }}
+              >
+                {showVisionLayer ? t('collapse', language) : t('expand', language)}
+              </span>
+            </button>
+            {showVisionLayer && (
+              <div
+                className="mt-2 rounded-lg p-4 text-sm font-mono whitespace-pre-wrap max-h-96 overflow-y-auto"
+                style={{
+                  background: '#0B0E11',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              >
+                {visionLayerSection}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Analysis Layer (from Input Prompt) */}
+        {analysisLayerSection && (
+          <div>
+            <button
+              onClick={() => setShowAnalysisLayer(!showAnalysisLayer)}
+              className="flex items-center gap-2 text-sm transition-colors w-full justify-between p-2 rounded hover:bg-white/5"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-base">🧾</span>
+                <span className="font-semibold" style={{ color: '#34D399' }}>
+                  {t('analysisLayerResult', language)}
+                </span>
+              </div>
+              <span
+                className="text-xs px-2 py-0.5 rounded"
+                style={{ background: 'rgba(52, 211, 153, 0.15)', color: '#34D399' }}
+              >
+                {showAnalysisLayer ? t('collapse', language) : t('expand', language)}
+              </span>
+            </button>
+            {showAnalysisLayer && (
+              <div
+                className="mt-2 rounded-lg p-4 text-sm font-mono whitespace-pre-wrap max-h-96 overflow-y-auto"
+                style={{
+                  background: '#0B0E11',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              >
+                {analysisLayerSection}
               </div>
             )}
           </div>
