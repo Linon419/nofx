@@ -26,7 +26,34 @@ func NormalizeTelegramBotToken(botToken string) string {
 		return ""
 	}
 	// Remove all whitespace (spaces, newlines, tabs, etc).
-	return strings.Join(strings.Fields(botToken), "")
+	botToken = strings.Join(strings.Fields(botToken), "")
+
+	// Users sometimes paste the full API URL:
+	//   https://api.telegram.org/bot<token>/sendMessage
+	// Extract the <token> part.
+	const apiPrefix = "api.telegram.org/bot"
+	lower := strings.ToLower(botToken)
+	if idx := strings.Index(lower, apiPrefix); idx >= 0 {
+		start := idx + len(apiPrefix)
+		rest := botToken[start:]
+		restLower := lower[start:]
+		// Cut at first '/' or '?' if present.
+		cut := len(rest)
+		if j := strings.IndexByte(rest, '/'); j >= 0 && j < cut {
+			cut = j
+		}
+		if j := strings.IndexByte(restLower, '?'); j >= 0 && j < cut {
+			cut = j
+		}
+		botToken = rest[:cut]
+	}
+
+	// Users may also paste tokens with a leading "bot" prefix. Telegram expects the raw token.
+	if strings.HasPrefix(strings.ToLower(botToken), "bot") {
+		botToken = botToken[3:]
+	}
+
+	return botToken
 }
 
 func IsValidTelegramBotToken(botToken string) bool {

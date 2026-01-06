@@ -8,9 +8,20 @@ import (
 )
 
 func TestNormalizeTelegramBotToken(t *testing.T) {
-	got := NormalizeTelegramBotToken("  123456:AA_bb-CC \n\t")
-	if got != "123456:AA_bb-CC" {
-		t.Fatalf("unexpected normalized token: %q", got)
+	cases := map[string]string{
+		"  123456:AA_bb-CC \n\t":                                   "123456:AA_bb-CC",
+		"bot123456:AA_bb-CC":                                       "123456:AA_bb-CC",
+		"BOT123456:AA_bb-CC":                                       "123456:AA_bb-CC",
+		"https://api.telegram.org/bot123456:AA_bb-CC/sendMessage":  "123456:AA_bb-CC",
+		"https://api.telegram.org/bot123456:AA_bb-CC/getMe?x=1":    "123456:AA_bb-CC",
+		"api.telegram.org/bot123456:AA_bb-CC/sendMessage":          "123456:AA_bb-CC",
+		"https://api.telegram.org/bot123456:AA_bb-CC/sendMessage\n": "123456:AA_bb-CC",
+	}
+	for in, want := range cases {
+		got := NormalizeTelegramBotToken(in)
+		if got != want {
+			t.Fatalf("unexpected normalized token for %q: got=%q want=%q", in, got, want)
+		}
 	}
 }
 
@@ -19,6 +30,8 @@ func TestIsValidTelegramBotToken(t *testing.T) {
 		"123456789:AA_bb-CCddEEffGGhhIIjjKKllMMnn",
 		"  123456789:AA_bb-CCddEEffGGhhIIjjKKllMMnn  ",
 		"123456789:\nAA_bb-CCddEEffGGhhIIjjKKllMMnn",
+		"bot123456789:AA_bb-CCddEEffGGhhIIjjKKllMMnn",
+		"https://api.telegram.org/bot123456789:AA_bb-CCddEEffGGhhIIjjKKllMMnn/sendMessage",
 	}
 	for _, tok := range valid {
 		if !IsValidTelegramBotToken(tok) {
@@ -33,6 +46,7 @@ func TestIsValidTelegramBotToken(t *testing.T) {
 		"abc:AA_bb-CC",
 		"123456789:",
 		"123456789:has space",
+		"botabc:AA_bb-CC",
 	}
 	for _, tok := range invalid {
 		if IsValidTelegramBotToken(tok) {
