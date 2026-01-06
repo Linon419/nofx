@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import type { TelegramConfig, UpdateTelegramConfigRequest } from '../../types'
 import { api } from '../../lib/api'
+import { CryptoService } from '../../lib/crypto'
+import { httpClient } from '../../lib/httpClient'
 import { t, type Language } from '../../i18n/translations'
 
 interface TelegramConfigModalProps {
@@ -17,6 +19,7 @@ export function TelegramConfigModal({
 }: TelegramConfigModalProps) {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
   const [config, setConfig] = useState<TelegramConfig | null>(null)
 
   const [enabled, setEnabled] = useState(false)
@@ -48,6 +51,60 @@ export function TelegramConfigModal({
   }, [isOpen, language])
 
   if (!isOpen) return null
+
+  const handleTest = async () => {
+    const requestBody = {
+      bot_token: botToken,
+      chat_id: chatId,
+    }
+
+    setTesting(true)
+    try {
+      await toast.promise(
+        (async () => {
+          const cfg = await CryptoService.fetchCryptoConfig()
+
+          if (!cfg.transport_encryption) {
+            const result = await httpClient.post(
+              `/api/notifications/telegram/test`,
+              requestBody
+            )
+            if (!result.success)
+              throw new Error(result.message || 'Telegram test failed')
+            return
+          }
+
+          const publicKey = await CryptoService.fetchPublicKey()
+          await CryptoService.initialize(publicKey)
+
+          const userId = localStorage.getItem('user_id') || ''
+          const sessionId = sessionStorage.getItem('session_id') || ''
+          const encryptedPayload = await CryptoService.encryptSensitiveData(
+            JSON.stringify(requestBody),
+            userId,
+            sessionId
+          )
+
+          const result = await httpClient.post(
+            `/api/notifications/telegram/test`,
+            encryptedPayload
+          )
+          if (!result.success)
+            throw new Error(result.message || 'Telegram test failed')
+        })(),
+        {
+          loading: language === 'zh' ? '正在发送测试消息…' : 'Sending test message...',
+          success: language === 'zh' ? '测试消息已发送' : 'Test message sent',
+          error: (err) =>
+            language === 'zh'
+              ? `发送测试消息失败：${(err as Error)?.message || err}`
+              : `Failed to send test message: ${(err as Error)?.message || err}`,
+        }
+      )
+    } finally {
+      setTesting(false)
+    }
+  }
 
   const handleSave = async () => {
     const req: UpdateTelegramConfigRequest = {
@@ -190,14 +247,27 @@ export function TelegramConfigModal({
           <button
             onClick={onClose}
             className="px-4 py-2 rounded bg-[#2B3139] text-[#EAECEF] hover:bg-[#3A4250] transition-colors"
-            disabled={saving}
+            disabled={saving || testing}
           >
             {language === 'zh' ? '取消' : 'Cancel'}
           </button>
           <button
+            onClick={handleTest}
+            className="px-4 py-2 rounded bg-[#0ECB81] text-black font-semibold hover:opacity-90 transition-opacity disabled:opacity-60"
+            disabled={
+              saving ||
+              testing ||
+              loading ||
+              !chatId.trim() ||
+              (!botToken.trim() && !config?.has_bot_token)
+            }
+          >
+            {language === 'zh' ? '发送测试' : 'Send test'}
+          </button>
+          <button
             onClick={handleSave}
             className="px-4 py-2 rounded bg-[#F0B90B] text-black font-semibold hover:opacity-90 transition-opacity disabled:opacity-60"
-            disabled={saving || loading}
+            disabled={saving || testing || loading}
           >
             {language === 'zh' ? '保存' : 'Save'}
           </button>

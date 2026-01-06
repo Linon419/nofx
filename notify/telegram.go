@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,8 +18,79 @@ type telegramSendMessageRequest struct {
 	DisableWebPagePreview bool   `json:"disable_web_page_preview"`
 }
 
-func SendTelegramMessage(ctx context.Context, botToken string, chatID string, text string) error {
+// NormalizeTelegramBotToken removes surrounding and internal whitespace.
+// Telegram bot tokens never contain whitespace, but users may paste them with line breaks/spaces.
+func NormalizeTelegramBotToken(botToken string) string {
 	botToken = strings.TrimSpace(botToken)
+	if botToken == "" {
+		return ""
+	}
+	// Remove all whitespace (spaces, newlines, tabs, etc).
+	return strings.Join(strings.Fields(botToken), "")
+}
+
+func IsValidTelegramBotToken(botToken string) bool {
+	botToken = NormalizeTelegramBotToken(botToken)
+	if botToken == "" {
+		return false
+	}
+	parts := strings.Split(botToken, ":")
+	if len(parts) != 2 {
+		return false
+	}
+	if parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	// Bot ID (left side) is numeric.
+	if _, err := strconv.ParseInt(parts[0], 10, 64); err != nil {
+		return false
+	}
+	// Right side is typically base64url-ish: letters/digits/_/-
+	for _, r := range parts[1] {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	// Most tokens are ~35 chars after ":", but keep it loose.
+	return len(parts[1]) >= 10
+}
+
+func IsValidTelegramChatID(chatID string) bool {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return false
+	}
+	if strings.HasPrefix(chatID, "@") {
+		username := strings.TrimPrefix(chatID, "@")
+		// Telegram usernames are 5-32 chars, containing letters, digits, and underscores.
+		if len(username) < 5 || len(username) > 32 {
+			return false
+		}
+		for _, r := range username {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+				continue
+			}
+			return false
+		}
+		return true
+	}
+	if strings.HasPrefix(chatID, "-") {
+		chatID = strings.TrimPrefix(chatID, "-")
+	}
+	if chatID == "" {
+		return false
+	}
+	for _, r := range chatID {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func SendTelegramMessage(ctx context.Context, botToken string, chatID string, text string) error {
+	botToken = NormalizeTelegramBotToken(botToken)
 	chatID = strings.TrimSpace(chatID)
 	if botToken == "" {
 		return fmt.Errorf("telegram bot token is empty")
@@ -28,6 +100,12 @@ func SendTelegramMessage(ctx context.Context, botToken string, chatID string, te
 	}
 	if strings.TrimSpace(text) == "" {
 		return fmt.Errorf("telegram message text is empty")
+	}
+	if !IsValidTelegramBotToken(botToken) {
+		return fmt.Errorf("telegram bot token is invalid")
+	}
+	if !IsValidTelegramChatID(chatID) {
+		return fmt.Errorf("telegram chat_id is invalid")
 	}
 
 	reqBody, err := json.Marshal(telegramSendMessageRequest{

@@ -64,7 +64,16 @@ func sendTelegramTradeNotification(st *store.Store, traderID string, exchangeID 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := notify.SendTelegramMessage(ctx, tg.BotToken, tg.ChatID, msg); err != nil {
-			logger.Infof("telegram notification failed (trade): %v", err)
+			logger.Infof(
+				"telegram notification failed (trade, trader=%s, trader_id=%s, user_id=%s, exchange=%s, action=%s, symbol=%s): %v",
+				traderInfo.Name,
+				traderID,
+				traderInfo.UserID,
+				exchangeType,
+				actionLower,
+				symbol,
+				err,
+			)
 		}
 	}()
 }
@@ -105,7 +114,7 @@ func sendTelegramErrorNotification(st *store.Store, userID string, traderName st
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := notify.SendTelegramMessage(ctx, tg.BotToken, tg.ChatID, msg); err != nil {
-			logger.Infof("telegram notification failed (error): %v", err)
+			logger.Infof("telegram notification failed (error, user_id=%s, trader=%s): %v", userID, traderName, err)
 		}
 	}()
 }

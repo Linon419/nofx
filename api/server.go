@@ -13,6 +13,7 @@ import (
 	"nofx/logger"
 	"nofx/manager"
 	"nofx/market"
+	"nofx/notify"
 	"nofx/provider/alpaca"
 	"nofx/provider/coinank/coinank_api"
 	"nofx/provider/coinank/coinank_enum"
@@ -182,6 +183,7 @@ func (s *Server) setupRoutes() {
 			// Notifications
 			protected.GET("/notifications/telegram", s.handleGetTelegramConfig)
 			protected.PUT("/notifications/telegram", s.handleUpdateTelegramConfig)
+			protected.POST("/notifications/telegram/test", s.handleTestTelegramNotification)
 
 			// Strategy management
 			protected.GET("/strategies", s.handleGetStrategies)
@@ -521,6 +523,12 @@ type TelegramConfigResponse struct {
 	NotifyOnOpen  bool   `json:"notify_on_open"`
 	NotifyOnClose bool   `json:"notify_on_close"`
 	NotifyOnError bool   `json:"notify_on_error"`
+}
+
+type TelegramTestRequest struct {
+	BotToken string `json:"bot_token"`
+	ChatID   string `json:"chat_id"`
+	Text     string `json:"text"`
 }
 
 // handleCreateTrader Create new AI trader
@@ -1930,9 +1938,10 @@ func (s *Server) handleUpdateTelegramConfig(c *gin.Context) {
 		}
 	}
 
+	normalizedBotToken := notify.NormalizeTelegramBotToken(req.BotToken)
 	trimmedChatID := strings.TrimSpace(req.ChatID)
 	var existing *store.TelegramConfig
-	if req.Enabled && (trimmedChatID == "" || strings.TrimSpace(req.BotToken) == "") {
+	if req.Enabled && (trimmedChatID == "" || normalizedBotToken == "") {
 		var err error
 		existing, err = s.store.Telegram().Get(userID)
 		if err != nil {
@@ -1940,16 +1949,30 @@ func (s *Server) handleUpdateTelegramConfig(c *gin.Context) {
 			return
 		}
 	}
-	if req.Enabled && trimmedChatID == "" {
+	effectiveChatID := trimmedChatID
+	if req.Enabled && effectiveChatID == "" {
 		if existing == nil || strings.TrimSpace(existing.ChatID) == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "chat_id is required when telegram notifications are enabled"})
 			return
 		}
-		trimmedChatID = strings.TrimSpace(existing.ChatID)
+		effectiveChatID = strings.TrimSpace(existing.ChatID)
 	}
-	if req.Enabled && strings.TrimSpace(req.BotToken) == "" {
+	effectiveBotToken := normalizedBotToken
+	if req.Enabled && effectiveBotToken == "" {
 		if existing == nil || strings.TrimSpace(existing.BotToken) == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "bot_token is required when telegram notifications are enabled"})
+			return
+		}
+		effectiveBotToken = notify.NormalizeTelegramBotToken(existing.BotToken)
+	}
+
+	if req.Enabled {
+		if !notify.IsValidTelegramChatID(effectiveChatID) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "chat_id is invalid; it should be a numeric Telegram chat ID (e.g. 123456789 or -1001234567890)"})
+			return
+		}
+		if !notify.IsValidTelegramBotToken(effectiveBotToken) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "bot_token is invalid; it should look like 123456789:AA... and must not contain spaces"})
 			return
 		}
 	}
@@ -1957,8 +1980,8 @@ func (s *Server) handleUpdateTelegramConfig(c *gin.Context) {
 	if err := s.store.Telegram().Upsert(
 		userID,
 		req.Enabled,
-		req.BotToken,
-		trimmedChatID,
+		normalizedBotToken,
+		effectiveChatID,
 		req.NotifyOnOpen,
 		req.NotifyOnClose,
 		req.NotifyOnError,
@@ -1968,6 +1991,94 @@ func (s *Server) handleUpdateTelegramConfig(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Telegram configuration updated"})
+}
+
+func (s *Server) handleTestTelegramNotification(c *gin.Context) {
+	userID := c.GetString("user_id")
+	cfg := config.Get()
+
+	bodyBytes, err := c.GetRawData()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body"})
+		return
+	}
+
+	var req TelegramTestRequest
+	if len(bodyBytes) > 0 {
+		if !cfg.TransportEncryption {
+			if err := json.Unmarshal(bodyBytes, &req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+				return
+			}
+		} else {
+			var encryptedPayload crypto.EncryptedPayload
+			if err := json.Unmarshal(bodyBytes, &encryptedPayload); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format, encrypted transmission required"})
+				return
+			}
+			if encryptedPayload.WrappedKey == "" {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error":   "This endpoint only supports encrypted transmission, please use encrypted client",
+					"code":    "ENCRYPTION_REQUIRED",
+					"message": "Encrypted transmission is required for security reasons",
+				})
+				return
+			}
+			decrypted, err := s.cryptoHandler.cryptoService.DecryptSensitiveData(&encryptedPayload)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to decrypt data"})
+				return
+			}
+			if err := json.Unmarshal([]byte(decrypted), &req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse decrypted data"})
+				return
+			}
+		}
+	}
+
+	tg, err := s.store.Telegram().Get(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to get telegram config: %v", err)})
+		return
+	}
+
+	overridesProvided := strings.TrimSpace(req.BotToken) != "" || strings.TrimSpace(req.ChatID) != ""
+
+	botToken := notify.NormalizeTelegramBotToken(req.BotToken)
+	chatID := strings.TrimSpace(req.ChatID)
+	if botToken == "" && tg != nil {
+		botToken = notify.NormalizeTelegramBotToken(tg.BotToken)
+	}
+	if chatID == "" && tg != nil {
+		chatID = strings.TrimSpace(tg.ChatID)
+	}
+
+	if botToken == "" || chatID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bot_token and chat_id are required to send a test notification"})
+		return
+	}
+	if tg == nil || !tg.Enabled {
+		if !overridesProvided {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "telegram notifications are disabled; enable first or provide bot_token/chat_id in request"})
+			return
+		}
+	}
+
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		text = fmt.Sprintf("NOFX Telegram test\nTime: %s", time.Now().Format(time.RFC3339))
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	if err := notify.SendTelegramMessage(ctx, botToken, chatID, text); err != nil {
+		logger.Infof("telegram test notification failed (user_id=%s, chat_id=%s): %v", userID, chatID, err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Failed to send telegram message: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Telegram test message sent"})
 }
 
 // handleUpdateExchangeConfigs Update exchange configurations (supports both encrypted and plain text based on config)
