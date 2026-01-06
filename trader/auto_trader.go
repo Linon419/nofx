@@ -11,6 +11,7 @@ import (
 	"nofx/market"
 	"nofx/mcp"
 	"nofx/store"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ type AutoTraderConfig struct {
 	ID      string // Trader unique identifier (for log directory, etc.)
 	Name    string // Trader display name
 	AIModel string // AI model: "qwen" or "deepseek"
+	AIModelID string // AI model config ID (for failover / diagnostics)
 
 	// Optional dedicated analysis model configuration (text-only).
 	// If AnalysisAIModel is empty, the decision model is used for analysis as well.
@@ -170,6 +172,72 @@ func newMCPClientByProvider(provider string) mcp.AIClient {
 	}
 }
 
+func buildDecisionFailoverClient(primary mcp.AIClient, cfg AutoTraderConfig, st *store.Store, userID string) mcp.AIClient {
+	if primary == nil || st == nil {
+		return nil
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil
+	}
+
+	models, err := st.AIModel().List(userID)
+	if err != nil {
+		return nil
+	}
+
+	enabled := make([]*store.AIModel, 0, len(models))
+	for _, m := range models {
+		if m == nil || !m.Enabled {
+			continue
+		}
+		if strings.TrimSpace(m.APIKey.String()) == "" {
+			continue
+		}
+		enabled = append(enabled, m)
+	}
+	if len(enabled) < 2 {
+		return nil
+	}
+
+	// Prefer the most recently updated configs as fallbacks.
+	sort.SliceStable(enabled, func(i, j int) bool {
+		return enabled[i].UpdatedAt.After(enabled[j].UpdatedAt)
+	})
+
+	primaryID := strings.TrimSpace(cfg.AIModelID)
+	primaryProvider := strings.ToLower(strings.TrimSpace(cfg.AIModel))
+	primaryURL := strings.TrimSpace(cfg.CustomAPIURL)
+	primaryModel := strings.TrimSpace(cfg.CustomModelName)
+
+	fallbacks := make([]mcp.AIClient, 0, len(enabled)-1)
+	for _, m := range enabled {
+		if primaryID != "" && strings.TrimSpace(m.ID) == primaryID {
+			continue
+		}
+		// Best-effort exclusion when legacy configs didn't carry AIModelID.
+		if primaryID == "" &&
+			strings.ToLower(strings.TrimSpace(m.Provider)) == primaryProvider &&
+			strings.TrimSpace(m.CustomAPIURL) == primaryURL &&
+			strings.TrimSpace(m.CustomModelName) == primaryModel {
+			continue
+		}
+
+		cli := newMCPClientByProvider(m.Provider)
+		if cli == nil {
+			continue
+		}
+		cli.SetAPIKey(strings.TrimSpace(m.APIKey.String()), m.CustomAPIURL, m.CustomModelName)
+		fallbacks = append(fallbacks, cli)
+	}
+	if len(fallbacks) == 0 {
+		return nil
+	}
+
+	logger.Infof("🛟 [%s] AI failover enabled: %d fallback model(s)", cfg.Name, len(fallbacks))
+	return mcp.NewFailoverClient(primary, fallbacks...)
+}
+
 // NewAutoTrader creates an automatic trader
 // st parameter is used to store decision records to database
 func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*AutoTrader, error) {
@@ -247,6 +315,16 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 
 	decisionClient := mcpClient
 	analysisClient := decisionClient
+
+	// If the user has multiple enabled AI model configs, wrap the decision client with failover
+	// so a transient outage (5xx/timeout/empty response) won't stop the trading cycle.
+	if st != nil && strings.TrimSpace(userID) != "" {
+		if fo := buildDecisionFailoverClient(decisionClient, config, st, userID); fo != nil {
+			decisionClient = fo
+			analysisClient = decisionClient
+			mcpClient = decisionClient
+		}
+	}
 
 	if config.CustomAPIURL != "" || config.CustomModelName != "" {
 		logger.Infof("🔧 [%s] Custom config - URL: %s, Model: %s", config.Name, config.CustomAPIURL, config.CustomModelName)

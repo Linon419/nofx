@@ -80,6 +80,13 @@ func isVisionCapableClient(c AIClient) bool {
 	switch v := c.(type) {
 	case *OpenAIClient, *GeminiClient, *ClaudeClient:
 		return true
+	case *FailoverClient:
+		for _, cli := range v.clients {
+			if isVisionCapableClient(cli) {
+				return true
+			}
+		}
+		return false
 	case *Client:
 		return v.Provider == ProviderCustom || v.Provider == ProviderOpenAI
 	case *SplitClient:

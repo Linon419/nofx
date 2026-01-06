@@ -455,6 +455,12 @@ func (client *Client) isRetryableError(err error) bool {
 		}
 	}
 
+	// Some compat/proxy endpoints may return a valid HTTP 200 but with an empty choices array.
+	// This is usually transient and safe to retry.
+	if strings.Contains(errStr, "API returned empty response") {
+		return true
+	}
+
 	// Network errors, timeouts, EOF, etc. can be retried
 	for _, retryable := range client.config.RetryableErrors {
 		if strings.Contains(errStr, retryable) {
