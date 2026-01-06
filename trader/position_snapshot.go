@@ -80,12 +80,12 @@ func CreatePositionSnapshot(traderID, exchangeID, exchangeType string, trader Tr
 			Quantity:           positionAmt,
 			EntryPrice:         entryPrice,
 			EntryOrderID:       "snapshot", // Mark as snapshot
-			EntryTime:          nowMs,
+			EntryTime:          store.UnixMilli(nowMs),
 			Leverage:           int(leverage),
 			Status:             "OPEN",
 			Source:             "snapshot", // Mark source as snapshot
-			CreatedAt:          nowMs,
-			UpdatedAt:          nowMs,
+			CreatedAt:          store.UnixMilli(nowMs),
+			UpdatedAt:          store.UnixMilli(nowMs),
 		}
 
 		if err := positionStore.CreateOpenPosition(snapshotPosition); err != nil {

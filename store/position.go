@@ -25,7 +25,7 @@ type TraderStats struct {
 }
 
 // TraderPosition position record
-// All time fields use int64 millisecond timestamps (UTC) to avoid timezone issues
+// All time fields use Unix milliseconds (UTC) to avoid timezone issues.
 type TraderPosition struct {
 	ID                 int64   `gorm:"primaryKey;autoIncrement" json:"id"`
 	TraderID           string  `gorm:"column:trader_id;not null;index:idx_positions_trader" json:"trader_id"`
@@ -38,10 +38,10 @@ type TraderPosition struct {
 	Quantity           float64 `gorm:"column:quantity;not null" json:"quantity"`
 	EntryPrice         float64 `gorm:"column:entry_price;not null" json:"entry_price"`
 	EntryOrderID       string  `gorm:"column:entry_order_id;default:''" json:"entry_order_id"`
-	EntryTime          int64   `gorm:"column:entry_time;not null;index:idx_positions_entry" json:"entry_time"` // Unix milliseconds UTC
+	EntryTime          UnixMilli `gorm:"column:entry_time;not null;index:idx_positions_entry" json:"entry_time"` // Unix milliseconds UTC
 	ExitPrice          float64 `gorm:"column:exit_price;default:0" json:"exit_price"`
 	ExitOrderID        string  `gorm:"column:exit_order_id;default:''" json:"exit_order_id"`
-	ExitTime           int64   `gorm:"column:exit_time;index:idx_positions_exit" json:"exit_time"` // Unix milliseconds UTC, 0 means not set
+	ExitTime           UnixMilli `gorm:"column:exit_time;index:idx_positions_exit" json:"exit_time"` // Unix milliseconds UTC, 0 means not set
 	RealizedPnL        float64 `gorm:"column:realized_pnl;default:0" json:"realized_pnl"`
 	Fee                float64 `gorm:"column:fee;default:0" json:"fee"`
 	Leverage           int     `gorm:"column:leverage;default:1" json:"leverage"`
@@ -50,8 +50,8 @@ type TraderPosition struct {
 	ExitPlanSnapshot   string  `gorm:"column:exit_plan_snapshot;type:text;default:''" json:"exit_plan_snapshot"`
 	ExitPlanState      string  `gorm:"column:exit_plan_state;type:text;default:''" json:"exit_plan_state"`
 	Source             string  `gorm:"column:source;default:system" json:"source"`
-	CreatedAt          int64   `gorm:"column:created_at" json:"created_at"`   // Unix milliseconds UTC
-	UpdatedAt          int64   `gorm:"column:updated_at" json:"updated_at"`   // Unix milliseconds UTC
+	CreatedAt          UnixMilli `gorm:"column:created_at" json:"created_at"` // Unix milliseconds UTC
+	UpdatedAt          UnixMilli `gorm:"column:updated_at" json:"updated_at"` // Unix milliseconds UTC
 }
 
 // TableName returns the table name
@@ -587,12 +587,12 @@ func (s *PositionStore) GetRecentTrades(traderID string, limit int) ([]RecentTra
 			EntryPrice:  pos.EntryPrice,
 			ExitPrice:   pos.ExitPrice,
 			RealizedPnL: pos.RealizedPnL,
-			EntryTime:   pos.EntryTime / 1000, // Convert ms to seconds for API compatibility
+			EntryTime:   int64(pos.EntryTime) / 1000, // Convert ms to seconds for API compatibility
 		}
 
 		if pos.ExitTime > 0 {
-			t.ExitTime = pos.ExitTime / 1000 // Convert ms to seconds
-			durationMs := pos.ExitTime - pos.EntryTime
+			t.ExitTime = int64(pos.ExitTime) / 1000 // Convert ms to seconds
+			durationMs := int64(pos.ExitTime - pos.EntryTime)
 			t.HoldDuration = formatDurationMs(durationMs)
 		}
 
@@ -730,7 +730,7 @@ func (s *PositionStore) GetSymbolStats(traderID string, limit int) ([]SymbolStat
 		}
 
 		if pos.ExitTime > 0 {
-			holdMins := float64(pos.ExitTime-pos.EntryTime) / 60000.0 // ms to minutes
+			holdMins := float64(int64(pos.ExitTime-pos.EntryTime)) / 60000.0 // ms to minutes
 			symbolHoldMins[pos.Symbol] = append(symbolHoldMins[pos.Symbol], holdMins)
 		}
 	}
@@ -798,7 +798,7 @@ func (s *PositionStore) GetHoldingTimeStats(traderID string) ([]HoldingTimeStats
 		if pos.ExitTime == 0 {
 			continue
 		}
-		holdHours := float64(pos.ExitTime-pos.EntryTime) / 3600000.0 // ms to hours
+		holdHours := float64(int64(pos.ExitTime-pos.EntryTime)) / 3600000.0 // ms to hours
 
 		var rangeKey string
 		switch {
@@ -960,7 +960,7 @@ func (s *PositionStore) GetHistorySummary(traderID string) (*HistorySummary, err
 		var totalMins float64
 		for _, pos := range positions {
 			if pos.ExitTime > 0 {
-				totalMins += float64(pos.ExitTime-pos.EntryTime) / 60000.0 // ms to minutes
+				totalMins += float64(int64(pos.ExitTime-pos.EntryTime)) / 60000.0 // ms to minutes
 			}
 		}
 		summary.AvgHoldingMins = totalMins / float64(len(positions))
@@ -1155,18 +1155,18 @@ func (s *PositionStore) CreateFromClosedPnL(traderID, exchangeID, exchangeType s
 		Quantity:           record.Quantity,
 		EntryQuantity:      record.Quantity,
 		EntryPrice:         record.EntryPrice,
-		EntryTime:          entryTimeMs,
+		EntryTime:          UnixMilli(entryTimeMs),
 		ExitPrice:          record.ExitPrice,
 		ExitOrderID:        record.OrderID,
-		ExitTime:           exitTimeMs,
+		ExitTime:           UnixMilli(exitTimeMs),
 		RealizedPnL:        record.RealizedPnL,
 		Fee:                record.Fee,
 		Leverage:           record.Leverage,
 		Status:             "CLOSED",
 		CloseReason:        record.CloseType,
 		Source:             "sync",
-		CreatedAt:          nowMs,
-		UpdatedAt:          nowMs,
+		CreatedAt:          UnixMilli(nowMs),
+		UpdatedAt:          UnixMilli(nowMs),
 	}
 
 	err = s.db.Create(pos).Error
@@ -1194,7 +1194,7 @@ func (s *PositionStore) GetLastClosedPositionTime(traderID string) (int64, error
 		return 0, fmt.Errorf("failed to get last closed position time: %w", err)
 	}
 
-	return pos.ExitTime, nil
+	return int64(pos.ExitTime), nil
 }
 
 // CreateOpenPosition creates an open position

@@ -833,7 +833,7 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 		if at.store != nil {
 			if dbPos, err := at.store.Position().GetOpenPositionBySymbol(at.id, symbol, side); err == nil && dbPos != nil {
 				if dbPos.EntryTime > 0 {
-					updateTime = dbPos.EntryTime
+					updateTime = int64(dbPos.EntryTime)
 				}
 			}
 		}
@@ -2065,11 +2065,11 @@ func (at *AutoTrader) recordPositionChange(orderID, symbol, side, action string,
 			Quantity:     quantity,
 			EntryPrice:   price,
 			EntryOrderID: orderID,
-			EntryTime:    nowMs,
+			EntryTime:    store.UnixMilli(nowMs),
 			Leverage:     leverage,
 			Status:       "OPEN",
-			CreatedAt:    nowMs,
-			UpdatedAt:    nowMs,
+			CreatedAt:    store.UnixMilli(nowMs),
+			UpdatedAt:    store.UnixMilli(nowMs),
 		}
 		if err := at.store.Position().Create(pos); err != nil {
 			logger.Infof("  ⚠️ Failed to record position: %v", err)

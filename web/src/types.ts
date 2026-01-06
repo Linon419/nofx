@@ -811,17 +811,17 @@ export interface HistoricalPosition {
   entry_quantity: number;
   entry_price: number;
   entry_order_id: string;
-  entry_time: string;
+  entry_time: number | string;
   exit_price: number;
   exit_order_id: string;
-  exit_time: string;
+  exit_time: number | string;
   realized_pnl: number;
   fee: number;
   leverage: number;
   status: string;
   close_reason: string;
-  created_at: string;
-  updated_at: string;
+  created_at: number | string;
+  updated_at: number | string;
 }
 
 // Matches Go TraderStats struct exactly
