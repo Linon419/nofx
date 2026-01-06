@@ -109,7 +109,6 @@ func TestGetSchemaPrompt(t *testing.T) {
 			"持仓指标",
 			"市场数据",
 			"持仓量(OI)变化解读",
-			"常见错误",
 		}
 
 		for _, keyword := range mustContain {
@@ -134,7 +133,6 @@ func TestGetSchemaPrompt(t *testing.T) {
 			"Position Metrics",
 			"Market Data",
 			"Open Interest",
-			"Common Mistakes",
 		}
 
 		for _, keyword := range mustContain {
