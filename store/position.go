@@ -74,8 +74,96 @@ func (s *PositionStore) isPostgres() bool {
 	return s.db.Dialector.Name() == "postgres"
 }
 
+func (s *PositionStore) isSQLite() bool {
+	return s.db.Dialector.Name() == "sqlite"
+}
+
 // InitTables initializes position tables
 func (s *PositionStore) InitTables() error {
+	// SQLite: avoid GORM AutoMigrate table-rebuild behavior (can fail on existing data)
+	if s.isSQLite() {
+		if s.db.Migrator().HasTable(&TraderPosition{}) {
+			// Best-effort: backfill missing trader_id for legacy single-trader databases.
+			var traderCount int64
+			onlyTraderID := ""
+			if s.db.Migrator().HasTable(&Trader{}) {
+				s.db.Raw(`SELECT COUNT(*) FROM traders`).Scan(&traderCount)
+				if traderCount == 1 {
+					s.db.Raw(`SELECT id FROM traders LIMIT 1`).Scan(&onlyTraderID)
+				}
+			}
+			if onlyTraderID == "" {
+				onlyTraderID = "default_trader"
+			}
+			if traderCount <= 1 {
+				s.db.Exec(`UPDATE trader_positions SET trader_id = ? WHERE trader_id IS NULL OR trader_id = ''`, onlyTraderID)
+			}
+
+			// Ensure schema is up to date (additive only; no destructive rebuild).
+			for _, field := range []string{
+				"TraderID",
+				"ExchangeID",
+				"ExchangeType",
+				"ExchangePositionID",
+				"Symbol",
+				"Side",
+				"EntryQuantity",
+				"Quantity",
+				"EntryPrice",
+				"EntryOrderID",
+				"EntryTime",
+				"ExitPrice",
+				"ExitOrderID",
+				"ExitTime",
+				"RealizedPnL",
+				"Fee",
+				"Leverage",
+				"Status",
+				"CloseReason",
+				"ExitPlanSnapshot",
+				"ExitPlanState",
+				"Source",
+				"CreatedAt",
+				"UpdatedAt",
+			} {
+				if !s.db.Migrator().HasColumn(&TraderPosition{}, field) {
+					_ = s.db.Migrator().AddColumn(&TraderPosition{}, field)
+				}
+			}
+
+			// Best-effort: normalize legacy DATETIME/TEXT timestamps into Unix milliseconds (int64).
+			normalizeUnixMilli := func(col string) {
+				s.db.Exec(fmt.Sprintf(`
+UPDATE trader_positions
+SET %s = CASE
+  WHEN %s IS NULL THEN 0
+  WHEN typeof(%s) = 'integer' THEN %s
+  WHEN typeof(%s) = 'real' THEN CAST(%s AS INTEGER)
+  WHEN typeof(%s) = 'text' AND %s GLOB '[0-9]*' THEN CAST(%s AS INTEGER)
+  ELSE COALESCE(CAST(strftime('%%s', %s) AS INTEGER) * 1000, 0)
+END
+WHERE %s IS NOT NULL
+`, col, col, col, col, col, col, col, col, col, col, col))
+			}
+			if s.db.Migrator().HasColumn(&TraderPosition{}, "EntryTime") {
+				normalizeUnixMilli("entry_time")
+			}
+			if s.db.Migrator().HasColumn(&TraderPosition{}, "ExitTime") {
+				normalizeUnixMilli("exit_time")
+			}
+			if s.db.Migrator().HasColumn(&TraderPosition{}, "CreatedAt") {
+				normalizeUnixMilli("created_at")
+			}
+			if s.db.Migrator().HasColumn(&TraderPosition{}, "UpdatedAt") {
+				normalizeUnixMilli("updated_at")
+			}
+
+			// Ensure index exists (SQLite-safe)
+			s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_exchange_pos_unique ON trader_positions(exchange_id, exchange_position_id) WHERE exchange_position_id != ''`)
+			return nil
+		}
+	}
+
 	// For PostgreSQL with existing table, skip AutoMigrate
 	if s.isPostgres() {
 		var tableExists int64
