@@ -47,6 +47,8 @@ export function RiskControlEditor({
       riskParameters: { zh: '风险参数', en: 'Risk Parameters' },
       minRiskReward: { zh: '最小盈亏比', en: 'Min Risk/Reward Ratio' },
       minRiskRewardDesc: { zh: '开仓所需的最低盈亏比', en: 'Minimum profit ratio for opening' },
+      minOIValue: { zh: '最小OI流动性门槛（M USD）', en: 'Min OI Liquidity (M USD)' },
+      minOIValueDesc: { zh: '候选币需满足最小OI名义价值；设为0关闭该过滤', en: 'Candidate coins must meet a minimum OI notional; set to 0 to disable this filter' },
       maxMarginUsage: { zh: '最大保证金使用率（代码强制）', en: 'Max Margin Usage (CODE ENFORCED)' },
       maxMarginUsageDesc: { zh: '最大保证金使用率，代码强制', en: 'Maximum margin utilization, enforced by code' },
       entryRequirements: { zh: '开仓要求', en: 'Entry Requirements' },
@@ -402,6 +404,46 @@ export function RiskControlEditor({
                 style={{ color: '#0ECB81' }}
               >
                 {config.altcoin_max_position_value_ratio ?? 1}x
+              </span>
+            </div>
+          </div>
+
+          <div
+            className="p-4 rounded-lg"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+          >
+            <label className="block text-sm mb-1" style={{ color: '#EAECEF' }}>
+              {t('minOIValue')}
+            </label>
+            <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+              {t('minOIValueDesc')}
+            </p>
+            <div className="flex items-center">
+              <input
+                type="number"
+                value={config.min_open_interest_value_millions ?? 15}
+                onChange={(e) => {
+                  const raw = e.target.value.trim()
+                  if (raw === '') {
+                    updateField('min_open_interest_value_millions', 15)
+                    return
+                  }
+                  const next = Number(raw)
+                  updateField('min_open_interest_value_millions', Number.isFinite(next) ? next : 15)
+                }}
+                disabled={disabled}
+                min={0}
+                max={500}
+                step={1}
+                className="w-28 px-3 py-2 rounded"
+                style={{
+                  background: '#1E2329',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
+              <span className="ml-2" style={{ color: '#848E9C' }}>
+                M
               </span>
             </div>
           </div>

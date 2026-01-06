@@ -269,6 +269,10 @@ type RiskControlConfig struct {
 	MaxMarginUsage float64 `json:"max_margin_usage"`
 	// Min position size in USDT (CODE ENFORCED)
 	MinPositionSize float64 `json:"min_position_size"`
+	// Minimum open interest notional value (in millions of USD) required for a candidate coin to be tradable.
+	//  - nil: use default (15M)
+	//  - <= 0: disable the OI liquidity filter
+	MinOpenInterestValueMillions *float64 `json:"min_open_interest_value_millions,omitempty"`
 	// Enforce minimum order notional checks (CODE ENFORCED, default: true)
 	// When disabled, the system may attempt very small orders that could be rejected by the exchange.
 	EnforceMinPositionSize *bool `json:"enforce_min_position_size,omitempty"`
@@ -373,6 +377,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 	enforceMinPositionSize := true
 	enforceAICloseGuard := true
 	enforceAIClaimGuard := false
+	minOIMillions := 15.0
 
 	config := StrategyConfig{
 		Language: normalizedLang,
@@ -459,6 +464,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			AltcoinMaxPositionValueRatio: 1.0, // Altcoin: max position = 1x equity (CODE ENFORCED)
 			MaxMarginUsage:               0.9, // Max 90% margin usage (CODE ENFORCED)
 			MinPositionSize:              12,  // Min 12 USDT per position (CODE ENFORCED)
+			MinOpenInterestValueMillions: &minOIMillions,
 			EnforceMinPositionSize:       &enforceMinPositionSize,
 			MinRiskRewardRatio:           3.0, // Min 3:1 profit/loss ratio (AI guided)
 			MinConfidence:                75,  // Min 75% confidence (AI guided)

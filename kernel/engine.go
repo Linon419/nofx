@@ -898,7 +898,15 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 		positionSymbols[pos.Symbol] = true
 	}
 
-	const minOIThresholdMillions = 15.0 // 15M USD minimum open interest value
+	minOIThresholdMillions := 15.0 // 15M USD minimum open interest value
+	if cfg := engine.GetConfig(); cfg != nil {
+		if cfg.RiskControl.MinOpenInterestValueMillions != nil {
+			minOIThresholdMillions = *cfg.RiskControl.MinOpenInterestValueMillions
+			if minOIThresholdMillions < 0 {
+				minOIThresholdMillions = 0
+			}
+		}
+	}
 
 	for _, coin := range ctx.CandidateCoins {
 		if _, exists := ctx.MarketDataMap[coin.Symbol]; exists {
@@ -914,7 +922,7 @@ func fetchMarketDataWithStrategy(ctx *Context, engine *StrategyEngine) error {
 		// Liquidity filter (skip for xyz dex assets - they don't have OI data from Binance)
 		isExistingPosition := positionSymbols[coin.Symbol]
 		isXyzAsset := market.IsXyzDexAsset(coin.Symbol)
-		if !isExistingPosition && !isXyzAsset && data.OpenInterest != nil && data.CurrentPrice > 0 {
+		if minOIThresholdMillions > 0 && !isExistingPosition && !isXyzAsset && data.OpenInterest != nil && data.CurrentPrice > 0 {
 			oiValue := data.OpenInterest.Latest * data.CurrentPrice
 			oiValueInMillions := oiValue / 1_000_000
 			if oiValueInMillions < minOIThresholdMillions {
