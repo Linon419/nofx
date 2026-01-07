@@ -213,19 +213,16 @@ func Get(symbol string) (*Data, error) {
 
 	// Get 3-minute K-line data (or 5-minute for xyz assets as 3m may not be available)
 	shortTF := "3m"
+	klines3m, err = GetKlines(symbol, shortTF, 201)
+	if err != nil {
+		if isXyzAsset {
+			return nil, fmt.Errorf("Failed to get %s K-line from Hyperliquid: %v", shortTF, err)
+		}
+		return nil, fmt.Errorf("Failed to get %s K-line from Binance/CoinAnk: %v", shortTF, err)
+	}
 	if isXyzAsset {
-		// Use Hyperliquid API for xyz dex assets (use 5m since 3m may not be available)
-		klines3m, err = getKlinesFromHyperliquid(symbol, "5m", 201)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to get 5-minute K-line from Hyperliquid: %v", err)
-		}
+		// For xyz dex assets, GetKlines may map 3m -> 5m.
 		shortTF = "5m"
-	} else {
-		// Use CoinAnk for regular crypto assets
-		klines3m, err = getKlinesFromCoinAnk(symbol, "3m", 201)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to get 3-minute K-line from CoinAnk: %v", err)
-		}
 	}
 	klines3m = DropUnclosedKlines(klines3m, shortTF)
 
@@ -236,16 +233,12 @@ func Get(symbol string) (*Data, error) {
 	}
 
 	// Get 4-hour K-line data
-	if isXyzAsset {
-		klines4h, err = getKlinesFromHyperliquid(symbol, "4h", 201)
-		if err != nil {
+	klines4h, err = GetKlines(symbol, "4h", 201)
+	if err != nil {
+		if isXyzAsset {
 			return nil, fmt.Errorf("Failed to get 4-hour K-line from Hyperliquid: %v", err)
 		}
-	} else {
-		klines4h, err = getKlinesFromCoinAnk(symbol, "4h", 201)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to get 4-hour K-line from CoinAnk: %v", err)
-		}
+		return nil, fmt.Errorf("Failed to get 4-hour K-line from Binance/CoinAnk: %v", err)
 	}
 	klines4h = DropUnclosedKlines(klines4h, "4h")
 
@@ -356,26 +349,15 @@ func GetWithTimeframes(symbol string, timeframes []string, primaryTimeframe stri
 
 	// Get K-line data for each timeframe
 	for _, tf := range timeframes {
-		var klines []Kline
-		var err error
-
-		if isXyzAsset {
-			// Use Hyperliquid API for xyz dex assets
-			klines, err = getKlinesFromHyperliquid(symbol, tf, 201)
-			if err != nil {
+		klines, err := GetKlines(symbol, tf, 201)
+		if err != nil {
+			if isXyzAsset {
 				logger.Infof("⚠️ Failed to get %s %s K-line from Hyperliquid: %v", symbol, tf, err)
-				continue
+			} else {
+				logger.Infof("⚠️ Failed to get %s %s K-line from Binance/CoinAnk: %v", symbol, tf, err)
 			}
-		} else {
-			// Use CoinAnk for regular crypto assets
-			klines, err = getKlinesFromCoinAnk(symbol, tf, 201)
-			if err != nil {
-				logger.Infof("⚠️ Failed to get %s %s K-line from CoinAnk: %v", symbol, tf, err)
-				continue
-			}
+			continue
 		}
-
-		klines = DropUnclosedKlines(klines, tf)
 
 		if len(klines) == 0 {
 			logger.Infof("⚠️ %s %s K-line data is empty", symbol, tf)

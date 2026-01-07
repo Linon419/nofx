@@ -18,9 +18,19 @@ func GetKlines(symbol, interval string, limit int) ([]Kline, error) {
 
 	var klines []Kline
 	if IsXyzDexAsset(symbol) {
+		// Hyperliquid does not support 3m; use 5m as the closest intraday proxy.
+		if tf == "3m" {
+			tf = "5m"
+		}
 		klines, err = getKlinesFromHyperliquid(symbol, tf, limit)
 	} else {
-		klines, err = getKlinesFromCoinAnk(symbol, tf, limit)
+		// Prefer Binance futures public klines for freshness + consistency.
+		// Fall back to CoinAnk if Binance is unavailable/rate-limited.
+		binanceSymbol := ToBinanceFuturesSymbol(symbol)
+		klines, err = NewAPIClient().GetKlines(binanceSymbol, tf, limit)
+		if err != nil {
+			klines, err = getKlinesFromCoinAnk(symbol, tf, limit)
+		}
 	}
 	if err != nil {
 		return nil, err
