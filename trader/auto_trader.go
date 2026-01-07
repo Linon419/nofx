@@ -1273,14 +1273,22 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 	posKey := decision.Symbol + "_long"
 	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
 
-	// Set stop loss and take profit
-	if err := at.trader.SetStopLoss(decision.Symbol, "LONG", quantity, decision.StopLoss); err != nil {
-		logger.Infof("  ⚠ Failed to set stop loss: %v", err)
+	// Set stop loss and take profit (with validation)
+	if validateStopLoss("LONG", marketData.CurrentPrice, decision.StopLoss) {
+		if err := at.trader.SetStopLoss(decision.Symbol, "LONG", quantity, decision.StopLoss); err != nil {
+			logger.Infof("  ⚠ Failed to set stop loss: %v", err)
+		} else {
+			at.armStopLossFlip(decision.Symbol, "LONG", marketData.CurrentPrice, decision.StopLoss, quantity, decision.Leverage)
+		}
 	} else {
-		at.armStopLossFlip(decision.Symbol, "LONG", marketData.CurrentPrice, decision.StopLoss, quantity, decision.Leverage)
+		logger.Infof("  ⚠ Invalid stop loss price: %.4f (entry: %.4f)", decision.StopLoss, marketData.CurrentPrice)
 	}
-	if err := at.trader.SetTakeProfit(decision.Symbol, "LONG", quantity, decision.TakeProfit); err != nil {
-		logger.Infof("  ⚠ Failed to set take profit: %v", err)
+	if validateTakeProfit("LONG", marketData.CurrentPrice, decision.TakeProfit) {
+		if err := at.trader.SetTakeProfit(decision.Symbol, "LONG", quantity, decision.TakeProfit); err != nil {
+			logger.Infof("  ⚠ Failed to set take profit: %v", err)
+		}
+	} else {
+		logger.Infof("  ⚠ Invalid take profit price: %.4f (entry: %.4f)", decision.TakeProfit, marketData.CurrentPrice)
 	}
 
 	return nil
@@ -1392,14 +1400,22 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 	posKey := decision.Symbol + "_short"
 	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
 
-	// Set stop loss and take profit
-	if err := at.trader.SetStopLoss(decision.Symbol, "SHORT", quantity, decision.StopLoss); err != nil {
-		logger.Infof("  ⚠ Failed to set stop loss: %v", err)
+	// Set stop loss and take profit (with validation)
+	if validateStopLoss("SHORT", marketData.CurrentPrice, decision.StopLoss) {
+		if err := at.trader.SetStopLoss(decision.Symbol, "SHORT", quantity, decision.StopLoss); err != nil {
+			logger.Infof("  ⚠ Failed to set stop loss: %v", err)
+		} else {
+			at.armStopLossFlip(decision.Symbol, "SHORT", marketData.CurrentPrice, decision.StopLoss, quantity, decision.Leverage)
+		}
 	} else {
-		at.armStopLossFlip(decision.Symbol, "SHORT", marketData.CurrentPrice, decision.StopLoss, quantity, decision.Leverage)
+		logger.Infof("  ⚠ Invalid stop loss price: %.4f (entry: %.4f)", decision.StopLoss, marketData.CurrentPrice)
 	}
-	if err := at.trader.SetTakeProfit(decision.Symbol, "SHORT", quantity, decision.TakeProfit); err != nil {
-		logger.Infof("  ⚠ Failed to set take profit: %v", err)
+	if validateTakeProfit("SHORT", marketData.CurrentPrice, decision.TakeProfit) {
+		if err := at.trader.SetTakeProfit(decision.Symbol, "SHORT", quantity, decision.TakeProfit); err != nil {
+			logger.Infof("  ⚠ Failed to set take profit: %v", err)
+		}
+	} else {
+		logger.Infof("  ⚠ Invalid take profit price: %.4f (entry: %.4f)", decision.TakeProfit, marketData.CurrentPrice)
 	}
 
 	return nil
@@ -2377,6 +2393,28 @@ func (at *AutoTrader) enforceMaxPositions(currentPositionCount int) error {
 		return fmt.Errorf("❌ [RISK CONTROL] Already at max positions (%d/%d)", currentPositionCount, maxPositions)
 	}
 	return nil
+}
+
+// validateStopLoss validates stop loss price for a position
+func validateStopLoss(side string, entryPrice, stopLoss float64) bool {
+	if stopLoss <= 0 {
+		return false
+	}
+	if side == "LONG" {
+		return stopLoss < entryPrice
+	}
+	return stopLoss > entryPrice // SHORT
+}
+
+// validateTakeProfit validates take profit price for a position
+func validateTakeProfit(side string, entryPrice, takeProfit float64) bool {
+	if takeProfit <= 0 {
+		return false
+	}
+	if side == "LONG" {
+		return takeProfit > entryPrice
+	}
+	return takeProfit < entryPrice // SHORT
 }
 
 // getSideFromAction converts order action to side (BUY/SELL)
