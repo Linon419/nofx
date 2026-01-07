@@ -16,6 +16,8 @@ import type {
     ModelTestResponse,
     TelegramConfig,
     UpdateTelegramConfigRequest,
+    MaintenanceCleanupConfig,
+    UpdateMaintenanceCleanupRequest,
     UpdateExchangeConfigRequest,
     CompetitionData,
     BacktestRunsResponse,
@@ -906,6 +908,26 @@ export const api = {
       `${API_BASE}/positions/history?trader_id=${traderId}&limit=${limit}`
     )
     if (!result.success) throw new Error('获取历史仓位失败')
+    return result.data!
+  },
+
+  // Maintenance APIs (global)
+  async getMaintenanceCleanupConfig(): Promise<MaintenanceCleanupConfig> {
+    const result = await httpClient.get<MaintenanceCleanupConfig>(
+      `${API_BASE}/maintenance/cleanup`
+    )
+    if (!result.success) throw new Error('获取清理配置失败')
+    return result.data!
+  },
+
+  async updateMaintenanceCleanupConfig(
+    request: UpdateMaintenanceCleanupRequest
+  ): Promise<MaintenanceCleanupConfig> {
+    const result = await httpClient.put<MaintenanceCleanupConfig>(
+      `${API_BASE}/maintenance/cleanup`,
+      request
+    )
+    if (!result.success) throw new Error('更新清理配置失败')
     return result.data!
   },
 }

@@ -9,6 +9,7 @@ import (
 	"nofx/experience"
 	"nofx/logger"
 	"nofx/manager"
+	"nofx/maintenance"
 	"nofx/mcp"
 	"nofx/store"
 	"os"
@@ -136,6 +137,13 @@ func main() {
 		}
 	}()
 
+	// Start maintenance tasks (SQLite only)
+	var maintenanceStop chan struct{}
+	if st.DBType() == store.DBTypeSQLite {
+		maintenanceStop = make(chan struct{})
+		maintenance.StartAutoCleanup(maintenanceStop, st)
+	}
+
 	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -145,6 +153,10 @@ func main() {
 
 	<-quit
 	logger.Info("📴 Shutdown signal received, closing system...")
+
+	if maintenanceStop != nil {
+		close(maintenanceStop)
+	}
 
 	// Stop all traders
 	traderManager.StopAll()

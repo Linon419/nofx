@@ -261,6 +261,16 @@ export interface UpdateTelegramConfigRequest {
   notify_on_error: boolean
 }
 
+export interface MaintenanceCleanupConfig {
+  enabled: boolean
+  days: number
+  supported: boolean
+}
+
+export interface UpdateMaintenanceCleanupRequest {
+  enabled: boolean
+}
+
 export interface UpdateExchangeConfigRequest {
   exchanges: {
     [key: string]: {

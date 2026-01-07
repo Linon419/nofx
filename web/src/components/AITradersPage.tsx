@@ -19,6 +19,7 @@ import { TraderConfigModal } from './TraderConfigModal'
 import { DeepVoidBackground } from './DeepVoidBackground'
 import { ExchangeConfigModal } from './traders/ExchangeConfigModal'
 import { TelegramConfigModal } from './traders/TelegramConfigModal'
+import { MaintenanceCleanupModal } from './traders/MaintenanceCleanupModal'
 import { PunkAvatar, getTraderAvatar } from './PunkAvatar'
 import {
   Bot,
@@ -35,6 +36,7 @@ import {
   Copy,
   Check,
   Send,
+  HardDrive,
 } from 'lucide-react'
 import { confirmToast } from '../lib/notify'
 import { toast } from 'sonner'
@@ -153,6 +155,7 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
   const [showModelModal, setShowModelModal] = useState(false)
   const [showExchangeModal, setShowExchangeModal] = useState(false)
   const [showTelegramModal, setShowTelegramModal] = useState(false)
+  const [showMaintenanceModal, setShowMaintenanceModal] = useState(false)
   const [editingModel, setEditingModel] = useState<string | null>(null)
   const [editingExchange, setEditingExchange] = useState<string | null>(null)
   const [editingTrader, setEditingTrader] = useState<any>(null)
@@ -869,16 +872,26 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
               className="px-4 py-2 rounded text-xs font-mono uppercase tracking-wider transition-all border border-zinc-700 bg-black/20 text-zinc-400 hover:text-white hover:border-zinc-500 whitespace-nowrap backdrop-blur-sm"
             >
               <div className="flex items-center gap-2">
-                <Send className="w-3 h-3" />
-                <span>TELEGRAM</span>
+                 <Send className="w-3 h-3" />
+                 <span>TELEGRAM</span>
+               </div>
+             </button>
+
+            <button
+              onClick={() => setShowMaintenanceModal(true)}
+              className="px-4 py-2 rounded text-xs font-mono uppercase tracking-wider transition-all border border-zinc-700 bg-black/20 text-zinc-400 hover:text-white hover:border-zinc-500 whitespace-nowrap backdrop-blur-sm"
+            >
+              <div className="flex items-center gap-2">
+                <HardDrive className="w-3 h-3" />
+                <span>CLEANUP</span>
               </div>
             </button>
 
-            <button
-              onClick={() => setShowCreateModal(true)}
-              disabled={configuredModels.length === 0 || configuredExchanges.length === 0}
-              className="group relative px-6 py-2 rounded text-xs font-bold font-mono uppercase tracking-wider transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap overflow-hidden bg-nofx-gold text-black hover:bg-yellow-400 shadow-[0_0_20px_rgba(240,185,11,0.2)] hover:shadow-[0_0_30px_rgba(240,185,11,0.4)]"
-            >
+             <button
+               onClick={() => setShowCreateModal(true)}
+               disabled={configuredModels.length === 0 || configuredExchanges.length === 0}
+               className="group relative px-6 py-2 rounded text-xs font-bold font-mono uppercase tracking-wider transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap overflow-hidden bg-nofx-gold text-black hover:bg-yellow-400 shadow-[0_0_20px_rgba(240,185,11,0.2)] hover:shadow-[0_0_30px_rgba(240,185,11,0.4)]"
+             >
               <span className="relative z-10 flex items-center gap-2">
                 <Plus className="w-4 h-4" />
                 {t('createTrader', language)}
@@ -1410,6 +1423,14 @@ export function AITradersPage({ onTraderSelect }: AITradersPageProps) {
           <TelegramConfigModal
             isOpen={showTelegramModal}
             onClose={() => setShowTelegramModal(false)}
+            language={language}
+          />
+        )}
+
+        {showMaintenanceModal && (
+          <MaintenanceCleanupModal
+            isOpen={showMaintenanceModal}
+            onClose={() => setShowMaintenanceModal(false)}
             language={language}
           />
         )}

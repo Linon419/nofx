@@ -169,6 +169,9 @@ func (s *Store) initTables() error {
 
 // initDefaultData initializes default data
 func (s *Store) initDefaultData() error {
+
+	s.ensureMaintenanceDefaults()
+
 	if err := s.AIModel().initDefaultData(); err != nil {
 		return err
 	}
@@ -185,6 +188,20 @@ func (s *Store) initDefaultData() error {
 		logger.Infof("✅ Migrated %d equity records to new table", migrated)
 	}
 	return nil
+}
+
+func (s *Store) ensureMaintenanceDefaults() {
+	if v, err := s.GetSystemConfig(SystemConfigAutoCleanupEnabled); err != nil {
+		logger.Warnf("failed to read %s: %v", SystemConfigAutoCleanupEnabled, err)
+	} else if v == "" {
+		_ = s.SetSystemConfig(SystemConfigAutoCleanupEnabled, "true")
+	}
+
+	if v, err := s.GetSystemConfig(SystemConfigAutoCleanupDays); err != nil {
+		logger.Warnf("failed to read %s: %v", SystemConfigAutoCleanupDays, err)
+	} else if v == "" {
+		_ = s.SetSystemConfig(SystemConfigAutoCleanupDays, "3")
+	}
 }
 
 // User gets user storage

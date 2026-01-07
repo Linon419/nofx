@@ -155,6 +155,10 @@ func (s *Server) setupRoutes() {
 			// Server IP query (requires authentication, for whitelist configuration)
 			protected.GET("/server-ip", s.handleGetServerIP)
 
+			// Maintenance (requires authentication)
+			protected.GET("/maintenance/cleanup", s.handleGetMaintenanceCleanup)
+			protected.PUT("/maintenance/cleanup", s.handleUpdateMaintenanceCleanup)
+
 			// AI trader management
 			protected.GET("/my-traders", s.handleTraderList)
 			protected.GET("/traders/:id/config", s.handleGetTraderConfig)
