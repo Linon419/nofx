@@ -58,6 +58,15 @@ export function RiskControlEditor({
       enforceMinPositionSizeDesc: { zh: '关闭后允许更小的单（可能被交易所拒单）', en: 'If disabled, system may place tiny orders (exchange may reject)' },
       minConfidence: { zh: '最低信心', en: 'Min Confidence' },
       minConfidenceDesc: { zh: 'AI 开仓的信心阈值', en: 'AI confidence threshold for entry' },
+      stopLossFlip: { zh: '止损反手（反向开仓）', en: 'Stop-loss Flip (Reverse Entry)' },
+      stopLossFlipDesc: { zh: '止损触发后自动反向开仓（适用于单向/净持仓逻辑）', en: 'Auto reverse entry after stop-loss triggers (one-way/net logic)' },
+      stopLossFlipEnabled: { zh: '启用止损反手', en: 'Enable stop-loss flip' },
+      stopLossFlipRunnerRatio: { zh: 'Runner 比例', en: 'Runner Ratio' },
+      stopLossFlipRunnerRatioDesc: { zh: '反向单部分止盈后保留的持仓比例（0~1）', en: 'Portion kept as runner after partial recovery TP (0~1)' },
+      stopLossFlipTrailPct: { zh: '跟踪止损 (%)', en: 'Trail Stop (%)' },
+      stopLossFlipTrailPctDesc: { zh: '输入百分比，例如 0.3 表示 0.3%（保存为 0.003）', en: 'Enter percent, e.g. 0.3 means 0.3% (stored as 0.003)' },
+      stopLossFlipPollSecs: { zh: '轮询间隔 (秒)', en: 'Poll Interval (sec)' },
+      stopLossFlipPollSecsDesc: { zh: '检查止损触发/反手状态的轮询频率', en: 'How often to poll for stop-loss trigger/flip status' },
     }
     return translations[key]?.[language] || key
   }
@@ -75,6 +84,10 @@ export function RiskControlEditor({
   const stopLossSizingEnabled = config.stop_loss_sizing_enabled ?? false
   const stopLossSizingEffective = atrEnabled || stopLossSizingEnabled
   const enforceMinPositionSize = config.enforce_min_position_size ?? true
+  const stopLossFlipEnabled = config.stop_loss_flip_enabled ?? false
+  const stopLossFlipInputDisabled = disabled || !stopLossFlipEnabled
+  const stopLossFlipRunnerRatio = config.stop_loss_flip_runner_ratio ?? 0.3
+  const stopLossFlipTrailPct = config.stop_loss_flip_trail_pct ?? 0.003
 
   return (
     <div className="space-y-6">
@@ -609,6 +622,154 @@ export function RiskControlEditor({
               <span className="w-12 text-center font-mono" style={{ color: '#0ECB81' }}>
                 {config.min_confidence ?? 75}
               </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Stop-loss Flip */}
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <AlertTriangle className="w-5 h-5" style={{ color: '#F0B90B' }} />
+          <div>
+            <h3 className="font-medium" style={{ color: '#EAECEF' }}>
+              {t('stopLossFlip')}
+            </h3>
+            <p className="text-xs" style={{ color: '#848E9C' }}>
+              {t('stopLossFlipDesc')}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div
+            className="p-4 rounded-lg"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <input
+                type="checkbox"
+                checked={stopLossFlipEnabled}
+                onChange={(e) =>
+                  updateField('stop_loss_flip_enabled', e.target.checked)
+                }
+                disabled={disabled}
+                className="accent-yellow-500"
+              />
+              <span className="text-sm font-medium" style={{ color: '#EAECEF' }}>
+                {t('stopLossFlipEnabled')}
+              </span>
+            </div>
+
+            <label className="block text-sm mb-1" style={{ color: '#EAECEF' }}>
+              {t('stopLossFlipRunnerRatio')}
+            </label>
+            <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+              {t('stopLossFlipRunnerRatioDesc')}
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                value={Math.round(stopLossFlipRunnerRatio * 100)}
+                onChange={(e) => {
+                  const raw = parseInt(e.target.value)
+                  const next = Number.isFinite(raw) ? raw / 100 : 0.3
+                  const clamped = Math.max(0, Math.min(1, next))
+                  updateField('stop_loss_flip_runner_ratio', clamped)
+                }}
+                disabled={stopLossFlipInputDisabled}
+                min={0}
+                max={100}
+                step={1}
+                className="flex-1 accent-yellow-500"
+              />
+              <span
+                className="w-12 text-center font-mono"
+                style={{ color: '#F0B90B' }}
+              >
+                {Math.round(stopLossFlipRunnerRatio * 100)}%
+              </span>
+            </div>
+          </div>
+
+          <div
+            className="p-4 rounded-lg"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+          >
+            <label className="block text-sm mb-1" style={{ color: '#EAECEF' }}>
+              {t('stopLossFlipTrailPct')}
+            </label>
+            <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+              {t('stopLossFlipTrailPctDesc')}
+            </p>
+            <div className="flex items-center">
+              <input
+                type="number"
+                value={Number((stopLossFlipTrailPct * 100).toFixed(3))}
+                onChange={(e) => {
+                  const raw = e.target.value.trim()
+                  if (raw === '') {
+                    updateField('stop_loss_flip_trail_pct', 0.003)
+                    return
+                  }
+                  const nextPct = Number(raw)
+                  const pct = Number.isFinite(nextPct) ? nextPct : 0.3
+                  const clampedPct = Math.max(0, Math.min(100, pct))
+                  updateField('stop_loss_flip_trail_pct', clampedPct / 100)
+                }}
+                disabled={stopLossFlipInputDisabled}
+                min={0}
+                max={100}
+                step={0.1}
+                className="w-28 px-3 py-2 rounded"
+                style={{
+                  background: '#1E2329',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
+              <span className="ml-2" style={{ color: '#848E9C' }}>
+                %
+              </span>
+            </div>
+
+            <div className="mt-4">
+              <label className="block text-sm mb-1" style={{ color: '#EAECEF' }}>
+                {t('stopLossFlipPollSecs')}
+              </label>
+              <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+                {t('stopLossFlipPollSecsDesc')}
+              </p>
+              <div className="flex items-center">
+                <input
+                  type="number"
+                  value={config.stop_loss_flip_poll_secs ?? 10}
+                  onChange={(e) => {
+                    const raw = e.target.value.trim()
+                    if (raw === '') {
+                      updateField('stop_loss_flip_poll_secs', 10)
+                      return
+                    }
+                    const next = parseInt(raw)
+                    const n = Number.isFinite(next) ? next : 10
+                    const clamped = Math.max(1, Math.min(3600, n))
+                    updateField('stop_loss_flip_poll_secs', clamped)
+                  }}
+                  disabled={stopLossFlipInputDisabled}
+                  min={1}
+                  max={3600}
+                  step={1}
+                  className="w-28 px-3 py-2 rounded"
+                  style={{
+                    background: '#1E2329',
+                    border: '1px solid #2B3139',
+                    color: '#EAECEF',
+                  }}
+                />
+                <span className="ml-2" style={{ color: '#848E9C' }}>
+                  s
+                </span>
+              </div>
             </div>
           </div>
         </div>
