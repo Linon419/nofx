@@ -491,7 +491,7 @@ func RenderTimeframeChartPNG(symbol, timeframe string, tf *market.TimeframeSerie
 		}
 	}
 	if cvdPanel.Dx() > 0 && cvdPanel.Dy() > 0 && hasCVD {
-		drawCVDPanelBrale(img, cvdPanel, indexToX, cvdSeries, grid, text, muted, timeframe)
+		drawCVDPanelBrale(img, cvdPanel, indexToX, bodyW, cvdSeries, grid, text, muted, timeframe)
 	}
 	if macdPanel.Dx() > 0 && macdPanel.Dy() > 0 && hasMACD {
 		drawMACDPanelBrale(img, macdPanel, indexToX, macdLine, macdSignal, macdHist, grid, text, muted, timeframe)
@@ -831,23 +831,33 @@ func drawVolumePanel(img *image.RGBA, r image.Rectangle, indexToX func(int) int,
 	}
 }
 
-func drawCVDPanelBrale(img *image.RGBA, r image.Rectangle, indexToX func(int) int, cvd []float64, grid, text, muted color.RGBA, timeframe string) {
+func drawCVDPanelBrale(img *image.RGBA, r image.Rectangle, indexToX func(int) int, bodyW int, cvd []float64, grid, text, muted color.RGBA, timeframe string) {
 	drawLine(img, r.Min.X, r.Min.Y, r.Max.X, r.Min.Y, grid)
 	drawLine(img, r.Min.X, r.Max.Y, r.Max.X, r.Max.Y, grid)
-	drawText(img, r.Min.X+6, r.Min.Y+14, "CVD "+timeframe, text)
+	drawText(img, r.Min.X+6, r.Min.Y+14, "ΔCVD "+timeframe, text)
 
-	cvdC := color.RGBA{R: 34, G: 211, B: 238, A: 255}
+	upC := color.RGBA{R: 14, G: 203, B: 129, A: 255}
+	downC := color.RGBA{R: 246, G: 70, B: 93, A: 255}
 
 	// Legend centered-ish
 	legendY := r.Min.Y + 14
 	legendX := r.Min.X + 520
-	drawRect(img, legendX, legendY-9, legendX+10, legendY+1, cvdC)
-	drawText(img, legendX+14, legendY, "CVD (quote)", muted)
+	drawRect(img, legendX, legendY-9, legendX+10, legendY+1, upC)
+	drawRect(img, legendX+14, legendY-9, legendX+24, legendY+1, downC)
+	drawText(img, legendX+28, legendY, "ΔCVD (quote)", muted)
+
+	if len(cvd) < 2 {
+		return
+	}
+	delta := make([]float64, len(cvd))
+	for i := 1; i < len(cvd); i++ {
+		delta[i] = cvd[i] - cvd[i-1]
+	}
 
 	minV := 0.0
 	maxV := 0.0
 	ok := false
-	for _, v := range cvd {
+	for _, v := range delta {
 		if math.IsNaN(v) || math.IsInf(v, 0) {
 			continue
 		}
@@ -869,14 +879,17 @@ func drawCVDPanelBrale(img *image.RGBA, r image.Rectangle, indexToX func(int) in
 	if minV == maxV {
 		maxV = minV + 1
 	}
-	minV = math.Min(minV, 0)
-	maxV = math.Max(maxV, 0)
-	pad := (maxV - minV) * 0.12
+
+	maxAbs := math.Max(math.Abs(minV), math.Abs(maxV))
+	if maxAbs <= 0 {
+		maxAbs = 1
+	}
+	pad := maxAbs * 0.12
 	if pad <= 0 {
 		pad = 1
 	}
-	minV -= pad
-	maxV += pad
+	minV = -(maxAbs + pad)
+	maxV = maxAbs + pad
 
 	toY := func(v float64) int {
 		y := float64(r.Min.Y) + (maxV-v)/(maxV-minV)*float64(r.Dy())
@@ -894,10 +907,39 @@ func drawCVDPanelBrale(img *image.RGBA, r image.Rectangle, indexToX func(int) in
 	// Zero line
 	drawLine(img, r.Min.X, toY(0), r.Max.X, toY(0), color.RGBA{R: 148, G: 163, B: 184, A: 120})
 
-	if len(cvd) < 2 {
-		return
+	if bodyW <= 0 {
+		bodyW = 2
 	}
-	drawSeriesDots(img, indexToX, toY, cvd, cvdC, 2)
+	if bodyW > 12 {
+		bodyW = 12
+	}
+
+	zeroY := toY(0)
+	for i := 0; i < len(delta); i++ {
+		v := delta[i]
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			continue
+		}
+		x := indexToX(i)
+		y := toY(v)
+		y0 := zeroY
+		y1 := y
+		if y1 < y0 {
+			y0, y1 = y1, y0
+		}
+		if y1-y0 < 1 {
+			y1 = y0 + 1
+		}
+
+		c := downC
+		if v >= 0 {
+			c = upC
+		}
+
+		// Wick (center line) + body (rect), candle-style around the zero baseline.
+		drawLine(img, x, y0, x, y1, c)
+		drawRect(img, x-bodyW/2, y0, x+bodyW/2, y1, c)
+	}
 }
 
 type squeezeSeriesData struct {

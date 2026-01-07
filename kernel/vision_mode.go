@@ -256,6 +256,7 @@ func (e *StrategyEngine) buildVisionSystemPrompt() string {
 - K 线蜡烛
 - EMA21/55/100/200（如开启）
 - Volume / MACD / WT+MFI 等面板（如开启）
+- CVD 面板（如开启：以“ΔCVD 蜡烛”显示每根 K 线的净主动买卖成交额差，单位为 quote，例如 USDT）
 - 主图背离标记（如开启）
 
 规则：
@@ -274,6 +275,7 @@ You are a strict chart-reading assistant. You will see one or more charts (commo
 - Candles
 - EMA overlays (if enabled)
 - Volume panel
+- CVD panel (if enabled; shown as ΔCVD candles per bar: net taker buy/sell quote delta, in quote currency)
 - MACD panel (hist + DIF/DEA) (if enabled)
 - WT+MFI panel (if enabled)
 - Divergence dots on the main chart (if enabled)
@@ -494,6 +496,8 @@ func (e *StrategyEngine) callVisionForSymbol(ctx *Context, mcpClient mcp.AIClien
 					Low:    k.Low,
 					Close:  k.Close,
 					Volume: k.Volume,
+					QuoteVolume:         k.QuoteVolume,
+					TakerBuyQuoteVolume: k.TakerBuyQuoteVolume,
 				})
 			}
 			tfData = &market.TimeframeSeriesData{
