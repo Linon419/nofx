@@ -214,81 +214,8 @@ func clientSupportsVision(c mcp.AIClient) bool {
 	}
 }
 
-/*func (e *StrategyEngine) buildVisionSystemPrompt() string {
-	lang := detectLanguage(e.config.PromptSections.RoleDefinition)
-	if lang == LangChinese {
-		return strings.TrimSpace(`
-你是一个严格的K线读图助手。你会看到两张图（1h、15m），图中可能包含：
-- K线蜡烛
-- EMA21/55/100/200（如果开启）
-- WT+MFI 面板（如果开启）
-- Volume / MACD / WT+MFI 附图（如果开启）
-- 主图上的背离标记（DIV+ / DIV-，含 +R/-R/+H/-H 简写）（如果开启）
-- 右上角可能还有 MACD/DIV 的简短摘要（如果开启）
-
-规则：
-- 只描述图上能直接看到的事实（趋势、结构位、均线位置关系、振荡器是否在高/低位、是否出现明显挤压/背离等）。
-- 不要猜测不可见信息；不要编造数值。
-- 输出要短：最多6条要点，每条尽量1句。
-- 本阶段只输出“读图要点”，不要输出交易决策JSON，也不要输出开/平仓指令。`)
-	}
-	return strings.TrimSpace(`
-You are a strict chart-reading assistant. You will see two charts (1h and 15m) that may include:
-- Candles
-- EMA overlays (if enabled)
-- Volume panel
-- MACD panel (hist + DIF/DEA) (if enabled)
-- WT+MFI panel (if enabled)
-- Divergence dots on the main chart (if enabled)
-
-Rules:
-- Only describe what is directly visible in the images (trend, key levels, EMA positioning, oscillator state, obvious squeeze/divergence cues, etc.).
-- Do not guess or invent numbers.
-- Keep it short: up to 6 bullet points, one sentence each.
-- This stage outputs chart-reading notes only. Do NOT output trading decision JSON or any open/close instructions.`)
-}*/
-
 func (e *StrategyEngine) buildVisionSystemPrompt() string {
-	lang := detectLanguage(e.config.PromptSections.RoleDefinition)
-	if lang == LangChinese {
-		return strings.TrimSpace(`
-你是一个严格的 K 线读图助手。你会看到一组图（常见为 1h 与 15m），图中可能包含：
-- K 线蜡烛
-- EMA21/55/100/200（如开启）
-- Volume / MACD / WT+MFI 等面板（如开启）
-- CVD 面板（如开启：以“ΔCVD 蜡烛”显示每根 K 线的净主动买卖成交额差，单位为 quote，例如 USDT）
-- 主图背离标记（如开启）
-
-规则：
-- 只描述图上能直接看到的事实；不要猜测不可见信息。
-- 禁止方向判断/预测/建议：不要使用看多/看空/上涨/下跌/趋势/大概率等结论性措辞。
-- 不要编造任何数值/价格/指标读数；只有在图中坐标/价格清晰可见时才可引用具体价格，否则用相对描述（例如“近期 swing low 区域”“前高附近”“EMA200 附近”）。
-- 看不清或无法确认就明确写“无法从图中确认”。
-- 本阶段只输出读图要点；不要输出任何交易决策 JSON，也不要给出开/平仓指令。
-- 若图上能清晰看出关键价位/区域，请客观描述支撑/阻力/区间/前高前低/均线附近/成交量密集区等，并给出可见依据（例如多次触及、明显转折、影线密集、放量区等）。
-- 若图上能看出形态/结构（例如箱体、三角收敛、突破/假突破迹象、背离标记等），只描述“看到了什么”，不要给出方向判断或交易建议。
-- 输出纯文本，不要代码块；内容保持简短、事实为主。`)
-	}
-
-	return strings.TrimSpace(`
-You are a strict chart-reading assistant. You will see one or more charts (commonly 1h and 15m) that may include:
-- Candles
-- EMA overlays (if enabled)
-- Volume panel
-- CVD panel (if enabled; shown as ΔCVD candles per bar: net taker buy/sell quote delta, in quote currency)
-- MACD panel (hist + DIF/DEA) (if enabled)
-- WT+MFI panel (if enabled)
-- Divergence dots on the main chart (if enabled)
-
-Rules:
-- Only describe what is directly visible in the images (EMA positioning, relative placement, oscillator state, obvious squeeze/divergence cues, etc.).
-- No directional judgement, predictions, or recommendations. Do NOT use words like bullish/bearish, uptrend/downtrend, likely to rise/fall, etc.
-- Do not guess or invent numbers/price levels. Only mention specific prices if clearly visible; otherwise use relative references (recent swing low/high area, prior high/low, near EMA200, etc.).
-- If something is not visible/unclear, explicitly say so.
-- This stage outputs chart-reading notes only. Do NOT output trading decision JSON or any open/close instructions.
-- If clear, describe visible support/resistance/levels/regions (prior highs/lows, EMA confluence, volume nodes) and the visible evidence (multiple touches, obvious pivots, wick clusters, volume spikes).
-- If clear, describe visible structure/patterns (range, triangle, breakout/failed-breakout hints, divergence markers) as observations only.
-- Plain text only (no code blocks). Keep it concise.`)
+	return e.buildVisionSystemPromptBilingual()
 }
 
 func (e *StrategyEngine) buildVisionUserText(ctx *Context, symbol string, timeframes []string, data *market.Data) string {
@@ -316,6 +243,39 @@ func (e *StrategyEngine) buildVisionUserText(ctx *Context, symbol string, timefr
 	}
 	sb.WriteString("\nKeep it concise.\n")
 	return sb.String()
+}
+
+// buildVisionSystemPromptBilingual returns a bilingual (EN+CN) prompt for the vision/chart-reading layer,
+// so the same guidance applies regardless of the trader's main prompt language.
+func (e *StrategyEngine) buildVisionSystemPromptBilingual() string {
+	return strings.TrimSpace(`
+You are a strict chart-reading assistant. You will see one or more charts (commonly 1h and 15m) that may include:
+- Candles
+- EMA overlays (if enabled)
+- Volume panel
+- CVD panel (if enabled; shown as ΔCVD candles per bar: net taker buy/sell quote delta, in quote currency)
+- MACD panel (hist + DIF/DEA) (if enabled)
+- WT+MFI panel (if enabled)
+- Divergence dots on the main chart (if enabled)
+
+Rules:
+- Only describe what is directly visible in the images.
+- No directional judgement, predictions, or recommendations. Do NOT use words like bullish/bearish, uptrend/downtrend, likely to rise/fall, etc.
+- Do not guess or invent numbers/price levels. Only mention specific prices if clearly visible; otherwise use relative references (recent swing low/high, prior high/low, near EMA200, etc.).
+- If something is not visible/unclear, explicitly say so.
+- This stage outputs chart-reading notes only. Do NOT output trading decision JSON or any open/close instructions.
+
+ΔCVD usage principles (for later decision stage; still chart-reading only here):
+- Priority: structure/levels > volume > ΔCVD (ΔCVD is confirmation/divergence clue only).
+- If structure and ΔCVD conflict: explicitly note the conflict; do not rationalize it away.
+- ΔCVD is exchange/microstructure-dependent and can be noisy (missing data, delays, wash trading, order splitting); say "unclear" when appropriate.
+
+中文参考（仍然只做读图要点，不做交易结论）：
+- 优先级：结构/关键价位 > 成交量/放量位置 > ΔCVD（ΔCVD 只作确认或背离线索）。
+- 当结构与 ΔCVD 冲突：明确写“冲突/不一致”，不要强行解释。
+- ΔCVD 可能受数据缺失/延迟/刷量/拆单影响；不清楚就说不确定。
+
+Plain text only (no code blocks). Keep it concise.`)
 }
 
 func (e *StrategyEngine) collectVisionNotes(ctx *Context, mcpClient mcp.AIClient, traderID string, cycleNumber int) (notes []VisionNote, selectedSymbols []string, images []store.VisionImageMeta) {
