@@ -38,9 +38,6 @@ type RenderConfig struct {
 	// PlotBars is the number of bars plotted in the visible window (from the end).
 	// Defaults to 100 to match BRALE analysis_slice.
 	PlotBars int
-	// DropTailBars drops the latest N bars before plotting (after MaxBars truncation).
-	// Defaults to 0 because unclosed bars are already removed upstream.
-	DropTailBars int
 	// Indicators controls which overlays/panels to render.
 	Indicators IndicatorRenderConfig
 }
@@ -51,10 +48,6 @@ func DefaultRenderConfig() RenderConfig {
 		Height:   1396,
 		MaxBars:  300,
 		PlotBars: 100,
-		// DropTailBars controls whether to drop the most recent bars before plotting.
-		// For live chart-reading, we already drop unclosed bars upstream, so default to 0
-		// to keep the latest closed bar visible.
-		DropTailBars: 0,
 		Indicators: IndicatorRenderConfig{
 			ShowEMA:        true,
 			ShowMACD:       true,
@@ -91,12 +84,6 @@ func RenderTimeframeChartPNG(symbol, timeframe string, tf *market.TimeframeSerie
 	if cfg.PlotBars <= 0 {
 		cfg.PlotBars = def.PlotBars
 	}
-	if cfg.DropTailBars == 0 {
-		cfg.DropTailBars = def.DropTailBars
-	}
-	if cfg.DropTailBars < 0 {
-		cfg.DropTailBars = 0
-	}
 
 	history := tf.Klines
 	if len(history) > cfg.MaxBars {
@@ -104,9 +91,6 @@ func RenderTimeframeChartPNG(symbol, timeframe string, tf *market.TimeframeSerie
 	}
 
 	end := len(history)
-	if cfg.DropTailBars > 0 && end > cfg.DropTailBars+1 {
-		end -= cfg.DropTailBars
-	}
 	if end < 2 {
 		return nil, fmt.Errorf("not enough bars for %s %s (n=%d)", symbol, timeframe, end)
 	}
@@ -349,6 +333,20 @@ func RenderTimeframeChartPNG(symbol, timeframe string, tf *market.TimeframeSerie
 	}
 
 	drawBraleLegendRow(img, left+360, 20, cfg.Width-right, timeframe, cfg.Indicators, muted)
+
+	// Explicitly mark whether the latest (right-most) bar is closed or still forming.
+	lastBar := klinesPlot[len(klinesPlot)-1]
+	status := "CLOSED"
+	if !lastBar.IsClosed {
+		status = "OPEN"
+	}
+	if dur, err := market.TFDuration(timeframe); err == nil && dur > 0 && lastBar.Time > 0 {
+		closeMs := lastBar.Time + dur.Milliseconds()
+		label := fmt.Sprintf("LAST BAR: %s (ends %s UTC)", status, time.UnixMilli(closeMs).UTC().Format(time.RFC3339))
+		drawText(img, left, 56, label, muted)
+	} else {
+		drawText(img, left, 56, fmt.Sprintf("LAST BAR: %s", status), muted)
+	}
 
 	// Price panel bounds
 	minP, maxP := priceBounds(klinesPlot)

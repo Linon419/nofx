@@ -224,7 +224,6 @@ func Get(symbol string) (*Data, error) {
 		// For xyz dex assets, GetKlines may map 3m -> 5m.
 		shortTF = "5m"
 	}
-	klines3m = DropUnclosedKlines(klines3m, shortTF)
 
 	// Data staleness detection: Prevent DOGEUSDT-style price freeze issues
 	if isStaleData(klines3m, symbol) {
@@ -240,7 +239,6 @@ func Get(symbol string) (*Data, error) {
 		}
 		return nil, fmt.Errorf("Failed to get 4-hour K-line from Binance/CoinAnk: %v", err)
 	}
-	klines4h = DropUnclosedKlines(klines4h, "4h")
 
 	// Check if data is empty
 	if len(klines3m) == 0 {
@@ -462,6 +460,7 @@ func calculateTimeframeSeries(klines []Kline, timeframe string, count int) *Time
 			Low:                 klines[i].Low,
 			Close:               klines[i].Close,
 			Volume:              klines[i].Volume,
+			IsClosed:            klines[i].IsClosed,
 			QuoteVolume:         klines[i].QuoteVolume,
 			TakerBuyQuoteVolume: klines[i].TakerBuyQuoteVolume,
 		})

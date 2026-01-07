@@ -2734,14 +2734,21 @@ func (s *Server) handleKlines(c *gin.Context) {
 			return
 		}
 	default:
-		// Crypto exchanges via CoinAnk
+		// Crypto exchanges
 		symbol = market.Normalize(symbol)
-		klines, err = s.getKlinesFromCoinank(symbol, interval, exchange, limit)
+		if exchangeLower == "binance" {
+			klines, err = market.GetKlines(symbol, interval, limit)
+		} else {
+			klines, err = s.getKlinesFromCoinank(symbol, interval, exchange, limit)
+		}
 		if err != nil {
 			SafeInternalError(c, "Get klines from CoinAnk", err)
 			return
 		}
 	}
+
+	// Mark each candle as closed/open explicitly (no implicit dropping).
+	klines = market.MarkKlinesClosed(klines, interval)
 
 	c.JSON(http.StatusOK, klines)
 }

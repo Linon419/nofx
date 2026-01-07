@@ -30,6 +30,8 @@ type KlineBar struct {
 	Low    float64 `json:"low"`    // Low price
 	Close  float64 `json:"close"`  // Close price
 	Volume float64 `json:"volume"` // Volume
+	// IsClosed indicates whether this bar is fully closed/final (not currently forming).
+	IsClosed bool `json:"isClosed,omitempty"`
 	// QuoteVolume is the trade volume in quote currency for this bar (e.g., USDT).
 	QuoteVolume float64 `json:"quote_volume,omitempty"`
 	// TakerBuyQuoteVolume is the taker buy volume in quote currency for this bar (e.g., USDT).
@@ -117,6 +119,8 @@ type Kline struct {
 	Trades              int     `json:"trades"`
 	TakerBuyBaseVolume  float64 `json:"takerBuyBaseVolume"`
 	TakerBuyQuoteVolume float64 `json:"takerBuyQuoteVolume"`
+	// IsClosed indicates whether this candle is fully closed/final (not currently forming).
+	IsClosed bool `json:"isClosed,omitempty"`
 }
 
 type KlineResponse []interface{}

@@ -35,5 +35,5 @@ func GetKlines(symbol, interval string, limit int) ([]Kline, error) {
 	if err != nil {
 		return nil, err
 	}
-	return DropUnclosedKlines(klines, tf), nil
+	return MarkKlinesClosed(klines, tf), nil
 }

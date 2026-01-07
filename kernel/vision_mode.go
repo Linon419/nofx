@@ -334,11 +334,10 @@ func (e *StrategyEngine) collectVisionNotes(ctx *Context, mcpClient mcp.AIClient
 
 	system := e.buildVisionSystemPrompt()
 	renderCfg := vision.RenderConfig{
-		Width:        vcfg.ImageWidth,
-		Height:       vcfg.ImageHeight,
-		MaxBars:      300,
-		PlotBars:     100,
-		DropTailBars: 1,
+		Width:    vcfg.ImageWidth,
+		Height:   vcfg.ImageHeight,
+		MaxBars:  300,
+		PlotBars: 100,
 		Indicators: vision.IndicatorRenderConfig{
 			ShowEMA:        boolOrDefault(vcfg.Indicators.ShowEMA, true),
 			ShowMACD:       boolOrDefault(vcfg.Indicators.ShowMACD, true),
@@ -490,12 +489,13 @@ func (e *StrategyEngine) callVisionForSymbol(ctx *Context, mcpClient mcp.AIClien
 			bars := make([]market.KlineBar, 0, len(fetched))
 			for _, k := range fetched {
 				bars = append(bars, market.KlineBar{
-					Time:   k.OpenTime,
-					Open:   k.Open,
-					High:   k.High,
-					Low:    k.Low,
-					Close:  k.Close,
-					Volume: k.Volume,
+					Time:                k.OpenTime,
+					Open:                k.Open,
+					High:                k.High,
+					Low:                 k.Low,
+					Close:               k.Close,
+					Volume:              k.Volume,
+					IsClosed:            k.IsClosed,
 					QuoteVolume:         k.QuoteVolume,
 					TakerBuyQuoteVolume: k.TakerBuyQuoteVolume,
 				})
