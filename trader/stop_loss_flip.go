@@ -80,6 +80,14 @@ func calcRecoveryTarget(entryPrice, stopLossPrice float64) float64 {
 	return 2*stopLossPrice - entryPrice
 }
 
+func isNearStopLoss(exitPrice, stopLossPrice float64, tolerancePct float64) bool {
+	if stopLossPrice <= 0 || exitPrice <= 0 {
+		return false
+	}
+	diff := math.Abs(exitPrice-stopLossPrice) / stopLossPrice
+	return diff <= tolerancePct
+}
+
 func (at *AutoTrader) armStopLossFlip(symbol, side string, entryPrice, stopLossPrice, quantity float64, leverage int) {
 	cfg := at.getStopLossFlipConfig()
 	if !cfg.enabled || at.store == nil {
@@ -182,9 +190,6 @@ func (at *AutoTrader) handleClosedPnLRecord(rec *ClosedPnLRecord) {
 	if rec == nil || at.store == nil {
 		return
 	}
-	if strings.ToLower(strings.TrimSpace(rec.CloseType)) != "stop_loss" {
-		return
-	}
 
 	symbol := market.Normalize(rec.Symbol)
 	side := normalizeClosedSide(rec.Side)
@@ -197,9 +202,22 @@ func (at *AutoTrader) handleClosedPnLRecord(rec *ClosedPnLRecord) {
 		return
 	}
 
+	// Detect stop-loss by price comparison (tolerance 0.5%)
+	closeType := rec.CloseType
+	if closeType == "unknown" || closeType == "" {
+		if isNearStopLoss(rec.ExitPrice, task.StopLossPrice, 0.005) {
+			closeType = "stop_loss"
+			logger.Infof("[StopLossFlip] detected stop-loss by price: exit=%.4f sl=%.4f", rec.ExitPrice, task.StopLossPrice)
+		} else {
+			return
+		}
+	} else if strings.ToLower(strings.TrimSpace(closeType)) != "stop_loss" {
+		return
+	}
+
 	updates := map[string]interface{}{
 		"status":           store.StopLossFlipTriggered,
-		"close_type":       rec.CloseType,
+		"close_type":       closeType,
 		"close_order_id":   rec.OrderID,
 		"close_time_ms":    rec.ExitTime.UTC().UnixMilli(),
 		"close_exit_price": rec.ExitPrice,
