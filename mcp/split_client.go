@@ -55,11 +55,21 @@ func (c *SplitClient) CallWithRequest(req *Request) (string, error) {
 	if c.decisionClient == nil {
 		return "", fmt.Errorf("decision client is nil")
 	}
-	target := c.decisionClient
-	if requestHasImageParts(req) && c.visionClient != nil && isVisionCapableClient(c.visionClient) {
-		target = c.visionClient
+	if requestHasImageParts(req) && c.visionClient != nil {
+		// Always try the configured vision client first when image parts are present.
+		// If it fails (unsupported payload/model, auth, etc.), fall back to the decision client.
+		out, err := c.visionClient.CallWithRequest(req)
+		if err == nil {
+			return out, nil
+		}
+
+		// If the decision client can't handle image parts, fall back to a text-only request.
+		if !isVisionCapableClient(c.decisionClient) {
+			return c.decisionClient.CallWithRequest(stripImageParts(req))
+		}
+		return c.decisionClient.CallWithRequest(req)
 	}
-	return target.CallWithRequest(req)
+	return c.decisionClient.CallWithRequest(req)
 }
 
 func requestHasImageParts(req *Request) bool {
@@ -101,6 +111,39 @@ func isVisionCapableClient(c AIClient) bool {
 	default:
 		return false
 	}
+}
+
+func stripImageParts(req *Request) *Request {
+	if req == nil {
+		return nil
+	}
+
+	out := *req
+	if len(req.Messages) == 0 {
+		return &out
+	}
+
+	msgs := make([]Message, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		if len(m.Parts) == 0 {
+			msgs = append(msgs, m)
+			continue
+		}
+
+		parts := make([]ContentPart, 0, len(m.Parts))
+		for _, p := range m.Parts {
+			if p.Type == "text" && p.Text != "" {
+				parts = append(parts, p)
+			}
+		}
+
+		clone := m
+		clone.Parts = parts
+		msgs = append(msgs, clone)
+	}
+
+	out.Messages = msgs
+	return &out
 }
 
 // Ensure SplitClient satisfies the AIClient interface.

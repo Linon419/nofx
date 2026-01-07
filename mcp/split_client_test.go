@@ -72,8 +72,8 @@ func TestSplitClient_CallWithRequest_WithImages_NonVisionClient_FallsBackToDecis
 	decision.SetAPIKey("sk-decision", "", "")
 
 	visionHTTP := NewMockHTTPClient()
-	visionHTTP.SetSuccessResponse("vision-ok")
-	// DeepSeek client is not treated as vision-capable by SplitClient; should fall back to decision.
+	visionHTTP.SetErrorResponse(400, `{"error":{"message":"model does not support image input"}}`)
+	// Vision client errors should fall back to the decision client.
 	vision := NewDeepSeekClientWithOptions(WithHTTPClient(visionHTTP.ToHTTPClient()))
 	vision.SetAPIKey("sk-vision", "", "")
 
@@ -87,15 +87,18 @@ func TestSplitClient_CallWithRequest_WithImages_NonVisionClient_FallsBackToDecis
 		}).
 		MustBuild()
 
-	_, err := client.CallWithRequest(req)
+	resp, err := client.CallWithRequest(req)
 	if err != nil {
 		t.Fatalf("CallWithRequest error: %v", err)
+	}
+	if resp != "decision-ok" {
+		t.Fatalf("response = %q, want %q", resp, "decision-ok")
 	}
 
 	if got := len(decisionHTTP.GetRequests()); got != 1 {
 		t.Fatalf("decision client requests = %d, want 1", got)
 	}
-	if got := len(visionHTTP.GetRequests()); got != 0 {
-		t.Fatalf("vision client requests = %d, want 0", got)
+	if got := len(visionHTTP.GetRequests()); got != 1 {
+		t.Fatalf("vision client requests = %d, want 1", got)
 	}
 }
