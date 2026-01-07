@@ -935,7 +935,7 @@ func (t *BitgetTrader) ListPositionOrders(symbol string) ([]kernel.OpenOrderInfo
 		}
 	}
 
-	for _, planType := range []string{"loss_plan", "profit_plan", "normal_plan"} {
+	for _, planType := range []string{"loss_plan", "profit_plan", "normal_plan", "track_plan"} {
 		orders, err := t.listPlanOrders(symbol, planType)
 		if err != nil {
 			if isBitgetPlanTypeIllegal(err) {
@@ -1029,6 +1029,7 @@ func (t *BitgetTrader) listPlanOrders(symbol string, planType string) ([]bitgetP
 	params := map[string]interface{}{
 		"symbol":      symbol,
 		"productType": "USDT-FUTURES",
+		"marginCoin":  "USDT",
 		"planType":    planType,
 	}
 
@@ -1040,10 +1041,18 @@ func (t *BitgetTrader) listPlanOrders(symbol string, planType string) ([]bitgetP
 	var orders struct {
 		EntrustedList []bitgetPlanOrder `json:"entrustedList"`
 	}
-	if err := json.Unmarshal(data, &orders); err != nil {
-		return nil, err
+	if err := json.Unmarshal(data, &orders); err == nil && len(orders.EntrustedList) > 0 {
+		return orders.EntrustedList, nil
 	}
-	return orders.EntrustedList, nil
+
+	// Some Bitget responses may return a bare array.
+	var arr []bitgetPlanOrder
+	if err := json.Unmarshal(data, &arr); err == nil {
+		return arr, nil
+	}
+
+	// Default: treat as no orders.
+	return nil, nil
 }
 
 func (t *BitgetTrader) findPositionSide(symbol string) string {
