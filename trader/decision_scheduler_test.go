@@ -14,7 +14,8 @@ func TestNewDecisionScheduler_UsesStrategyAlignedSchedule(t *testing.T) {
 	cfg.Indicators.Klines.PrimaryTimeframe = "1h"
 	cfg.Indicators.Klines.SelectedTimeframes = []string{"1h", "5m"}
 	cfg.Indicators.Klines.DecisionIntervalMultiple = 2
-	cfg.Indicators.Klines.DecisionOffsetSeconds = 7
+	off := 7
+	cfg.Indicators.Klines.DecisionOffsetSeconds = &off
 	cfg.Indicators.Klines.DecisionRunImmediately = true
 
 	at := &AutoTrader{
@@ -86,4 +87,3 @@ func TestNewDecisionScheduler_FallsBackToScanInterval(t *testing.T) {
 		t.Fatalf("expected scheduler offset=0 and runImmediately=false, got offset=%s runImmediately=%v", sched.Offset, sched.RunImmediately)
 	}
 }
-

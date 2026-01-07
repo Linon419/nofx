@@ -9,13 +9,13 @@ import (
 )
 
 type decisionSchedule struct {
-	source        string
+	source         string
 	alignTimeframe string
-	alignInterval time.Duration
-	interval      time.Duration
-	offset        time.Duration
+	alignInterval  time.Duration
+	interval       time.Duration
+	offset         time.Duration
 	runImmediately bool
-	name          string
+	name           string
 }
 
 func (at *AutoTrader) newDecisionScheduler(ctx context.Context) (*alignedOnceScheduler, decisionSchedule) {
@@ -41,7 +41,10 @@ func (at *AutoTrader) newDecisionScheduler(ctx context.Context) (*alignedOnceSch
 				if multiple <= 0 {
 					multiple = 1
 				}
-				offsetSeconds := cfg.Indicators.Klines.DecisionOffsetSeconds
+				offsetSeconds := 10
+				if cfg.Indicators.Klines.DecisionOffsetSeconds != nil {
+					offsetSeconds = *cfg.Indicators.Klines.DecisionOffsetSeconds
+				}
 				if offsetSeconds < 0 {
 					offsetSeconds = 0
 				}
@@ -98,4 +101,3 @@ func pickAlignTimeframe(selected []string, primary string) (string, time.Duratio
 	}
 	return norm, dur, true
 }
-

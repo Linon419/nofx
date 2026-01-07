@@ -80,6 +80,9 @@ func isVisionCapableClient(c AIClient) bool {
 	switch v := c.(type) {
 	case *OpenAIClient, *GeminiClient, *ClaudeClient:
 		return true
+	case *QwenClient, *KimiClient, *GrokClient:
+		// These providers use OpenAI-compatible request payloads (image_url parts).
+		return true
 	case *FailoverClient:
 		for _, cli := range v.clients {
 			if isVisionCapableClient(cli) {
@@ -88,7 +91,11 @@ func isVisionCapableClient(c AIClient) bool {
 		}
 		return false
 	case *Client:
-		return v.Provider == ProviderCustom || v.Provider == ProviderOpenAI
+		return v.Provider == ProviderCustom ||
+			v.Provider == ProviderOpenAI ||
+			v.Provider == ProviderQwen ||
+			v.Provider == ProviderKimi ||
+			v.Provider == ProviderGrok
 	case *SplitClient:
 		return isVisionCapableClient(v.visionClient) || isVisionCapableClient(v.decisionClient)
 	default:

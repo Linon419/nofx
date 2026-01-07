@@ -71,6 +71,8 @@ var (
 	boolFalse = false
 )
 
+func intPtr(v int) *int { return &v }
+
 type VisionConfig struct {
 	Enabled bool `json:"enabled"`
 	// MaxSymbols limits how many candidate symbols will be analyzed with charts per cycle.
@@ -205,7 +207,7 @@ type KlineConfig struct {
 	SelectedTimeframes []string `json:"selected_timeframes,omitempty"`
 	// decision schedule: aligned to min timeframe close
 	DecisionIntervalMultiple int  `json:"decision_interval_multiple,omitempty"`
-	DecisionOffsetSeconds    int  `json:"decision_offset_seconds,omitempty"`
+	DecisionOffsetSeconds    *int `json:"decision_offset_seconds,omitempty"`
 	DecisionRunImmediately   bool `json:"decision_run_immediately,omitempty"`
 }
 
@@ -427,7 +429,7 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 				EnableMultiTimeframe:     true,
 				SelectedTimeframes:       []string{"5m", "15m", "1h", "4h"},
 				DecisionIntervalMultiple: 1,
-				DecisionOffsetSeconds:    10,
+				DecisionOffsetSeconds:    intPtr(10),
 				DecisionRunImmediately:   false,
 			},
 			EnableRawKlines:         true, // Required - raw OHLCV data for AI analysis

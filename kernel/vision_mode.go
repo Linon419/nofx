@@ -204,9 +204,18 @@ func clientSupportsVision(c mcp.AIClient) bool {
 		visionOK := v.VisionClient() != nil && clientSupportsVision(v.VisionClient())
 		decisionOK := v.DecisionClient() != nil && clientSupportsVision(v.DecisionClient())
 		return visionOK || decisionOK
+	case *mcp.QwenClient, *mcp.KimiClient, *mcp.GrokClient:
+		// These clients use OpenAI-compatible payloads (including image_url parts).
+		// Whether a given model supports vision depends on the model name, but we allow attempts here
+		// and rely on per-symbol error handling to avoid blocking the main decision cycle.
+		return true
 	case *mcp.Client:
 		// mcp.Client can encode image parts using OpenAI-compatible "image_url" content.
-		return v.Provider == mcp.ProviderCustom || v.Provider == mcp.ProviderOpenAI
+		return v.Provider == mcp.ProviderCustom ||
+			v.Provider == mcp.ProviderOpenAI ||
+			v.Provider == mcp.ProviderQwen ||
+			v.Provider == mcp.ProviderKimi ||
+			v.Provider == mcp.ProviderGrok
 	case *mcp.OpenAIClient, *mcp.GeminiClient, *mcp.ClaudeClient:
 		return true
 	default:
@@ -351,6 +360,9 @@ func (e *StrategyEngine) collectVisionNotes(ctx *Context, mcpClient mcp.AIClient
 
 	collected := make([]result, 0, len(selectedSymbols))
 	for r := range results {
+		if len(r.metas) > 0 {
+			images = append(images, r.metas...)
+		}
 		if r.err != nil {
 			logger.Infof("⚠️  vision note failed for %s: %v", r.sym, r.err)
 			continue
@@ -364,9 +376,6 @@ func (e *StrategyEngine) collectVisionNotes(ctx *Context, mcpClient mcp.AIClient
 
 	for _, r := range collected {
 		notes = append(notes, VisionNote{Symbol: r.sym, Note: r.note})
-		if len(r.metas) > 0 {
-			images = append(images, r.metas...)
-		}
 	}
 
 	if deleted, err := pruneOldVisionCyclesForTrader(traderID, visionKeepCycles()); err != nil {

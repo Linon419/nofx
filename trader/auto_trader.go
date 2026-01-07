@@ -1,6 +1,7 @@
 package trader
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -278,6 +279,13 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		logger.Infof("👁️ [%s] Vision model enabled: %s", config.Name, config.VisionAIModel)
 	}
 
+	// Route multimodal (image) calls to the vision client when configured, while keeping decision calls on the main client.
+	// This enables the chart-vision layer even when the decision model itself is not vision-capable.
+	if visionClient != nil {
+		mcpClient = mcp.NewSplitClient(mcpClient, visionClient)
+		logger.Infof("👁️  [%s] Vision routing enabled (SplitClient)", config.Name)
+	}
+
 	// Set default trading platform
 	if config.Exchange == "" {
 		config.Exchange = "binance"
@@ -500,33 +508,36 @@ func (at *AutoTrader) Run() error {
 		}
 	}
 
-	ticker := time.NewTicker(at.config.ScanInterval)
-	defer ticker.Stop()
+	scanInterval := at.config.ScanInterval
+	if scanInterval <= 0 {
+		scanInterval = 3 * time.Minute
+	}
+	offset := at.scanAlignedDecisionOffset()
+	logger.Infof("⏱️  [%s] Decision trigger aligned to UTC candle close: interval=%s offset=%s", at.name, scanInterval, offset)
 
-	// Execute immediately on first run
+	// Execute immediately on first run (startup catch-up), then align to candle closes.
 	if err := at.runCycle(); err != nil {
 		logger.Infof("❌ Execution failed: %v", err)
 	}
 
-	for {
-		at.isRunningMutex.RLock()
-		running := at.isRunning
-		at.isRunningMutex.RUnlock()
-
-		if !running {
-			break
-		}
-
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
 		select {
-		case <-ticker.C:
-			if err := at.runCycle(); err != nil {
-				logger.Infof("❌ Execution failed: %v", err)
-			}
 		case <-at.stopMonitorCh:
-			logger.Infof("[%s] ⏹ Stop signal received, exiting automatic trading main loop", at.name)
-			return nil
+			cancel()
+		case <-ctx.Done():
 		}
-	}
+	}()
+
+	sched := newAlignedOnceScheduler(ctx, scanInterval, scanInterval, offset)
+	sched.Name = fmt.Sprintf("scan-%s", scanInterval)
+	sched.RunImmediately = false
+	sched.Start(func() {
+		if err := at.runCycle(); err != nil {
+			logger.Infof("❌ Execution failed: %v", err)
+		}
+	})
 
 	return nil
 }
@@ -544,6 +555,19 @@ func (at *AutoTrader) Stop() {
 	close(at.stopMonitorCh) // Notify monitoring goroutine to stop
 	at.monitorWg.Wait()     // Wait for monitoring goroutine to finish
 	logger.Info("⏹ Automatic trading system stopped")
+}
+
+func (at *AutoTrader) scanAlignedDecisionOffset() time.Duration {
+	offsetSeconds := 10
+	if at != nil && at.strategyEngine != nil {
+		if cfg := at.strategyEngine.GetConfig(); cfg != nil && cfg.Indicators.Klines.DecisionOffsetSeconds != nil {
+			offsetSeconds = *cfg.Indicators.Klines.DecisionOffsetSeconds
+		}
+	}
+	if offsetSeconds < 0 {
+		offsetSeconds = 0
+	}
+	return time.Duration(offsetSeconds) * time.Second
 }
 
 // runCycle runs one trading cycle (using AI full decision-making)
