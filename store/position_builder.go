@@ -107,9 +107,52 @@ func (pb *PositionBuilder) handleClose(
 	}
 
 	if position == nil {
-		// No open position found - just skip
-		// This can happen if trades are processed out of order or database was cleared
-		logger.Infof("  ⚠️  No matching open position for %s %s (orderID: %s), skipping", symbol, side, orderID)
+		// No open position found.
+		// This can happen when history is incomplete (e.g., the opening trade is outside the sync window),
+		// or if trades are processed out of order / database was cleared.
+		//
+		// Best-effort: create a CLOSED position record from the close trade so history UI can still show it.
+		if quantity <= 0 || price <= 0 || tradeTimeMs <= 0 {
+			logger.Infof("  ⚠️  No matching open position for %s %s (orderID: %s); invalid close trade (qty=%.8f price=%.8f time=%d), skipping",
+				symbol, side, orderID, quantity, price, tradeTimeMs)
+			return nil
+		}
+
+		entryPrice := price
+		if strings.ToUpper(side) == "LONG" {
+			entryPrice = price - realizedPnL/quantity
+		} else {
+			entryPrice = price + realizedPnL/quantity
+		}
+		if entryPrice <= 0 {
+			entryPrice = price
+		}
+
+		rec := &ClosedPnLRecord{
+			Symbol:      symbol,
+			Side:        strings.ToUpper(side),
+			EntryPrice:  entryPrice,
+			ExitPrice:   price,
+			Quantity:    quantity,
+			RealizedPnL: realizedPnL,
+			Fee:         fee,
+			Leverage:    1,
+			EntryTime:   tradeTimeMs,
+			ExitTime:    tradeTimeMs,
+			OrderID:     orderID,
+			CloseType:   "unknown",
+			ExchangeID:  orderID,
+		}
+
+		created, createErr := pb.positionStore.CreateFromClosedPnL(traderID, exchangeID, exchangeType, rec)
+		if createErr != nil {
+			return fmt.Errorf("failed to create closed position from orphan close: %w", createErr)
+		}
+		if created {
+			logger.Infof("  ✅ Orphan close recorded: %s %s qty=%.6f @ %.2f (entry≈%.2f, PnL=%.2f)", symbol, side, quantity, price, entryPrice, realizedPnL)
+		} else {
+			logger.Infof("  ⚠️  Orphan close ignored (dedup/invalid): %s %s (orderID: %s)", symbol, side, orderID)
+		}
 		return nil
 	}
 
