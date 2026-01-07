@@ -87,10 +87,12 @@ func (at *AutoTrader) applyExitPlanOnOpen(decision *decision.Decision, positionS
 	}
 
 	stopLossPrice := resolveStopLossFromPlan(decision.ExitPlan, decision.StopLoss, decision.Symbol, positionSide, entryPrice)
-	if stopLossPrice > 0 {
+	if validateStopLoss(strings.ToUpper(normalizeSide(positionSide)), entryPrice, stopLossPrice) {
 		if err := at.trader.SetStopLoss(decision.Symbol, positionSide, normalizedQty, stopLossPrice); err != nil {
 			logger.Infof("  Failed to set stop loss (exit plan): %v", err)
 		}
+	} else if stopLossPrice > 0 {
+		logger.Infof("  Invalid stop loss price in exit plan: %.4f (entry: %.4f)", stopLossPrice, entryPrice)
 	}
 
 	snapshotJSON, err := json.Marshal(decision.ExitPlan)
@@ -171,7 +173,14 @@ func (at *AutoTrader) applyTakeProfitTiersOnOpen(symbol string, positionSide str
 			break
 		}
 
-		if err := at.trader.SetTakeProfit(symbol, strings.ToUpper(normalizeSide(positionSide)), tierQty, tier.TargetPrice); err != nil {
+		side := strings.ToUpper(normalizeSide(positionSide))
+		if !validateTakeProfit(side, state.EntryPrice, tier.TargetPrice) {
+			logger.Infof("  Invalid take profit price in exit plan tier: %.4f (entry: %.4f)", tier.TargetPrice, state.EntryPrice)
+			placedAll = false
+			break
+		}
+
+		if err := at.trader.SetTakeProfit(symbol, side, tierQty, tier.TargetPrice); err != nil {
 			logger.Infof("  Failed to set take profit (tier target=%.8f ratio=%.4f): %v", tier.TargetPrice, tier.Ratio, err)
 			placedAll = false
 			break
@@ -451,13 +460,19 @@ func (at *AutoTrader) replaceStopLoss(pos *store.TraderPosition, state *exitPlan
 		return nil
 	}
 
+	side := strings.ToUpper(normalizeSide(pos.Side))
+	if !validateStopLoss(side, state.EntryPrice, state.StopLossPrice) {
+		logger.Infof("  Invalid stop loss price in replaceStopLoss: %.4f (entry: %.4f)", state.StopLossPrice, state.EntryPrice)
+		return nil
+	}
+
 	if err := at.trader.CancelStopLossOrders(pos.Symbol); err != nil {
 		logger.Infof("  Failed to cancel stop loss orders: %v", err)
 	}
 
 	var err error
 	for i := 0; i < 3; i++ {
-		err = at.trader.SetStopLoss(pos.Symbol, strings.ToUpper(normalizeSide(pos.Side)), state.RemainingQuantity, state.StopLossPrice)
+		err = at.trader.SetStopLoss(pos.Symbol, side, state.RemainingQuantity, state.StopLossPrice)
 		if err == nil {
 			return nil
 		}
