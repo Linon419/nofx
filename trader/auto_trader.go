@@ -631,6 +631,11 @@ func (at *AutoTrader) runCycle() error {
 		record.InputPrompt = aiDecision.UserPrompt
 		record.CoTTrace = aiDecision.CoTTrace
 		record.RawResponse = aiDecision.RawResponse // Save raw AI response for debugging
+		// Persist vision chart image metadata so the UI can load thumbnails via the API.
+		record.VisionImages = aiDecision.VisionImages
+		if record.VisionImages == nil {
+			record.VisionImages = []store.VisionImageMeta{}
+		}
 		if len(aiDecision.Decisions) > 0 {
 			decisionJSON, _ := json.MarshalIndent(aiDecision.Decisions, "", "  ")
 			record.DecisionJSON = string(decisionJSON)

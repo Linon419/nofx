@@ -193,7 +193,11 @@ func (s *DecisionStore) LogDecision(record *DecisionRecord) error {
 	candidateCoinsJSON, _ := json.Marshal(record.CandidateCoins)
 	executionLogJSON, _ := json.Marshal(record.ExecutionLog)
 	decisionsJSON, _ := json.Marshal(record.Decisions)
-	visionImagesJSON, _ := json.Marshal(record.VisionImages)
+	visionImages := record.VisionImages
+	if visionImages == nil {
+		visionImages = []VisionImageMeta{}
+	}
+	visionImagesJSON, _ := json.Marshal(visionImages)
 
 	dbRecord := &DecisionRecordDB{
 		TraderID:            record.TraderID,
