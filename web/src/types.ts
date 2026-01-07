@@ -563,6 +563,7 @@ export interface VisionConfig {
   indicators?: {
     show_ema?: boolean;
     show_macd?: boolean;
+    show_cvd?: boolean;
     show_wavetrend?: boolean;
     show_squeeze?: boolean;
     show_divergence?: boolean;
@@ -595,6 +596,14 @@ export interface IndicatorConfig {
   enable_volume: boolean;
   enable_oi: boolean;
   enable_funding_rate: boolean;
+  // Prompt-injected technical analysis (analysis module)
+  enable_technical_analysis?: boolean;
+  enable_pattern?: boolean;
+  enable_wavetrend?: boolean;
+  enable_divergence?: boolean;
+  enable_squeeze?: boolean;
+  enable_trend?: boolean;
+  enable_cvd?: boolean;
   ema_periods?: number[];
   rsi_periods?: number[];
   atr_periods?: number[];

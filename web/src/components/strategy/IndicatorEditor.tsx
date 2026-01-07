@@ -84,6 +84,23 @@ export function IndicatorEditor({
       fundingRate: { zh: '资金费率', en: 'Funding Rate' },
       fundingRateDesc: { zh: '永续合约资金费率', en: 'Perpetual funding rate' },
 
+      // Analysis module (prompt injection)
+      analysisIndicators: { zh: '分析指标（Prompt）', en: 'Analysis Indicators (Prompt)' },
+      analysisIndicatorsDesc: { zh: '注入到决策 Prompt 的技术分析 JSON，可按需关闭以节省 token', en: 'Injected into the decision prompt as Technical Analysis JSON; disable to save tokens' },
+      technicalAnalysisJson: { zh: '技术分析 JSON', en: 'Technical Analysis JSON' },
+      pattern: { zh: '形态', en: 'Pattern' },
+      patternDesc: { zh: '形态识别（双底/双顶/三角等）', en: 'Pattern detection (double bottom/top, triangles, etc.)' },
+      wavetrend: { zh: 'WaveTrend', en: 'WaveTrend' },
+      wavetrendDesc: { zh: 'WaveTrend 指标', en: 'WaveTrend oscillator' },
+      divergence: { zh: '背离', en: 'Divergence' },
+      divergenceDesc: { zh: '多指标背离检测', en: 'Multi-indicator divergence detection' },
+      squeeze: { zh: '挤压预警', en: 'Squeeze' },
+      squeezeDesc: { zh: '波动挤压/扩张预警（BB/KC）', en: 'Volatility squeeze warning (BB/KC)' },
+      trend: { zh: '趋势结构', en: 'Trend' },
+      trendDesc: { zh: '结构点/关键位等趋势信息', en: 'Structure points / key levels' },
+      cvd: { zh: 'CVD', en: 'CVD' },
+      cvdDesc: { zh: '累计成交量差（taker buy/sell 代理）', en: 'Cumulative volume delta (taker buy/sell proxy)' },
+
       // OI Ranking
       oiRanking: { zh: 'OI 排行', en: 'OI Ranking' },
       oiRankingDesc: { zh: '持仓量增减排行', en: 'OI change ranking' },
@@ -127,6 +144,7 @@ export function IndicatorEditor({
   const decisionMultiple = config.klines.decision_interval_multiple ?? 1
   const decisionOffset = config.klines.decision_offset_seconds ?? 10
   const decisionRunImmediately = config.klines.decision_run_immediately ?? false
+  const technicalAnalysisEnabled = config.enable_technical_analysis ?? true
 
   // 切换时间周期选择
   const toggleTimeframe = (tf: string) => {
@@ -791,6 +809,69 @@ export function IndicatorEditor({
                 )}
               </div>
             ))}
+          </div>
+
+          {/* Analysis Module (Prompt Injection) */}
+          <div className="mt-4 pt-3" style={{ borderTop: '1px solid #2B3139' }}>
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="flex-1">
+                <div className="text-xs font-medium" style={{ color: '#EAECEF' }}>
+                  {t('analysisIndicators')}
+                </div>
+                <div className="text-[10px] mt-0.5" style={{ color: '#848E9C' }}>
+                  {t('analysisIndicatorsDesc')}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px]" style={{ color: '#848E9C' }}>{t('technicalAnalysisJson')}</span>
+                <input
+                  type="checkbox"
+                  checked={technicalAnalysisEnabled}
+                  onChange={(e) => !disabled && onChange({ ...config, enable_technical_analysis: e.target.checked })}
+                  disabled={disabled}
+                  className="w-4 h-4 rounded accent-yellow-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { key: 'enable_pattern', label: 'pattern', desc: 'patternDesc', color: '#60a5fa' },
+                { key: 'enable_wavetrend', label: 'wavetrend', desc: 'wavetrendDesc', color: '#22c55e' },
+                { key: 'enable_divergence', label: 'divergence', desc: 'divergenceDesc', color: '#a855f7' },
+                { key: 'enable_squeeze', label: 'squeeze', desc: 'squeezeDesc', color: '#fbbf24' },
+                { key: 'enable_trend', label: 'trend', desc: 'trendDesc', color: '#e879f9' },
+                { key: 'enable_cvd', label: 'cvd', desc: 'cvdDesc', color: '#34d399' },
+              ].map(({ key, label, desc, color }) => {
+                const checked = technicalAnalysisEnabled && ((config as any)[key] ?? true)
+                return (
+                  <div
+                    key={key}
+                    className="p-2.5 rounded-lg transition-all"
+                    style={{
+                      background: checked ? `${color}08` : 'transparent',
+                      border: `1px solid ${checked ? `${color}30` : '#2B3139'}`,
+                      opacity: !technicalAnalysisEnabled ? 0.6 : 1,
+                    }}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full" style={{ background: color }} />
+                        <span className="text-xs font-medium" style={{ color: '#EAECEF' }}>{t(label)}</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => !disabled && onChange({ ...config, [key]: e.target.checked })}
+                        disabled={disabled || !technicalAnalysisEnabled}
+                        className="w-4 h-4 rounded accent-yellow-500"
+                      />
+                    </div>
+                    <p className="text-[10px]" style={{ color: '#5E6673' }}>{t(desc)}</p>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </div>
       </div>

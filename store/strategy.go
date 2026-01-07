@@ -142,6 +142,17 @@ type IndicatorConfig struct {
 	EnableVolume      bool `json:"enable_volume"`
 	EnableOI          bool `json:"enable_oi"`           // open interest
 	EnableFundingRate bool `json:"enable_funding_rate"` // funding rate
+
+	// analysis-module switches (prompt injection: "Technical Analysis" JSON)
+	// Pointers allow backward-compatible defaults when fields are missing in stored configs.
+	EnableTechnicalAnalysis *bool `json:"enable_technical_analysis,omitempty"`
+	EnablePattern           *bool `json:"enable_pattern,omitempty"`
+	EnableWaveTrend         *bool `json:"enable_wavetrend,omitempty"`
+	EnableDivergence        *bool `json:"enable_divergence,omitempty"`
+	EnableSqueeze           *bool `json:"enable_squeeze,omitempty"`
+	EnableTrend             *bool `json:"enable_trend,omitempty"`
+	EnableCVD               *bool `json:"enable_cvd,omitempty"`
+
 	// EMA period configuration
 	EMAPeriods []int `json:"ema_periods,omitempty"` // default [21, 55, 100, 200]
 	// RSI period configuration
@@ -413,6 +424,13 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			EnableVolume:      true,
 			EnableOI:          true,
 			EnableFundingRate: true,
+			EnableTechnicalAnalysis: &boolTrue,
+			EnablePattern:           &boolTrue,
+			EnableWaveTrend:         &boolTrue,
+			EnableDivergence:        &boolTrue,
+			EnableSqueeze:           &boolTrue,
+			EnableTrend:             &boolTrue,
+			EnableCVD:               &boolTrue,
 			EMAPeriods:        []int{21, 55, 100, 200},
 			RSIPeriods:        []int{7, 14},
 			ATRPeriods:        []int{14},

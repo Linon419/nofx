@@ -2304,6 +2304,14 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 	// Perform analysis according to selected timeframes (from strategy config) if available.
 	if len(data.TimeframeData) > 0 {
 		klineCfg := indicators.Klines
+		analysisEnabled := boolPtrOrDefault(indicators.EnableTechnicalAnalysis, true)
+		analysisCfg := analysis.DefaultConfig()
+		analysisCfg.EnablePattern = boolPtrOrDefault(indicators.EnablePattern, true)
+		analysisCfg.EnableWaveTrend = boolPtrOrDefault(indicators.EnableWaveTrend, true)
+		analysisCfg.EnableDivergence = boolPtrOrDefault(indicators.EnableDivergence, true)
+		analysisCfg.EnableVolatilityWarning = boolPtrOrDefault(indicators.EnableSqueeze, true)
+		analysisCfg.EnableTrend = boolPtrOrDefault(indicators.EnableTrend, true)
+		analysisCfg.EnableCVD = boolPtrOrDefault(indicators.EnableCVD, true)
 
 		analysisTimeframes := make([]string, 0, len(klineCfg.SelectedTimeframes)+1)
 		if len(klineCfg.SelectedTimeframes) > 0 {
@@ -2315,6 +2323,14 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 		analysisTimeframes = normalizeAndDedupTimeframes(analysisTimeframes)
 		if len(analysisTimeframes) == 0 {
 			analysisTimeframes = []string{"15m", "1h", "4h", "5m"}
+		}
+
+		if !analysisEnabled {
+			sb.WriteString("=== Technical Analysis ===\n\n")
+			sb.WriteString("```json\n")
+			sb.WriteString(`{"note":"disabled_by_strategy_config"}`)
+			sb.WriteString("\n```\n\n")
+			return sb.String()
 		}
 
 		for _, tf := range analysisTimeframes {
@@ -2329,7 +2345,7 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 			}
 
 			klines := convertKlineBarsToKlines(tf, tfData.Klines)
-			analysisResult := safeAnalyzeWithDefaults(klines)
+			analysisResult := safeAnalyze(klines, analysisCfg)
 			analysisJSON := formatAnalysisEnvelopeJSON(tf, tfData, analysisResult)
 
 			sb.WriteString("```json\n")
@@ -2341,13 +2357,13 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 	return sb.String()
 }
 
-func safeAnalyzeWithDefaults(klines []market.Kline) (result *analysis.AnalysisResult) {
+func safeAnalyze(klines []market.Kline, cfg analysis.Config) (result *analysis.AnalysisResult) {
 	defer func() {
 		if r := recover(); r != nil {
 			result = nil
 		}
 	}()
-	return analysis.AnalyzeWithDefaults(klines)
+	return analysis.Analyze(klines, cfg)
 }
 
 type emaSnapshot struct {
@@ -2383,6 +2399,13 @@ func formatAnalysisEnvelopeJSON(tf string, tfData *market.TimeframeSeriesData, a
 		return `{"note":"analysis_unavailable"}`
 	}
 	return string(data)
+}
+
+func boolPtrOrDefault(v *bool, def bool) bool {
+	if v == nil {
+		return def
+	}
+	return *v
 }
 
 func buildEMASnapshot(tf string, tfData *market.TimeframeSeriesData) *emaSnapshot {

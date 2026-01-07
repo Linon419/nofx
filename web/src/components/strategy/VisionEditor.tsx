@@ -28,6 +28,7 @@ export function VisionEditor({ config, onChange, disabled, language }: VisionEdi
       indicators: { zh: '图中指标', en: 'Indicators in Image' },
       showEMA: { zh: 'EMA', en: 'EMA' },
       showMACD: { zh: 'MACD', en: 'MACD' },
+      showCVD: { zh: 'CVD', en: 'CVD' },
       showWaveTrend: { zh: 'WaveTrend', en: 'WaveTrend' },
       showSqueeze: { zh: '挤压预警 (Squeeze)', en: 'Squeeze' },
       showDivergence: { zh: '背离 (Divergence)', en: 'Divergence' },
@@ -49,6 +50,7 @@ export function VisionEditor({ config, onChange, disabled, language }: VisionEdi
     indicators: {
       show_ema: config?.indicators?.show_ema ?? true,
       show_macd: config?.indicators?.show_macd ?? true,
+      show_cvd: config?.indicators?.show_cvd ?? true,
       show_wavetrend: config?.indicators?.show_wavetrend ?? true,
       show_squeeze: config?.indicators?.show_squeeze ?? false,
       show_divergence: config?.indicators?.show_divergence ?? true,
@@ -72,6 +74,7 @@ export function VisionEditor({ config, onChange, disabled, language }: VisionEdi
   const indicatorItems: Array<{ key: keyof VisionIndicators; label: string }> = [
     { key: 'show_ema', label: t('showEMA') },
     { key: 'show_macd', label: t('showMACD') },
+    { key: 'show_cvd', label: t('showCVD') },
     { key: 'show_wavetrend', label: t('showWaveTrend') },
     { key: 'show_squeeze', label: t('showSqueeze') },
     { key: 'show_divergence', label: t('showDivergence') },
