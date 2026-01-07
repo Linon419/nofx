@@ -1875,10 +1875,14 @@ func (e *StrategyEngine) BuildUserPromptWithOptions(ctx *Context, opts UserPromp
 	}
 
 	// Account information
+	availableBalancePct := 0.0
+	if ctx.Account.TotalEquity > 0 {
+		availableBalancePct = (ctx.Account.AvailableBalance / ctx.Account.TotalEquity) * 100
+	}
 	sb.WriteString(fmt.Sprintf("Account: Equity %.2f | Balance %.2f (%.1f%%) | PnL %+.2f%% | Margin %.1f%% | Positions %d\n\n",
 		ctx.Account.TotalEquity,
 		ctx.Account.AvailableBalance,
-		(ctx.Account.AvailableBalance/ctx.Account.TotalEquity)*100,
+		availableBalancePct,
 		ctx.Account.TotalPnLPct,
 		ctx.Account.MarginUsedPct,
 		ctx.Account.PositionCount))
@@ -3059,7 +3063,7 @@ func validateDecision(
 				logger.Warnf("[Min Position Size] %s cannot open: min %.2f USDT > cap %.2f USDT, converting %s -> wait", d.Symbol, minOpeningAmount, maxPositionValue, originalAction)
 				return nil
 			}
-			logger.Infof("閳跨媴绗? [Min Amount Fallback] %s opening amount too small (%.2f USDT), auto-adjusting to minimum %.2f USDT",
+			logger.Infof("[Min Amount Fallback] %s opening amount too small (%.2f USDT), auto-adjusting to minimum %.2f USDT",
 				d.Symbol, d.PositionSizeUSD, minOpeningAmount)
 			d.PositionSizeUSD = minOpeningAmount
 		}
