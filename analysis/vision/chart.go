@@ -39,7 +39,7 @@ type RenderConfig struct {
 	// Defaults to 100 to match BRALE analysis_slice.
 	PlotBars int
 	// DropTailBars drops the latest N bars before plotting (after MaxBars truncation).
-	// Defaults to 1 to match BRALE slice_drop_tail.
+	// Defaults to 0 because unclosed bars are already removed upstream.
 	DropTailBars int
 	// Indicators controls which overlays/panels to render.
 	Indicators IndicatorRenderConfig
@@ -47,11 +47,14 @@ type RenderConfig struct {
 
 func DefaultRenderConfig() RenderConfig {
 	return RenderConfig{
-		Width:        1600,
-		Height:       1396,
-		MaxBars:      300,
-		PlotBars:     100,
-		DropTailBars: 1,
+		Width:    1600,
+		Height:   1396,
+		MaxBars:  300,
+		PlotBars: 100,
+		// DropTailBars controls whether to drop the most recent bars before plotting.
+		// For live chart-reading, we already drop unclosed bars upstream, so default to 0
+		// to keep the latest closed bar visible.
+		DropTailBars: 0,
 		Indicators: IndicatorRenderConfig{
 			ShowEMA:        true,
 			ShowMACD:       true,
