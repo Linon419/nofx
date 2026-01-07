@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"nofx/kernel"
 	"nofx/logger"
 	"strconv"
 	"strings"
@@ -41,6 +42,123 @@ type BybitTrader struct {
 
 	// Cache duration (15 seconds)
 	cacheDuration time.Duration
+}
+
+// ListPositionOrders lists active orders relevant to an existing position (TP/SL/conditional reduce-only).
+// This is used to enrich the AI prompt; failures should not block trading decisions.
+func (t *BybitTrader) ListPositionOrders(symbol string) ([]kernel.OpenOrderInfo, error) {
+	symbol = strings.TrimSpace(symbol)
+	if symbol == "" {
+		return nil, nil
+	}
+
+	out := make([]kernel.OpenOrderInfo, 0, 16)
+	seen := make(map[string]struct{}, 16)
+
+	appendOrder := func(o kernel.OpenOrderInfo) {
+		if strings.TrimSpace(o.Symbol) == "" {
+			return
+		}
+		if strings.TrimSpace(o.OrderID) != "" {
+			if _, ok := seen[o.OrderID]; ok {
+				return
+			}
+			seen[o.OrderID] = struct{}{}
+		}
+		out = append(out, o)
+	}
+
+	fetch := func(orderFilter string, source string) error {
+		params := map[string]interface{}{
+			"category":    "linear",
+			"symbol":      symbol,
+			"orderFilter": orderFilter, // "Order" or "StopOrder"
+		}
+
+		result, err := t.client.NewUtaBybitServiceWithParams(params).GetOpenOrders(context.Background())
+		if err != nil {
+			return err
+		}
+		if result.RetCode != 0 {
+			return nil
+		}
+
+		resultData, ok := result.Result.(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		list, _ := resultData["list"].([]interface{})
+		for _, item := range list {
+			order, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			orderID, _ := order["orderId"].(string)
+			sym, _ := order["symbol"].(string)
+			if sym == "" {
+				sym = symbol
+			}
+
+			side := strings.ToUpper(strings.TrimSpace(getBybitString(order["side"])))
+			orderType := strings.TrimSpace(getBybitString(order["orderType"]))
+			stopOrderType := strings.TrimSpace(getBybitString(order["stopOrderType"]))
+			status := strings.TrimSpace(getBybitString(order["orderStatus"]))
+			tif := strings.TrimSpace(getBybitString(order["timeInForce"]))
+
+			reduceOnly := getBybitBool(order["reduceOnly"])
+			closeOnly := getBybitBool(order["closeOnTrigger"])
+
+			qty := getBybitFloat(order["qty"])
+			price := getBybitFloat(order["price"])
+			stopPrice := getBybitFloat(order["triggerPrice"])
+
+			positionSide := bybitPositionSide(order, side)
+
+			// Filter: only keep orders that are clearly position-related.
+			isStop := strings.EqualFold(orderFilter, "StopOrder")
+			isPositionRelated := reduceOnly || closeOnly || (isStop && stopOrderType != "")
+			if !isPositionRelated {
+				continue
+			}
+
+			typ := orderType
+			if stopOrderType != "" {
+				typ = stopOrderType
+			}
+
+			updateTime := getBybitInt64(order["updatedTime"])
+			appendOrder(kernel.OpenOrderInfo{
+				Symbol:       sym,
+				PositionSide: positionSide,
+				OrderID:      orderID,
+				Source:       source,
+				Type:         typ,
+				Side:         side,
+				ReduceOnly:   reduceOnly,
+				CloseOnly:    closeOnly,
+				Quantity:     qty,
+				Price:        price,
+				StopPrice:    stopPrice,
+				TimeInForce:  tif,
+				Status:       status,
+				UpdateTime:   updateTime,
+			})
+		}
+
+		return nil
+	}
+
+	// Stop/conditional orders cover most TP/SL usage.
+	if err := fetch("StopOrder", "stop_order"); err != nil {
+		return out, err
+	}
+	// Normal open orders may include reduce-only limit closes.
+	if err := fetch("Order", "open_order"); err != nil {
+		return out, err
+	}
+
+	return out, nil
 }
 
 // NewBybitTrader creates a Bybit trader
@@ -949,6 +1067,97 @@ func (t *BybitTrader) getClosedPnLViaHTTP(startTime time.Time, limit int) ([]Clo
 	}
 
 	return t.parseClosedPnLResult(result.Result)
+}
+
+func getBybitString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case []byte:
+		return string(x)
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(x)
+	case int64:
+		return strconv.FormatInt(x, 10)
+	default:
+		return ""
+	}
+}
+
+func getBybitBool(v any) bool {
+	switch x := v.(type) {
+	case bool:
+		return x
+	case string:
+		x = strings.TrimSpace(strings.ToLower(x))
+		return x == "true" || x == "1"
+	case float64:
+		return x != 0
+	case int:
+		return x != 0
+	case int64:
+		return x != 0
+	default:
+		return false
+	}
+}
+
+func getBybitFloat(v any) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case int:
+		return float64(x)
+	case int64:
+		return float64(x)
+	case string:
+		f, _ := strconv.ParseFloat(strings.TrimSpace(x), 64)
+		return f
+	default:
+		return 0
+	}
+}
+
+func getBybitInt64(v any) int64 {
+	switch x := v.(type) {
+	case int64:
+		return x
+	case int:
+		return int64(x)
+	case float64:
+		return int64(x)
+	case string:
+		i, _ := strconv.ParseInt(strings.TrimSpace(x), 10, 64)
+		return i
+	default:
+		return 0
+	}
+}
+
+func bybitPositionSide(order map[string]interface{}, side string) string {
+	// Bybit positionIdx: 0=one-way, 1=buy side (long), 2=sell side (short)
+	idxRaw, ok := order["positionIdx"]
+	if ok {
+		idx := int(getBybitFloat(idxRaw))
+		switch idx {
+		case 1:
+			return "long"
+		case 2:
+			return "short"
+		}
+	}
+
+	// One-way mode: infer close direction from order side.
+	switch strings.ToUpper(strings.TrimSpace(side)) {
+	case "SELL":
+		return "long"
+	case "BUY":
+		return "short"
+	default:
+		return ""
+	}
 }
 
 // parseClosedPnLResult parses the closed PnL result from Bybit API

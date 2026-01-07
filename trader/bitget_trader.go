@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"nofx/kernel"
 	"nofx/logger"
 	"strconv"
 	"strings"
@@ -901,6 +902,69 @@ func (t *BitgetTrader) CancelStopLossOrders(symbol string) error {
 // CancelTakeProfitOrders cancels take profit orders
 func (t *BitgetTrader) CancelTakeProfitOrders(symbol string) error {
 	return t.cancelPlanOrdersWithFallback(symbol, []string{"profit_plan", "normal_plan"}, cancelTakeProfit)
+}
+
+// ListPositionOrders lists active orders relevant to an existing position (TP/SL/conditional reduce-only).
+// Bitget V2 exposes stop-loss / take-profit primarily as "plan orders".
+func (t *BitgetTrader) ListPositionOrders(symbol string) ([]kernel.OpenOrderInfo, error) {
+	symbol = t.convertSymbol(symbol)
+	if strings.TrimSpace(symbol) == "" {
+		return nil, nil
+	}
+
+	out := make([]kernel.OpenOrderInfo, 0, 16)
+	seen := make(map[string]struct{}, 16)
+	appendOrder := func(o kernel.OpenOrderInfo) {
+		if strings.TrimSpace(o.OrderID) != "" {
+			if _, ok := seen[o.OrderID]; ok {
+				return
+			}
+			seen[o.OrderID] = struct{}{}
+		}
+		out = append(out, o)
+	}
+
+	typeForPlan := func(planType string) string {
+		switch planType {
+		case "loss_plan":
+			return "stop_loss"
+		case "profit_plan":
+			return "take_profit"
+		default:
+			return "plan"
+		}
+	}
+
+	for _, planType := range []string{"loss_plan", "profit_plan", "normal_plan"} {
+		orders, err := t.listPlanOrders(symbol, planType)
+		if err != nil {
+			if isBitgetPlanTypeIllegal(err) {
+				continue
+			}
+			return out, err
+		}
+		for _, o := range orders {
+			stopPrice, _ := strconv.ParseFloat(strings.TrimSpace(o.TriggerPrice), 64)
+			posSide := strings.ToLower(strings.TrimSpace(o.HoldSide))
+			side := strings.ToUpper(strings.TrimSpace(o.Side))
+			appendOrder(kernel.OpenOrderInfo{
+				Symbol:       symbol,
+				PositionSide: posSide,
+				OrderID:      strings.TrimSpace(o.OrderId),
+				Source:       "plan",
+				Type:         typeForPlan(planType),
+				Side:         side,
+				ReduceOnly:   true,
+				Quantity:     0,
+				Price:        0,
+				StopPrice:    stopPrice,
+				TimeInForce:  "",
+				Status:       "PENDING",
+			})
+		}
+	}
+
+	return out, nil
 }
 
 type bitgetPlanOrder struct {

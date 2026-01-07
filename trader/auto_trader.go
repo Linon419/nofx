@@ -905,6 +905,54 @@ func (at *AutoTrader) buildTradingContext() (*kernel.Context, error) {
 		})
 	}
 
+	// 2.1. Enrich positions with active TP/SL/conditional orders when supported by the exchange trader.
+	// This is best-effort: failures must not block decision making.
+	if lister, ok := at.trader.(PositionOrderLister); ok && len(positionInfos) > 0 {
+		const maxOrdersPerPosition = 20
+
+		uniqueSymbols := make(map[string]struct{}, len(positionInfos))
+		for _, p := range positionInfos {
+			s := strings.TrimSpace(p.Symbol)
+			if s != "" {
+				uniqueSymbols[s] = struct{}{}
+			}
+		}
+
+		ordersBySymbol := make(map[string][]kernel.OpenOrderInfo, len(uniqueSymbols))
+		for sym := range uniqueSymbols {
+			orders, err := lister.ListPositionOrders(sym)
+			if err != nil {
+				logger.Infof("⚠️ [%s] Failed to list position orders for %s: %v", at.name, sym, err)
+				continue
+			}
+			if len(orders) > 0 {
+				ordersBySymbol[sym] = orders
+			}
+		}
+
+		if len(ordersBySymbol) > 0 {
+			for i := range positionInfos {
+				p := &positionInfos[i]
+				orders := ordersBySymbol[p.Symbol]
+				if len(orders) == 0 {
+					continue
+				}
+
+				// Hedge-mode compatible: if order provides positionSide, filter by current position side.
+				filtered := make([]kernel.OpenOrderInfo, 0, len(orders))
+				for _, o := range orders {
+					if o.PositionSide == "" || strings.EqualFold(o.PositionSide, p.Side) {
+						filtered = append(filtered, o)
+					}
+				}
+				if len(filtered) > maxOrdersPerPosition {
+					filtered = filtered[:maxOrdersPerPosition]
+				}
+				p.OpenOrders = filtered
+			}
+		}
+	}
+
 	// Clean up closed position records
 	for key := range at.positionFirstSeenTime {
 		if !currentPositionKeys[key] {

@@ -55,6 +55,26 @@ type PositionInfo struct {
 	LiquidationPrice float64 `json:"liquidation_price"`
 	MarginUsed       float64 `json:"margin_used"`
 	UpdateTime       int64   `json:"update_time"` // Position update timestamp (milliseconds)
+	OpenOrders       []OpenOrderInfo `json:"open_orders,omitempty"`
+}
+
+// OpenOrderInfo represents an active (open) order that is relevant to an existing position,
+// such as stop-loss / take-profit / conditional reduce-only orders.
+type OpenOrderInfo struct {
+	Symbol       string  `json:"symbol"`
+	PositionSide string  `json:"position_side,omitempty"` // "long" or "short" (if available)
+	OrderID      string  `json:"order_id,omitempty"`
+	Source       string  `json:"source,omitempty"` // exchange-specific source (e.g., "open_order", "algo", "plan")
+	Type         string  `json:"type,omitempty"`
+	Side         string  `json:"side,omitempty"` // BUY/SELL (if available)
+	ReduceOnly   bool    `json:"reduce_only,omitempty"`
+	CloseOnly    bool    `json:"close_only,omitempty"`
+	Quantity     float64 `json:"quantity,omitempty"`
+	Price        float64 `json:"price,omitempty"`
+	StopPrice    float64 `json:"stop_price,omitempty"`
+	TimeInForce  string  `json:"time_in_force,omitempty"`
+	Status       string  `json:"status,omitempty"`
+	UpdateTime   int64   `json:"update_time,omitempty"`
 }
 
 // AccountInfo account information
@@ -2099,6 +2119,38 @@ func (e *StrategyEngine) formatPositionInfo(index int, pos PositionInfo, ctx *Co
 		if line := formatOTCPeriodQualityLine(*meta); line != "" {
 			sb.WriteString(line + "\n\n")
 		}
+	}
+
+	if len(pos.OpenOrders) > 0 {
+		dash := func(s string) string {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				return "-"
+			}
+			return s
+		}
+		fnum := func(v float64) string {
+			if v == 0 {
+				return "-"
+			}
+			return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.8f", v), "0"), ".")
+		}
+
+		sb.WriteString("Active Position Orders (open TP/SL/conditional):\n")
+		for _, o := range pos.OpenOrders {
+			sb.WriteString(fmt.Sprintf("- symbol=%s position_side=%s reduce_only=%t type=%s qty=%s price=%s stop_price=%s time_in_force=%s status=%s\n",
+				dash(o.Symbol),
+				dash(o.PositionSide),
+				o.ReduceOnly,
+				dash(o.Type),
+				fnum(o.Quantity),
+				fnum(o.Price),
+				fnum(o.StopPrice),
+				dash(o.TimeInForce),
+				dash(o.Status),
+			))
+		}
+		sb.WriteString("\n")
 	}
 
 	if marketData, ok := ctx.MarketDataMap[pos.Symbol]; ok {

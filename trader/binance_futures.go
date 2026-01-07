@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"nofx/hook"
+	"nofx/kernel"
 	"nofx/logger"
 	"nofx/market"
 	"strconv"
@@ -15,6 +16,120 @@ import (
 
 	"github.com/adshao/go-binance/v2/futures"
 )
+
+func normalizeBinancePositionSide(side futures.PositionSideType) string {
+	switch strings.ToUpper(string(side)) {
+	case "LONG":
+		return "long"
+	case "SHORT":
+		return "short"
+	default:
+		return ""
+	}
+}
+
+func parseFloatOrZero(v string) float64 {
+	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	if err != nil {
+		return 0
+	}
+	return f
+}
+
+// ListPositionOrders lists active orders relevant to an existing position (TP/SL/conditional reduce-only orders).
+// This is used to enrich the AI decision prompt; it does not affect execution.
+func (t *FuturesTrader) ListPositionOrders(symbol string) ([]kernel.OpenOrderInfo, error) {
+	binanceSymbol := market.ToBinanceFuturesSymbol(symbol)
+	out := make([]kernel.OpenOrderInfo, 0, 16)
+	seen := make(map[string]bool, 32)
+
+	appendOrder := func(o kernel.OpenOrderInfo) {
+		key := o.OrderID + "|" + o.Source
+		if key == "|" {
+			return
+		}
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, o)
+	}
+
+	var anyOK bool
+
+	orders, err := t.client.NewListOpenOrdersService().
+		Symbol(binanceSymbol).
+		Do(context.Background())
+	if err == nil {
+		anyOK = true
+		for _, order := range orders {
+			// Only include orders that can close/reduce an existing position.
+			if !order.ReduceOnly && !order.ClosePosition {
+				continue
+			}
+			appendOrder(kernel.OpenOrderInfo{
+				Symbol:       market.FromBinanceFuturesSymbol(order.Symbol),
+				PositionSide: normalizeBinancePositionSide(order.PositionSide),
+				OrderID:      fmt.Sprintf("%d", order.OrderID),
+				Source:       "open_order",
+				Type:         string(order.Type),
+				Side:         string(order.Side),
+				ReduceOnly:   order.ReduceOnly,
+				CloseOnly:    order.ClosePosition,
+				Quantity:     parseFloatOrZero(order.OrigQuantity),
+				Price:        parseFloatOrZero(order.Price),
+				StopPrice:    parseFloatOrZero(order.StopPrice),
+				TimeInForce:  string(order.TimeInForce),
+				Status:       string(order.Status),
+				UpdateTime:   order.UpdateTime,
+			})
+		}
+	}
+
+	algoOrders, algoErr := t.client.NewListOpenAlgoOrdersService().
+		Symbol(binanceSymbol).
+		Do(context.Background())
+	if algoErr == nil {
+		anyOK = true
+		for _, order := range algoOrders {
+			if !order.ReduceOnly && !order.ClosePosition {
+				continue
+			}
+			stop := parseFloatOrZero(order.TriggerPrice)
+			if stop == 0 {
+				stop = parseFloatOrZero(order.TpTriggerPrice)
+			}
+			if stop == 0 {
+				stop = parseFloatOrZero(order.SlTriggerPrice)
+			}
+			appendOrder(kernel.OpenOrderInfo{
+				Symbol:       market.FromBinanceFuturesSymbol(order.Symbol),
+				PositionSide: normalizeBinancePositionSide(order.PositionSide),
+				OrderID:      fmt.Sprintf("algo:%d", order.AlgoId),
+				Source:       "algo",
+				Type:         string(order.OrderType),
+				Side:         string(order.Side),
+				ReduceOnly:   order.ReduceOnly,
+				CloseOnly:    order.ClosePosition,
+				Quantity:     parseFloatOrZero(order.Quantity),
+				Price:        parseFloatOrZero(order.Price),
+				StopPrice:    stop,
+				TimeInForce:  string(order.TimeInForce),
+				Status:       strings.TrimSpace(order.AlgoStatus),
+				UpdateTime:   order.CreateTime,
+			})
+		}
+	}
+
+	if !anyOK {
+		if err != nil {
+			return nil, err
+		}
+		return nil, algoErr
+	}
+
+	return out, nil
+}
 
 // getBrOrderID generates unique order ID (for futures contracts)
 // Format: x-{BR_ID}{TIMESTAMP}{RANDOM}
