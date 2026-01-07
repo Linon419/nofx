@@ -862,19 +862,36 @@ func (t *BitgetTrader) SetTakeProfit(symbol string, positionSide string, quantit
 	return nil
 }
 
+func isTPSLPlanType(planType string) bool {
+	return planType == "loss_plan" || planType == "profit_plan"
+}
+
 func (t *BitgetTrader) placePlanOrderWithFallback(symbol string, baseBody map[string]interface{}, planTypes []string) error {
 	var lastErr error
 	for _, planType := range planTypes {
 		body := make(map[string]interface{}, len(baseBody)+1)
-		for k, v := range baseBody {
-			body[k] = v
-		}
 		body["planType"] = planType
 
-		_, err := t.doRequest("POST", "/api/v2/mix/order/place-plan-order", body)
+		var endpoint string
+		if isTPSLPlanType(planType) {
+			endpoint = "/api/v2/mix/order/place-tpsl-order"
+			body["symbol"] = baseBody["symbol"]
+			body["productType"] = baseBody["productType"]
+			body["marginCoin"] = baseBody["marginCoin"]
+			body["triggerPrice"] = baseBody["triggerPrice"]
+			body["holdSide"] = baseBody["holdSide"]
+			body["size"] = baseBody["size"]
+		} else {
+			endpoint = "/api/v2/mix/order/place-plan-order"
+			for k, v := range baseBody {
+				body[k] = v
+			}
+		}
+
+		_, err := t.doRequest("POST", endpoint, body)
 		if err == nil {
 			if len(planTypes) > 1 && planType != planTypes[0] {
-				logger.Infof("  ⚠️ [Bitget] planType=%s accepted; fallback from %s", planType, planTypes[0])
+				logger.Infof("  [Bitget] planType=%s accepted; fallback from %s", planType, planTypes[0])
 			}
 			return nil
 		}
