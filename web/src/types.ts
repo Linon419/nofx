@@ -691,6 +691,12 @@ export interface RiskControlConfig {
   enforce_min_position_size?: boolean; // Enforce minimum order notional checks (CODE ENFORCED, default: true)
   min_risk_reward_ratio: number;   // Min take_profit / stop_loss ratio (AI guided)
   min_confidence: number;          // Min AI confidence to open position (AI guided)
+
+  // Stop-loss flip (One-way/net): reverse after stop-loss triggers
+  stop_loss_flip_enabled?: boolean;
+  stop_loss_flip_runner_ratio?: number; // default 0.3
+  stop_loss_flip_trail_pct?: number;    // default 0.003 (=0.3%)
+  stop_loss_flip_poll_secs?: number;    // default 10
 }
 
 // Debate Arena Types

@@ -294,6 +294,21 @@ type RiskControlConfig struct {
 	MinRiskRewardRatio float64 `json:"min_risk_reward_ratio"`
 	// Min AI confidence to open position (AI guided)
 	MinConfidence int `json:"min_confidence"`
+
+	// StopLossFlipEnabled enables automatic reverse-on-stop-loss behavior (One-way/net mode).
+	// When enabled, after a stop-loss closes a position, the system opens an equal reverse position,
+	// takes partial profit at the recovery target, and leaves a runner with trailing stop.
+	StopLossFlipEnabled bool `json:"stop_loss_flip_enabled,omitempty"`
+
+	// StopLossFlipRunnerRatio is the remaining position ratio after recovery TP is hit (default: 0.3).
+	// Example: 0.3 => close 70% at recovery target, leave 30% as runner.
+	StopLossFlipRunnerRatio float64 `json:"stop_loss_flip_runner_ratio,omitempty"`
+
+	// StopLossFlipTrailPct is the trailing stop distance (percent, e.g. 0.003 = 0.3%) for the runner.
+	StopLossFlipTrailPct float64 `json:"stop_loss_flip_trail_pct,omitempty"`
+
+	// StopLossFlipPollSecs is how often to poll closed PnL/positions for flip triggers (seconds).
+	StopLossFlipPollSecs int `json:"stop_loss_flip_poll_secs,omitempty"`
 }
 
 // NewStrategyStore creates a new StrategyStore
@@ -415,15 +430,15 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 				DecisionOffsetSeconds:    10,
 				DecisionRunImmediately:   false,
 			},
-			EnableRawKlines:   true, // Required - raw OHLCV data for AI analysis
-			EnableEMA:         false,
-			EnableMACD:        false,
-			EnableRSI:         false,
-			EnableATR:         false,
-			EnableBOLL:        false,
-			EnableVolume:      true,
-			EnableOI:          true,
-			EnableFundingRate: true,
+			EnableRawKlines:         true, // Required - raw OHLCV data for AI analysis
+			EnableEMA:               false,
+			EnableMACD:              false,
+			EnableRSI:               false,
+			EnableATR:               false,
+			EnableBOLL:              false,
+			EnableVolume:            true,
+			EnableOI:                true,
+			EnableFundingRate:       true,
 			EnableTechnicalAnalysis: &boolTrue,
 			EnablePattern:           &boolTrue,
 			EnableWaveTrend:         &boolTrue,
@@ -431,10 +446,10 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			EnableSqueeze:           &boolTrue,
 			EnableTrend:             &boolTrue,
 			EnableCVD:               &boolTrue,
-			EMAPeriods:        []int{21, 55, 100, 200},
-			RSIPeriods:        []int{7, 14},
-			ATRPeriods:        []int{14},
-			BOLLPeriods:       []int{20},
+			EMAPeriods:              []int{21, 55, 100, 200},
+			RSIPeriods:              []int{7, 14},
+			ATRPeriods:              []int{14},
+			BOLLPeriods:             []int{20},
 			// NofxOS unified API key
 			NofxOSAPIKey: "cm_568c67eae410d912c54c",
 			// Quant data

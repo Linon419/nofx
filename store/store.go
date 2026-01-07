@@ -18,17 +18,18 @@ type Store struct {
 	driver *DBDriver // Database driver for abstraction (legacy)
 
 	// Sub-stores (lazy initialization)
-	user     *UserStore
-	aiModel  *AIModelStore
-	exchange *ExchangeStore
-	trader   *TraderStore
-	decision *DecisionStore
-	backtest *BacktestStore
-	position *PositionStore
-	strategy *StrategyStore
-	equity   *EquityStore
-	order    *OrderStore
-	telegram *TelegramStore
+	user         *UserStore
+	aiModel      *AIModelStore
+	exchange     *ExchangeStore
+	trader       *TraderStore
+	decision     *DecisionStore
+	backtest     *BacktestStore
+	position     *PositionStore
+	strategy     *StrategyStore
+	equity       *EquityStore
+	order        *OrderStore
+	telegram     *TelegramStore
+	stopLossFlip *StopLossFlipStore
 
 	mu sync.RWMutex
 }
@@ -159,6 +160,9 @@ func (s *Store) initTables() error {
 	}
 	if err := s.Telegram().initTables(); err != nil {
 		return fmt.Errorf("failed to initialize telegram tables: %w", err)
+	}
+	if err := s.StopLossFlip().initTables(); err != nil {
+		return fmt.Errorf("failed to initialize stop-loss flip tables: %w", err)
 	}
 	return nil
 }
@@ -291,6 +295,16 @@ func (s *Store) Telegram() *TelegramStore {
 		s.telegram = NewTelegramStore(s.gdb)
 	}
 	return s.telegram
+}
+
+// StopLossFlip gets stop-loss flip storage.
+func (s *Store) StopLossFlip() *StopLossFlipStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopLossFlip == nil {
+		s.stopLossFlip = NewStopLossFlipStore(s.gdb)
+	}
+	return s.stopLossFlip
 }
 
 // Close closes database connection
