@@ -20,6 +20,7 @@ func main() {
 		maxBars     = flag.Int("maxbars", 300, "history bars to fetch")
 		plotBars    = flag.Int("plotbars", 100, "bars to plot in window")
 		showSqueeze = flag.Bool("squeeze", false, "enable squeeze overlay in volume panel")
+		showCVD     = flag.Bool("cvd", true, "enable CVD panel (requires quote volume + taker buy volume)")
 	)
 	flag.Parse()
 
@@ -38,6 +39,9 @@ func main() {
 			Close:    k.Close,
 			Volume:   k.Volume,
 			IsClosed: k.IsClosed,
+			// CVD calculation uses quote volumes.
+			QuoteVolume:         k.QuoteVolume,
+			TakerBuyQuoteVolume: k.TakerBuyQuoteVolume,
 		})
 	}
 	tf := &market.TimeframeSeriesData{Timeframe: *timeframe, Klines: bars}
@@ -50,6 +54,7 @@ func main() {
 		Indicators: vision.IndicatorRenderConfig{
 			ShowEMA:        true,
 			ShowMACD:       true,
+			ShowCVD:        *showCVD,
 			ShowWaveTrend:  true,
 			ShowSqueeze:    *showSqueeze,
 			ShowDivergence: true,
