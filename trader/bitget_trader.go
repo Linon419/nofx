@@ -803,13 +803,14 @@ func (t *BitgetTrader) SetStopLoss(symbol string, positionSide string, quantity,
 	}
 
 	qtyStr, _ := t.FormatQuantity(symbol, quantity)
+	triggerPrice, _ := t.FormatPrice(symbol, stopPrice)
 
 	err := t.placePlanOrderWithFallback(symbol, map[string]interface{}{
 		"symbol":       symbol,
 		"productType":  "USDT-FUTURES",
 		"marginMode":   t.getMarginMode(symbol),
 		"marginCoin":   "USDT",
-		"triggerPrice": fmt.Sprintf("%.8f", stopPrice),
+		"triggerPrice": triggerPrice,
 		"triggerType":  "mark_price",
 		"side":         side,
 		"tradeSide":    "close",
@@ -839,13 +840,14 @@ func (t *BitgetTrader) SetTakeProfit(symbol string, positionSide string, quantit
 	}
 
 	qtyStr, _ := t.FormatQuantity(symbol, quantity)
+	triggerPrice, _ := t.FormatPrice(symbol, takeProfitPrice)
 
 	err := t.placePlanOrderWithFallback(symbol, map[string]interface{}{
 		"symbol":       symbol,
 		"productType":  "USDT-FUTURES",
 		"marginMode":   t.getMarginMode(symbol),
 		"marginCoin":   "USDT",
-		"triggerPrice": fmt.Sprintf("%.8f", takeProfitPrice),
+		"triggerPrice": triggerPrice,
 		"triggerType":  "mark_price",
 		"side":         side,
 		"tradeSide":    "close",
@@ -879,6 +881,9 @@ func (t *BitgetTrader) placePlanOrderWithFallback(symbol string, baseBody map[st
 			body["productType"] = baseBody["productType"]
 			body["marginCoin"] = baseBody["marginCoin"]
 			body["triggerPrice"] = baseBody["triggerPrice"]
+			if triggerType, ok := baseBody["triggerType"]; ok && triggerType != nil {
+				body["triggerType"] = triggerType
+			}
 			body["holdSide"] = baseBody["holdSide"]
 			body["size"] = baseBody["size"]
 		} else {
@@ -1214,6 +1219,15 @@ func (t *BitgetTrader) FormatQuantity(symbol string, quantity float64) (string, 
 	// Format according to volume precision
 	format := fmt.Sprintf("%%.%df", contract.VolumePlace)
 	return fmt.Sprintf(format, quantity), nil
+}
+
+func (t *BitgetTrader) FormatPrice(symbol string, price float64) (string, error) {
+	contract, err := t.getContract(symbol)
+	if err != nil {
+		return fmt.Sprintf("%.8f", price), nil
+	}
+	format := fmt.Sprintf("%%.%df", contract.PricePlace)
+	return fmt.Sprintf(format, price), nil
 }
 
 // GetOrderStatus gets order status

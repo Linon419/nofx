@@ -2,6 +2,7 @@ package trader
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -72,6 +73,38 @@ func TestBitget_SetTakeProfit_PlanTypeFallback(t *testing.T) {
 	}
 	if len(endpoints) != 1 || endpoints[0] != "/api/v2/mix/order/place-tpsl-order" {
 		t.Fatalf("expected TPSL endpoint, got: %#v", endpoints)
+	}
+}
+
+func TestBitget_SetStopLoss_SendsTriggerTypeAndFormattedTriggerPrice(t *testing.T) {
+	var got map[string]interface{}
+
+	rt := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		b, _ := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		_ = json.Unmarshal(b, &got)
+		return http200JSON(`{"code":"00000","msg":"ok","data":{}}`), nil
+	})
+
+	bt := &BitgetTrader{
+		apiKey:             "k",
+		secretKey:          "s",
+		passphrase:         "p",
+		httpClient:         &http.Client{Transport: rt, Timeout: 5 * time.Second},
+		cacheDuration:      time.Hour,
+		contractsCache:     map[string]*BitgetContract{"BSVUSDT": {Symbol: "BSVUSDT", VolumePlace: 2, PricePlace: 2}},
+		contractsCacheTime: time.Now(),
+		marginModeCache:    map[string]string{"BSVUSDT": "crossed"},
+	}
+
+	if err := bt.SetStopLoss("BSVUSDT", "LONG", 3.74, 20.3061); err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+	if got["triggerType"] != "mark_price" {
+		t.Fatalf("expected triggerType=mark_price, got: %#v", got["triggerType"])
+	}
+	if got["triggerPrice"] != "20.31" {
+		t.Fatalf("expected triggerPrice=20.31, got: %#v", got["triggerPrice"])
 	}
 }
 
