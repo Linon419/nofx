@@ -591,6 +591,9 @@ export interface CoinSourceConfig {
   oi_top_api_url?: string;     // OI Top API URL
   use_otc_top: boolean;
   otc_top_api_url?: string;    // OTC Top API URL
+
+  // When enabled, include OTC Top `period_quality` metadata for candidate coins (default: false).
+  otc_period_quality_enabled?: boolean;
 }
 
 export interface IndicatorConfig {

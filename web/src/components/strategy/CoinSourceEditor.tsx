@@ -22,6 +22,7 @@ export function CoinSourceEditor({
   const normalizedUseAI500 = config.use_ai500 ?? false
   const normalizedUseOITop = config.use_oi_top ?? false
   const normalizedUseOTCTop = config.use_otc_top ?? false
+  const otcPeriodQualityEnabled = config.otc_period_quality_enabled ?? false
 
   const setSourceType = (nextType: CoinSourceConfig['source_type']) => {
     if (disabled) return
@@ -57,6 +58,11 @@ export function CoinSourceEditor({
 
   const t = (key: string) => {
     const translations: Record<string, Record<string, string>> = {
+      otcPeriodQuality: { zh: '获取 period_quality', en: 'Fetch period_quality' },
+      otcPeriodQualityDesc: {
+        zh: '从 OTC Top 数据中读取并附带 period_quality 元数据（默认关闭）',
+        en: 'Include period_quality metadata from OTC Top (default off)',
+      },
       sourceType: { zh: '数据来源类型', en: 'Source Type' },
       static: { zh: '静态列表', en: 'Static List' },
       ai500: { zh: 'AI500 数据源', en: 'AI500 Data Provider' },
@@ -471,6 +477,29 @@ export function CoinSourceEditor({
 
           {normalizedUseOTCTop && (
             <div>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={otcPeriodQualityEnabled}
+                      onChange={(e) =>
+                        !disabled &&
+                        onChange({ ...config, otc_period_quality_enabled: e.target.checked })
+                      }
+                      disabled={disabled}
+                      className="w-5 h-5 rounded accent-yellow-500 mt-0.5"
+                    />
+                    <div>
+                      <div style={{ color: '#EAECEF' }}>{t('otcPeriodQuality')}</div>
+                      <div className="text-xs mt-1 text-nofx-text-muted">
+                        {t('otcPeriodQualityDesc')}
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
               <div className="flex items-center justify-between mb-2">
                 <label className="text-sm" style={{ color: '#848E9C' }}>
                   {t('otcTopApiUrl')}

@@ -127,6 +127,9 @@ type CoinSourceConfig struct {
 	OITopAPIURL  string `json:"oi_top_api_url,omitempty"`
 	UseOTCTop    bool   `json:"use_otc_top"`
 	OTCTopAPIURL string `json:"otc_top_api_url,omitempty"`
+	// OTCPeriodQualityEnabled controls whether to include OTC Top `period_quality` metadata in candidate coins / prompts.
+	// Default: false (omit the field even if the OTC API returns it).
+	OTCPeriodQualityEnabled bool `json:"otc_period_quality_enabled,omitempty"`
 }
 
 // IndicatorConfig indicator configuration
@@ -412,13 +415,14 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 	config := StrategyConfig{
 		Language: normalizedLang,
 		CoinSource: CoinSourceConfig{
-			SourceType:   "ai500",
-			UseAI500:     true,
-			AI500Limit:   10,
-			UseOITop:     false,
-			OITopLimit:   20,
-			UseOTCTop:    false,
-			OTCTopAPIURL: "",
+			SourceType:              "ai500",
+			UseAI500:                true,
+			AI500Limit:              10,
+			UseOITop:                false,
+			OITopLimit:              20,
+			UseOTCTop:               false,
+			OTCTopAPIURL:            "",
+			OTCPeriodQualityEnabled: false,
 		},
 		Indicators: IndicatorConfig{
 			Klines: KlineConfig{

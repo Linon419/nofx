@@ -43,18 +43,18 @@ var (
 
 // PositionInfo position information
 type PositionInfo struct {
-	Symbol           string  `json:"symbol"`
-	Side             string  `json:"side"` // "long" or "short"
-	EntryPrice       float64 `json:"entry_price"`
-	MarkPrice        float64 `json:"mark_price"`
-	Quantity         float64 `json:"quantity"`
-	Leverage         int     `json:"leverage"`
-	UnrealizedPnL    float64 `json:"unrealized_pnl"`
-	UnrealizedPnLPct float64 `json:"unrealized_pnl_pct"`
-	PeakPnLPct       float64 `json:"peak_pnl_pct"` // Historical peak profit percentage
-	LiquidationPrice float64 `json:"liquidation_price"`
-	MarginUsed       float64 `json:"margin_used"`
-	UpdateTime       int64   `json:"update_time"` // Position update timestamp (milliseconds)
+	Symbol           string          `json:"symbol"`
+	Side             string          `json:"side"` // "long" or "short"
+	EntryPrice       float64         `json:"entry_price"`
+	MarkPrice        float64         `json:"mark_price"`
+	Quantity         float64         `json:"quantity"`
+	Leverage         int             `json:"leverage"`
+	UnrealizedPnL    float64         `json:"unrealized_pnl"`
+	UnrealizedPnLPct float64         `json:"unrealized_pnl_pct"`
+	PeakPnLPct       float64         `json:"peak_pnl_pct"` // Historical peak profit percentage
+	LiquidationPrice float64         `json:"liquidation_price"`
+	MarginUsed       float64         `json:"margin_used"`
+	UpdateTime       int64           `json:"update_time"` // Position update timestamp (milliseconds)
 	OpenOrders       []OpenOrderInfo `json:"open_orders,omitempty"`
 }
 
@@ -1262,16 +1262,20 @@ func (e *StrategyEngine) getOTCTopCoins() ([]CandidateCoin, error) {
 
 	var candidates []CandidateCoin
 	now := time.Now().UTC()
+	includePeriodQuality := e != nil && e.config != nil && e.config.CoinSource.OTCPeriodQualityEnabled
 	for _, item := range items {
 		symbol := market.FromBinanceFuturesSymbol(item.Symbol)
-		meta := buildOTCPeriodQualityMeta(item, now)
-		candidates = append(candidates, CandidateCoin{
-			Symbol:               symbol,
-			Sources:              []string{"otc_top"},
-			PeriodQuality:        meta.Quality,
-			PeriodQualityTime:    meta.Time,
-			PeriodQualityExpired: meta.Expired,
-		})
+		coin := CandidateCoin{
+			Symbol:  symbol,
+			Sources: []string{"otc_top"},
+		}
+		if includePeriodQuality {
+			meta := buildOTCPeriodQualityMeta(item, now)
+			coin.PeriodQuality = meta.Quality
+			coin.PeriodQualityTime = meta.Time
+			coin.PeriodQualityExpired = meta.Expired
+		}
+		candidates = append(candidates, coin)
 	}
 	return candidates, nil
 }
