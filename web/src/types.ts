@@ -572,6 +572,20 @@ export interface PromptModulesConfig {
   vision_system_prompt?: string;
 }
 
+export interface PromptModuleDefaults {
+  schema_prompt: string;
+  schema_prompt_lite: string;
+  mode_variant_aggressive: string;
+  mode_variant_conservative: string;
+  mode_variant_scalping: string;
+  hard_constraints: string;
+  output_format: string;
+  analysis_core_prompt: string;
+  vision_system_prompt: string;
+  vision_system_prompt_verbose?: string;
+  vision_system_prompt_concise?: string;
+}
+
 export interface StrategyConfig {
   // Language setting: "zh" for Chinese, "en" for English
   // Determines the language used for data formatting and prompt generation

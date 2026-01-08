@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { SlidersHorizontal, AlertTriangle, ChevronDown, ChevronRight, RotateCcw } from 'lucide-react'
-import type { PromptTogglesConfig, PromptModulesConfig } from '../../types'
+import type { PromptModuleDefaults, PromptModulesConfig, PromptTogglesConfig } from '../../types'
 
 interface PromptTogglesEditorProps {
   config?: PromptTogglesConfig
   onChange: (config: PromptTogglesConfig) => void
   modules?: PromptModulesConfig
   onModulesChange: (config: PromptModulesConfig) => void
+  defaults?: PromptModuleDefaults
+  isLoadingDefaults?: boolean
   disabled?: boolean
   language: string
   visionEnabled?: boolean
@@ -17,6 +19,8 @@ export function PromptTogglesEditor({
   onChange,
   modules,
   onModulesChange,
+  defaults,
+  isLoadingDefaults,
   disabled,
   language,
   visionEnabled,
@@ -88,6 +92,15 @@ export function PromptTogglesEditor({
     language === 'zh'
       ? '留空=使用系统默认。支持 Go template 变量，例如：{{.AccountEquity}} / {{.MaxPositions}} / {{.ExitPlanID}} / {{.ExitPlanExample}}'
       : 'Empty = use system default. Supports Go template vars, e.g. {{.AccountEquity}} / {{.MaxPositions}} / {{.ExitPlanID}} / {{.ExitPlanExample}}'
+
+  const defaultPlaceholder =
+    language === 'zh'
+      ? isLoadingDefaults
+        ? '加载系统默认中...'
+        : '系统默认未加载'
+      : isLoadingDefaults
+        ? 'Loading system defaults...'
+        : 'System defaults not loaded'
 
   const [expandedEditors, setExpandedEditors] = useState<Record<string, boolean>>({
     schema: false,
@@ -217,6 +230,13 @@ export function PromptTogglesEditor({
               </button>
             </div>
             <textarea
+              value={defaults?.schema_prompt || ''}
+              readOnly
+              placeholder={defaultPlaceholder}
+              className="w-full h-28 mt-2 px-3 py-2 rounded-lg resize-none font-mono text-xs opacity-80"
+              style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#AEB4C0' }}
+            />
+            <textarea
               value={currentModules.schema_prompt || ''}
               onChange={(e) => setModules({ schema_prompt: e.target.value })}
               disabled={Boolean(disabled)}
@@ -242,6 +262,13 @@ export function PromptTogglesEditor({
                 {language === 'zh' ? '清空' : 'Clear'}
               </button>
             </div>
+            <textarea
+              value={defaults?.schema_prompt_lite || ''}
+              readOnly
+              placeholder={defaultPlaceholder}
+              className="w-full h-24 mt-2 px-3 py-2 rounded-lg resize-none font-mono text-xs opacity-80"
+              style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#AEB4C0' }}
+            />
             <textarea
               value={currentModules.schema_prompt_lite || ''}
               onChange={(e) => setModules({ schema_prompt_lite: e.target.value })}
@@ -297,6 +324,19 @@ export function PromptTogglesEditor({
                 </button>
               </div>
               <textarea
+                value={
+                  (key === 'mode_variant_aggressive'
+                    ? defaults?.mode_variant_aggressive
+                    : key === 'mode_variant_conservative'
+                      ? defaults?.mode_variant_conservative
+                      : defaults?.mode_variant_scalping) || ''
+                }
+                readOnly
+                placeholder={defaultPlaceholder}
+                className="w-full h-20 mt-2 px-3 py-2 rounded-lg resize-none font-mono text-xs opacity-80"
+                style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#AEB4C0' }}
+              />
+              <textarea
                 value={currentModules[key] || ''}
                 onChange={(e) => setModules({ [key]: e.target.value } as Partial<PromptModulesConfig>)}
                 disabled={Boolean(disabled)}
@@ -345,6 +385,13 @@ export function PromptTogglesEditor({
             </button>
           </div>
           <textarea
+            value={defaults?.hard_constraints || ''}
+            readOnly
+            placeholder={defaultPlaceholder}
+            className="w-full h-40 mt-2 px-3 py-2 rounded-lg resize-none font-mono text-xs opacity-80"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#AEB4C0' }}
+          />
+          <textarea
             value={currentModules.hard_constraints || ''}
             onChange={(e) => setModules({ hard_constraints: e.target.value })}
             disabled={Boolean(disabled)}
@@ -391,6 +438,13 @@ export function PromptTogglesEditor({
             </button>
           </div>
           <textarea
+            value={defaults?.output_format || ''}
+            readOnly
+            placeholder={defaultPlaceholder}
+            className="w-full h-40 mt-2 px-3 py-2 rounded-lg resize-none font-mono text-xs opacity-80"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#AEB4C0' }}
+          />
+          <textarea
             value={currentModules.output_format || ''}
             onChange={(e) => setModules({ output_format: e.target.value })}
             disabled={Boolean(disabled)}
@@ -436,6 +490,13 @@ export function PromptTogglesEditor({
               {language === 'zh' ? '清空' : 'Clear'}
             </button>
           </div>
+          <textarea
+            value={defaults?.analysis_core_prompt || ''}
+            readOnly
+            placeholder={defaultPlaceholder}
+            className="w-full h-32 mt-2 px-3 py-2 rounded-lg resize-none font-mono text-xs opacity-80"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#AEB4C0' }}
+          />
           <textarea
             value={currentModules.analysis_core_prompt || ''}
             onChange={(e) => setModules({ analysis_core_prompt: e.target.value })}
@@ -484,6 +545,13 @@ export function PromptTogglesEditor({
               {language === 'zh' ? '清空' : 'Clear'}
             </button>
           </div>
+          <textarea
+            value={defaults?.vision_system_prompt || defaults?.vision_system_prompt_verbose || defaults?.vision_system_prompt_concise || ''}
+            readOnly
+            placeholder={defaultPlaceholder}
+            className="w-full h-40 mt-2 px-3 py-2 rounded-lg resize-none font-mono text-xs opacity-80"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#AEB4C0' }}
+          />
           <textarea
             value={currentModules.vision_system_prompt || ''}
             onChange={(e) => setModules({ vision_system_prompt: e.target.value })}

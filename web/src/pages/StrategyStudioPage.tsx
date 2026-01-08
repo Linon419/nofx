@@ -31,7 +31,7 @@ import {
   Globe,
   SlidersHorizontal,
 } from 'lucide-react'
-import type { Strategy, StrategyConfig, AIModel } from '../types'
+import type { Strategy, StrategyConfig, AIModel, PromptModuleDefaults } from '../types'
 import { confirmToast, notify } from '../lib/notify'
 import { CoinSourceEditor } from '../components/strategy/CoinSourceEditor'
 import { IndicatorEditor } from '../components/strategy/IndicatorEditor'
@@ -84,6 +84,8 @@ export function StrategyStudioPage() {
     config_summary: Record<string, unknown>
   } | null>(null)
   const [isLoadingPrompt, setIsLoadingPrompt] = useState(false)
+  const [promptModuleDefaults, setPromptModuleDefaults] = useState<PromptModuleDefaults | null>(null)
+  const [isLoadingPromptDefaults, setIsLoadingPromptDefaults] = useState(false)
   const [selectedVariant, setSelectedVariant] = useState('balanced')
 
   // AI Test Run states
@@ -460,6 +462,38 @@ export function StrategyStudioPage() {
     }
   }
 
+  const fetchPromptModuleDefaults = useCallback(async () => {
+    if (!token || !editingConfig) return
+    setIsLoadingPromptDefaults(true)
+    try {
+      const response = await fetch(`${API_BASE}/api/strategies/prompt-module-defaults`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          config: editingConfig,
+          account_equity: 1000,
+          prompt_variant: selectedVariant,
+        }),
+      })
+      if (!response.ok) throw new Error('Failed to fetch prompt module defaults')
+      const data = await response.json()
+      setPromptModuleDefaults(data)
+    } catch (err) {
+      console.error('Failed to fetch prompt module defaults:', err)
+      setPromptModuleDefaults(null)
+    } finally {
+      setIsLoadingPromptDefaults(false)
+    }
+  }, [token, editingConfig, selectedVariant])
+
+  useEffect(() => {
+    if (!expandedSections.promptToggles) return
+    fetchPromptModuleDefaults()
+  }, [expandedSections.promptToggles, fetchPromptModuleDefaults])
+
   // Run AI test with real AI model
   const runAiTest = async () => {
     if (!token || !editingConfig || !selectedModelId) return
@@ -631,6 +665,8 @@ export function StrategyStudioPage() {
           onChange={(promptToggles) => updateConfig('prompt_toggles', promptToggles)}
           modules={editingConfig.prompt_modules}
           onModulesChange={(promptModules) => updateConfig('prompt_modules', promptModules)}
+          defaults={promptModuleDefaults || undefined}
+          isLoadingDefaults={isLoadingPromptDefaults}
           disabled={selectedStrategy?.is_default}
           language={language}
           visionEnabled={editingConfig.vision?.enabled}

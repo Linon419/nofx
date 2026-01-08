@@ -422,10 +422,10 @@ func (s *Server) handlePreviewPrompt(c *gin.Context) {
 	)
 
 	c.JSON(http.StatusOK, gin.H{
-		"system_prompt":           systemPrompt,
-		"analysis_system_prompt":  engine.BuildDecisionAnalysisSystemPrompt(),
-		"vision_system_prompt":    engine.BuildVisionSystemPrompt(),
-		"prompt_variant":          req.PromptVariant,
+		"system_prompt":          systemPrompt,
+		"analysis_system_prompt": engine.BuildDecisionAnalysisSystemPrompt(),
+		"vision_system_prompt":   engine.BuildVisionSystemPrompt(),
+		"prompt_variant":         req.PromptVariant,
 		"config_summary": gin.H{
 			"coin_source":      req.Config.CoinSource.SourceType,
 			"primary_tf":       req.Config.Indicators.Klines.PrimaryTimeframe,
@@ -434,6 +434,37 @@ func (s *Server) handlePreviewPrompt(c *gin.Context) {
 			"max_positions":    req.Config.RiskControl.MaxPositions,
 		},
 	})
+}
+
+// handlePromptModuleDefaults returns the system default texts for each editable prompt module,
+// computed based on the given strategy config and runtime parameters.
+func (s *Server) handlePromptModuleDefaults(c *gin.Context) {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var req struct {
+		Config        store.StrategyConfig `json:"config" binding:"required"`
+		AccountEquity float64              `json:"account_equity"`
+		PromptVariant string               `json:"prompt_variant"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		SafeBadRequest(c, "Invalid request parameters")
+		return
+	}
+	if req.AccountEquity <= 0 {
+		req.AccountEquity = 1000.0
+	}
+	if req.PromptVariant == "" {
+		req.PromptVariant = "balanced"
+	}
+
+	engine := kernel.NewStrategyEngine(&req.Config)
+	defaults := engine.BuildPromptModuleDefaults(req.AccountEquity, req.PromptVariant)
+	c.JSON(http.StatusOK, defaults)
 }
 
 // handleStrategyTestRun AI test run (does not execute trades, only returns AI analysis results)
@@ -565,42 +596,42 @@ func (s *Server) handleStrategyTestRun(c *gin.Context) {
 		aiResponse, aiErr := s.runRealAITest(userID, req.AIModelID, systemPrompt, userPrompt)
 		if aiErr != nil {
 			c.JSON(http.StatusOK, gin.H{
-				"system_prompt":   systemPrompt,
-				"user_prompt":     userPrompt,
-				"candidate_count": len(candidates),
-				"candidates":      candidates,
+				"system_prompt":      systemPrompt,
+				"user_prompt":        userPrompt,
+				"candidate_count":    len(candidates),
+				"candidates":         candidates,
 				"candidate_warnings": candidateWarnings,
-				"prompt_variant":  req.PromptVariant,
-				"ai_response":     fmt.Sprintf("❌ AI call failed: %s", aiErr.Error()),
-				"ai_error":        aiErr.Error(),
-				"note":            "AI call error",
+				"prompt_variant":     req.PromptVariant,
+				"ai_response":        fmt.Sprintf("❌ AI call failed: %s", aiErr.Error()),
+				"ai_error":           aiErr.Error(),
+				"note":               "AI call error",
 			})
 			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"system_prompt":   systemPrompt,
-			"user_prompt":     userPrompt,
-			"candidate_count": len(candidates),
-			"candidates":      candidates,
+			"system_prompt":      systemPrompt,
+			"user_prompt":        userPrompt,
+			"candidate_count":    len(candidates),
+			"candidates":         candidates,
 			"candidate_warnings": candidateWarnings,
-			"prompt_variant":  req.PromptVariant,
-			"ai_response":     aiResponse,
-			"note":            "✅ Real AI test run successful",
+			"prompt_variant":     req.PromptVariant,
+			"ai_response":        aiResponse,
+			"note":               "✅ Real AI test run successful",
 		})
 		return
 	}
 
 	// Return result (without actually calling AI, only return built prompt)
 	c.JSON(http.StatusOK, gin.H{
-		"system_prompt":   systemPrompt,
-		"user_prompt":     userPrompt,
-		"candidate_count": len(candidates),
-		"candidates":      candidates,
+		"system_prompt":      systemPrompt,
+		"user_prompt":        userPrompt,
+		"candidate_count":    len(candidates),
+		"candidates":         candidates,
 		"candidate_warnings": candidateWarnings,
-		"prompt_variant":  req.PromptVariant,
-		"ai_response":     "Please select an AI model and click 'Run Test' to perform real AI analysis.",
-		"note":            "AI model not selected or real AI call not enabled",
+		"prompt_variant":     req.PromptVariant,
+		"ai_response":        "Please select an AI model and click 'Run Test' to perform real AI analysis.",
+		"note":               "AI model not selected or real AI call not enabled",
 	})
 }
 
