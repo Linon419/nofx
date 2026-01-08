@@ -3,9 +3,17 @@ package kernel
 import "strings"
 
 func (e *StrategyEngine) buildDecisionAnalysisSystemPrompt() string {
+	toggles := e.config.PromptToggles
+	if !boolOrDefault(toggles.EnableAnalysisStage, true) {
+		return ""
+	}
+
 	lang := detectLanguage(e.config.PromptSections.RoleDefinition)
+	includeSchema := boolOrDefault(toggles.IncludeSchemaPrompt, true)
+
+	var suffix string
 	if lang == LangChinese {
-		return strings.TrimSpace(GetSchemaPromptLite(lang) + `
+		suffix = `
 
 ---
 
@@ -17,10 +25,9 @@ func (e *StrategyEngine) buildDecisionAnalysisSystemPrompt() string {
 - 禁止任何方向判断/预测/建议：不要使用看多/看空/上涨/下跌/趋势/大概率等结论性措辞。
 - 允许指出不确定性、冲突信号、关键风险与需要满足的条件，但禁止给出任何交易动作/指令（open/close/hold/wait 等）。
 - 禁止输出任何 JSON（尤其是决策数组），也不要输出 <decision> / <reasoning> 等标签。
-- 纯文本，不要代码块。`)
-	}
-
-	return strings.TrimSpace(GetSchemaPromptLite(lang) + `
+- 纯文本，不要代码块。`
+	} else {
+		suffix = `
 
 ---
 
@@ -32,7 +39,13 @@ Rules:
 - No directional judgement, predictions, or recommendations. Do NOT use words like bullish/bearish, uptrend/downtrend, likely to rise/fall, etc.
 - You may highlight uncertainty, conflicting signals, key risks, and conditions to be met, but you must NOT output any trading actions or instructions (open/close/hold/wait, etc.).
 - Do NOT output any JSON (especially no decision arrays), and do NOT use tags like <decision>/<reasoning>.
-- Plain text only. Do not use code blocks.`)
+- Plain text only. Do not use code blocks.`
+	}
+
+	if includeSchema {
+		return strings.TrimSpace(GetSchemaPromptLite(lang) + suffix)
+	}
+	return strings.TrimSpace(strings.TrimPrefix(suffix, "\n\n---\n\n"))
 }
 
 func appendDecisionAnalysisNotes(userPrompt, notes string) string {

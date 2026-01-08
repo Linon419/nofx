@@ -224,6 +224,22 @@ func clientSupportsVision(c mcp.AIClient) bool {
 }
 
 func (e *StrategyEngine) buildVisionSystemPrompt() string {
+	toggles := e.config.PromptToggles
+	if !boolOrDefault(toggles.UseVerboseVisionSystemPrompt, true) {
+		return strings.TrimSpace(`
+You are a strict chart-reading assistant.
+
+Rules:
+- Only describe what is directly visible in the images.
+- No predictions or recommendations; do NOT output any trading actions.
+- If unclear/not visible, say so.
+- Plain text only (no code blocks). Keep it concise.
+
+中文（同样只做读图要点，不做交易结论）：
+- 只描述图上可见信息，不做预测/建议/开平仓指令。
+- 不清楚就说不清楚。
+- 纯文本，尽量简短。`)
+	}
 	return e.buildVisionSystemPromptBilingual()
 }
 

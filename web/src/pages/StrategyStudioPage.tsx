@@ -29,6 +29,7 @@ import {
   Download,
   Upload,
   Globe,
+  SlidersHorizontal,
 } from 'lucide-react'
 import type { Strategy, StrategyConfig, AIModel } from '../types'
 import { confirmToast, notify } from '../lib/notify'
@@ -37,6 +38,7 @@ import { IndicatorEditor } from '../components/strategy/IndicatorEditor'
 import { VisionEditor } from '../components/strategy/VisionEditor'
 import { RiskControlEditor } from '../components/strategy/RiskControlEditor'
 import { PromptSectionsEditor } from '../components/strategy/PromptSectionsEditor'
+import { PromptTogglesEditor } from '../components/strategy/PromptTogglesEditor'
 import { PublishSettingsEditor } from '../components/strategy/PublishSettingsEditor'
 import { DeepVoidBackground } from '../components/DeepVoidBackground'
 
@@ -65,6 +67,7 @@ export function StrategyStudioPage() {
     vision: false,
     riskControl: false,
     promptSections: false,
+    promptToggles: false,
     customPrompt: false,
     publishSettings: false,
   })
@@ -499,6 +502,7 @@ export function StrategyStudioPage() {
       vision: { zh: '视觉读图', en: 'Vision' },
       riskControl: { zh: '风控参数', en: 'Risk Control' },
       promptSections: { zh: 'Prompt 编辑', en: 'Prompt Editor' },
+      promptToggles: { zh: 'Prompt 开关', en: 'Prompt Toggles' },
       customPrompt: { zh: '附加提示', en: 'Extra Prompt' },
       save: { zh: '保存', en: 'Save' },
       saving: { zh: '保存中...', en: 'Saving...' },
@@ -613,6 +617,21 @@ export function StrategyStudioPage() {
           onChange={(promptSections) => updateConfig('prompt_sections', promptSections)}
           disabled={selectedStrategy?.is_default}
           language={language}
+        />
+      ),
+    },
+    {
+      key: 'promptToggles' as const,
+      icon: SlidersHorizontal,
+      color: '#60a5fa',
+      title: t('promptToggles'),
+      content: editingConfig && (
+        <PromptTogglesEditor
+          config={editingConfig.prompt_toggles}
+          onChange={(promptToggles) => updateConfig('prompt_toggles', promptToggles)}
+          disabled={selectedStrategy?.is_default}
+          language={language}
+          visionEnabled={editingConfig.vision?.enabled}
         />
       ),
     },

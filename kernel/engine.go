@@ -142,6 +142,7 @@ type Context struct {
 	PromptVariant      string                             `json:"prompt_variant,omitempty"`
 	TradingStats       *TradingStats                      `json:"trading_stats,omitempty"`
 	RecentOrders       []RecentOrder                      `json:"recent_orders,omitempty"`
+	StopLossFlipAlerts []StopLossFlipAlert                `json:"stop_loss_flip_alerts,omitempty"`
 	MarketDataMap      map[string]*market.Data            `json:"-"`
 	MultiTFMarket      map[string]map[string]*market.Data `json:"-"`
 	OITopDataMap       map[string]*OITopData              `json:"-"`
@@ -152,6 +153,20 @@ type Context struct {
 	BTCETHLeverage     int                                `json:"-"`
 	AltcoinLeverage    int                                `json:"-"`
 	Timeframes         []string                           `json:"-"`
+}
+
+type StopLossFlipAlert struct {
+	Symbol         string  `json:"symbol"`
+	OriginalSide   string  `json:"original_side"` // LONG/SHORT
+	ReverseSide    string  `json:"reverse_side"`  // LONG/SHORT
+	Quantity       float64 `json:"quantity"`
+	Leverage       int     `json:"leverage"`
+	EntryPrice     float64 `json:"entry_price"`
+	StopLossPrice  float64 `json:"stop_loss_price"`
+	CloseExitPrice float64 `json:"close_exit_price"`
+	RecoveryTarget float64 `json:"recovery_target"`
+	ErrorMessage   string  `json:"error_message,omitempty"`
+	UpdatedAtMs    int64   `json:"updated_at_ms,omitempty"`
 }
 
 // Decision AI trading decision
@@ -362,7 +377,7 @@ func getFullDecisionWithStrategyInternal(ctx *Context, mcpClient mcp.AIClient, a
 	userPrompt := engine.BuildUserPromptWithOptions(ctx, userPromptOpts)
 
 	decisionPrompt := userPrompt
-	if analysisClient != nil {
+	if analysisClient != nil && boolOrDefault(engine.config.PromptToggles.EnableAnalysisStage, true) {
 		analysisSystem := engine.buildDecisionAnalysisSystemPrompt()
 		analysisStart := time.Now()
 		analysisNotes, err := analysisClient.CallWithMessages(analysisSystem, userPrompt)
@@ -376,6 +391,8 @@ func getFullDecisionWithStrategyInternal(ctx *Context, mcpClient mcp.AIClient, a
 				logger.Infof("🧠 Pre-analysis stage completed in %d ms", analysisDur.Milliseconds())
 			}
 		}
+	} else if analysisClient != nil {
+		logger.Infof("🧠 Pre-analysis stage disabled by strategy prompt toggles")
 	}
 
 	callAIAndParse := func(prompt string) (*FullDecision, error) {
@@ -1539,14 +1556,22 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	var sb strings.Builder
 	riskControl := e.config.RiskControl
 	promptSections := e.config.PromptSections
+	toggles := e.config.PromptToggles
 	exitPlanID := normalizeExitPlanID(promptSections.ExitStrategyPlan)
 
 	// 0. Data Dictionary & Schema (ensure AI understands all fields)
 	lang := detectLanguage(promptSections.RoleDefinition)
-	schemaPrompt := GetSchemaPrompt(lang)
-	sb.WriteString(schemaPrompt)
-	sb.WriteString("\n\n")
-	sb.WriteString("---\n\n")
+	includeSchemaPrompt := boolOrDefault(toggles.IncludeSchemaPrompt, true)
+	includeModeVariant := boolOrDefault(toggles.IncludeModeVariant, true)
+	includeHardConstraints := boolOrDefault(toggles.IncludeHardConstraints, true)
+	includeOutputFormat := boolOrDefault(toggles.IncludeOutputFormat, true)
+
+	if includeSchemaPrompt {
+		schemaPrompt := GetSchemaPrompt(lang)
+		sb.WriteString(schemaPrompt)
+		sb.WriteString("\n\n")
+		sb.WriteString("---\n\n")
+	}
 
 	// 1. Role definition (editable)
 	if promptSections.RoleDefinition != "" {
@@ -1558,13 +1583,15 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	}
 
 	// 2. Trading mode variant
-	switch strings.ToLower(strings.TrimSpace(variant)) {
-	case "aggressive":
-		sb.WriteString("## Mode: Aggressive\n- Prioritize capturing trend breakouts, can build positions in batches when confidence >=70\n- Allow higher positions, but must strictly set stop-loss and explain risk-reward ratio\n\n")
-	case "conservative":
-		sb.WriteString("## Mode: Conservative\n- Only open positions when multiple signals resonate\n- Prioritize cash preservation, must pause for multiple periods after consecutive losses\n\n")
-	case "scalping":
-		sb.WriteString("## Mode: Scalping\n- Focus on short-term momentum, smaller profit targets but require quick action\n- If price doesn't move as expected within two bars, immediately reduce position or stop-loss\n\n")
+	if includeModeVariant {
+		switch strings.ToLower(strings.TrimSpace(variant)) {
+		case "aggressive":
+			sb.WriteString("## Mode: Aggressive\n- Prioritize capturing trend breakouts, can build positions in batches when confidence >=70\n- Allow higher positions, but must strictly set stop-loss and explain risk-reward ratio\n\n")
+		case "conservative":
+			sb.WriteString("## Mode: Conservative\n- Only open positions when multiple signals resonate\n- Prioritize cash preservation, must pause for multiple periods after consecutive losses\n\n")
+		case "scalping":
+			sb.WriteString("## Mode: Scalping\n- Focus on short-term momentum, smaller profit targets but require quick action\n- If price doesn't move as expected within two bars, immediately reduce position or stop-loss\n\n")
+		}
 	}
 
 	// 3. Hard constraints (risk control)
@@ -1577,43 +1604,75 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 		altcoinPosValueRatio = 1.0
 	}
 
-	sb.WriteString("# Hard Constraints (Risk Control)\n\n")
-	sb.WriteString("## CODE ENFORCED (Backend validation, cannot be bypassed):\n")
-	sb.WriteString(fmt.Sprintf("- Max Positions: %d coins simultaneously\n", riskControl.MaxPositions))
-	sb.WriteString(fmt.Sprintf("- Position Value Limit (Altcoins): max %.0f USDT (= equity %.0f * %.1fx)\n",
-		accountEquity*altcoinPosValueRatio, accountEquity, altcoinPosValueRatio))
-	sb.WriteString(fmt.Sprintf("- Position Value Limit (BTC/ETH): max %.0f USDT (= equity %.0f * %.1fx)\n",
-		accountEquity*btcEthPosValueRatio, accountEquity, btcEthPosValueRatio))
-	sb.WriteString(fmt.Sprintf("- Max Margin Usage: <=%.0f%%\n", riskControl.MaxMarginUsage*100))
-	minPositionSize := riskControl.MinPositionSize
-	if minPositionSize <= 0 {
-		minPositionSize = 12
-	}
-	enforceMinPositionSize := true
-	if riskControl.EnforceMinPositionSize != nil {
-		enforceMinPositionSize = *riskControl.EnforceMinPositionSize
-	}
-	if enforceMinPositionSize {
-		sb.WriteString(fmt.Sprintf("- Min Position Size (Altcoins): >=%.0f USDT\n", minPositionSize))
-		btcEthMinPositionSize := minPositionSize
-		if btcEthMinPositionSize < 60 {
-			btcEthMinPositionSize = 60
+	if includeHardConstraints {
+		sb.WriteString("# Hard Constraints (Risk Control)\n\n")
+		sb.WriteString("## CODE ENFORCED (Backend validation, cannot be bypassed):\n")
+		sb.WriteString(fmt.Sprintf("- Max Positions: %d coins simultaneously\n", riskControl.MaxPositions))
+		sb.WriteString(fmt.Sprintf("- Position Value Limit (Altcoins): max %.0f USDT (= equity %.0f * %.1fx)\n",
+			accountEquity*altcoinPosValueRatio, accountEquity, altcoinPosValueRatio))
+		sb.WriteString(fmt.Sprintf("- Position Value Limit (BTC/ETH): max %.0f USDT (= equity %.0f * %.1fx)\n",
+			accountEquity*btcEthPosValueRatio, accountEquity, btcEthPosValueRatio))
+		sb.WriteString(fmt.Sprintf("- Max Margin Usage: <=%.0f%%\n", riskControl.MaxMarginUsage*100))
+		minPositionSize := riskControl.MinPositionSize
+		if minPositionSize <= 0 {
+			minPositionSize = 12
 		}
-		sb.WriteString(fmt.Sprintf("- Min Position Size (BTC/ETH): >=%.0f USDT\n\n", btcEthMinPositionSize))
-	} else {
-		sb.WriteString("- Min Position Size: disabled (exchange may reject small orders)\n\n")
+		enforceMinPositionSize := true
+		if riskControl.EnforceMinPositionSize != nil {
+			enforceMinPositionSize = *riskControl.EnforceMinPositionSize
+		}
+		if enforceMinPositionSize {
+			sb.WriteString(fmt.Sprintf("- Min Position Size (Altcoins): >=%.0f USDT\n", minPositionSize))
+			btcEthMinPositionSize := minPositionSize
+			if btcEthMinPositionSize < 60 {
+				btcEthMinPositionSize = 60
+			}
+			sb.WriteString(fmt.Sprintf("- Min Position Size (BTC/ETH): >=%.0f USDT\n\n", btcEthMinPositionSize))
+		} else {
+			sb.WriteString("- Min Position Size: disabled (exchange may reject small orders)\n\n")
+		}
+
+		sb.WriteString("## AI GUIDED (Recommended, you should follow):\n")
+		sb.WriteString(fmt.Sprintf("- Trading Leverage: Altcoins max %dx | BTC/ETH max %dx\n",
+			riskControl.AltcoinMaxLeverage, riskControl.BTCETHMaxLeverage))
+		sb.WriteString(fmt.Sprintf("- Risk-Reward Ratio: >=1:%.1f (take_profit / stop_loss)\n", riskControl.MinRiskRewardRatio))
+		if lang == LangChinese {
+			sb.WriteString("- RR 不足时：直接输出 wait；不要为了满足 RR 去移动止损/止盈（SL/TP）。优先保持结构失效位的止损与合理目标位。\n")
+		} else {
+			sb.WriteString("- If RR is insufficient: output wait; do NOT move SL/TP just to satisfy the RR constraint. Keep SL at the structural invalidation level and TP at a realistic target.\n")
+		}
+		sb.WriteString(fmt.Sprintf("- Min Confidence: >=%d to open position\n\n", riskControl.MinConfidence))
 	}
 
-	sb.WriteString("## AI GUIDED (Recommended, you should follow):\n")
-	sb.WriteString(fmt.Sprintf("- Trading Leverage: Altcoins max %dx | BTC/ETH max %dx\n",
-		riskControl.AltcoinMaxLeverage, riskControl.BTCETHMaxLeverage))
-	sb.WriteString(fmt.Sprintf("- Risk-Reward Ratio: >=1:%.1f (take_profit / stop_loss)\n", riskControl.MinRiskRewardRatio))
-	if lang == LangChinese {
-		sb.WriteString("- RR 不足时：直接输出 wait；不要为了满足 RR 去移动止损/止盈（SL/TP）。优先保持结构失效位的止损与合理目标位。\n")
-	} else {
-		sb.WriteString("- If RR is insufficient: output wait; do NOT move SL/TP just to satisfy the RR constraint. Keep SL at the structural invalidation level and TP at a realistic target.\n")
+	// Stop-loss flip (reverse after stop-loss triggers, one-way/net mode)
+	if riskControl.StopLossFlipEnabled {
+		runnerRatio := riskControl.StopLossFlipRunnerRatio
+		if runnerRatio <= 0 || runnerRatio >= 1 {
+			runnerRatio = 0.3
+		}
+		trailPct := riskControl.StopLossFlipTrailPct
+		if trailPct <= 0 || trailPct >= 0.2 {
+			trailPct = 0.003
+		}
+		pollSecs := riskControl.StopLossFlipPollSecs
+		if pollSecs <= 0 || pollSecs > 300 {
+			pollSecs = 10
+		}
+
+		if lang == LangChinese {
+			sb.WriteString("## 止损反手（止损触发后自动反向开仓）\n")
+			sb.WriteString("- 已启用：当止损导致平仓后，系统可能自动以相同数量反向开仓（单向/净持仓模式）。\n")
+			sb.WriteString(fmt.Sprintf("- 复原目标：到达复原价位先止盈 %.0f%%，保留 %.0f%% runner；runner 使用 %.3f%% 跟踪止损（轮询 %d 秒）。\n",
+				(1-runnerRatio)*100, runnerRatio*100, trailPct*100, pollSecs))
+			sb.WriteString("- 这是执行层行为；你仍然必须为每一次开新仓给出合理的 stop_loss / take_profit。\n\n")
+		} else {
+			sb.WriteString("## Stop-Loss Flip (Auto Reverse After Stop-Out)\n")
+			sb.WriteString("- Enabled: after a stop-loss closes a position, the system may auto-open an equal reverse position (one-way/net mode).\n")
+			sb.WriteString(fmt.Sprintf("- Recovery: close %.0f%% at recovery target, keep %.0f%% runner; runner trails by %.3f%% (poll %ds).\n",
+				(1-runnerRatio)*100, runnerRatio*100, trailPct*100, pollSecs))
+			sb.WriteString("- This is execution-layer behavior; you must still provide sensible stop_loss / take_profit for every new position.\n\n")
+		}
 	}
-	sb.WriteString(fmt.Sprintf("- Min Confidence: >=%d to open position\n\n", riskControl.MinConfidence))
 
 	// Data integrity / anti-hallucination rules
 	sb.WriteString("# Data Integrity (Anti-Hallucination)\n\n")
@@ -1718,53 +1777,56 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	}
 
 	// 7. Output format
-	sb.WriteString("# Output Format (Strictly Follow)\n\n")
-	sb.WriteString("**Must use XML tags <reasoning> and <decision> to separate brief public rationale and decision JSON, avoiding parsing errors**\n\n")
-	sb.WriteString("## Format Requirements\n\n")
-	sb.WriteString("<reasoning>\n")
-	sb.WriteString("Requirements:\n")
-	sb.WriteString("- Write brief public rationale notes grouped by symbol (recommended: 2-6 bullets per symbol, total <= 40 lines).\n")
-	sb.WriteString("- Do NOT output chain-of-thought.\n")
-	sb.WriteString("</reasoning>\n\n")
-	sb.WriteString("<decision>\n")
-	sb.WriteString("Requirements:\n")
-	sb.WriteString("- Only output a pure JSON array inside <decision> ... </decision> (no extra text).\n")
-	sb.WriteString("- Do NOT use code fences (no ```).\n\n")
-	sb.WriteString("[\n")
-	// Use the actual configured position value ratio for BTC/ETH in the example
-	examplePositionSize := accountEquity * btcEthPosValueRatio
-	exitPlanExample := buildExitPlanExample(exitPlanID)
-	sb.WriteString("  {\n")
-	sb.WriteString("    \"symbol\": \"BTCUSDT\",\n")
-	sb.WriteString("    \"action\": \"open_short\",\n")
-	sb.WriteString(fmt.Sprintf("    \"leverage\": %d,\n", riskControl.BTCETHMaxLeverage))
-	sb.WriteString(fmt.Sprintf("    \"position_size_usd\": %.0f,\n", examplePositionSize))
-	sb.WriteString("    \"stop_loss\": 97000,\n")
-	sb.WriteString("    \"take_profit\": 91000,\n")
-	sb.WriteString("    \"confidence\": 85,\n")
-	sb.WriteString("    \"risk_usd\": 300,\n")
-	sb.WriteString("    \"reasoning\": \"One sentence summary of why this action is taken\"")
-	if exitPlanExample != "" {
-		sb.WriteString(",\n")
-		sb.WriteString(exitPlanExample)
-	} else {
-		sb.WriteString("\n")
+	if includeOutputFormat {
+		sb.WriteString("# Output Format (Strictly Follow)\n\n")
+		sb.WriteString("**Must use XML tags <reasoning> and <decision> to separate brief public rationale and decision JSON, avoiding parsing errors**\n\n")
+		sb.WriteString("## Format Requirements\n\n")
+		sb.WriteString("<reasoning>\n")
+		sb.WriteString("Requirements:\n")
+		sb.WriteString("- Write brief public rationale notes grouped by symbol (recommended: 2-6 bullets per symbol, total <= 40 lines).\n")
+		sb.WriteString("- Do NOT output chain-of-thought.\n")
+		sb.WriteString("</reasoning>\n\n")
+		sb.WriteString("<decision>\n")
+		sb.WriteString("Requirements:\n")
+		sb.WriteString("- Only output a pure JSON array inside <decision> ... </decision> (no extra text).\n")
+		sb.WriteString("- Do NOT use code fences (no ```).\n\n")
+		sb.WriteString("[\n")
+		// Use the actual configured position value ratio for BTC/ETH in the example
+		examplePositionSize := accountEquity * btcEthPosValueRatio
+		exitPlanExample := buildExitPlanExample(exitPlanID)
+		sb.WriteString("  {\n")
+		sb.WriteString("    \"symbol\": \"BTCUSDT\",\n")
+		sb.WriteString("    \"action\": \"open_short\",\n")
+		sb.WriteString(fmt.Sprintf("    \"leverage\": %d,\n", riskControl.BTCETHMaxLeverage))
+		sb.WriteString(fmt.Sprintf("    \"position_size_usd\": %.0f,\n", examplePositionSize))
+		sb.WriteString("    \"stop_loss\": 97000,\n")
+		sb.WriteString("    \"take_profit\": 91000,\n")
+		sb.WriteString("    \"confidence\": 85,\n")
+		sb.WriteString("    \"risk_usd\": 300,\n")
+		sb.WriteString("    \"reasoning\": \"One sentence summary of why this action is taken\"")
+		if exitPlanExample != "" {
+			sb.WriteString(",\n")
+			sb.WriteString(exitPlanExample)
+		} else {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("  },\n")
+		sb.WriteString("  {\"symbol\": \"ETHUSDT\", \"action\": \"close_long\"}\n")
+		sb.WriteString("]\n")
+		sb.WriteString("</decision>\n\n")
+		sb.WriteString("## Field Description\n\n")
+		sb.WriteString("- `action`: open_long | open_short | close_long | close_short | hold | wait\n")
+		sb.WriteString(fmt.Sprintf("- `confidence`: 0-100 (opening recommended >=%d)\n", riskControl.MinConfidence))
+		sb.WriteString("- Required when opening: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd\n")
+		sb.WriteString("- `exit_plan`: required when opening if exit plan is configured; must match plan_id and component rules\n")
+		sb.WriteString("- **IMPORTANT**: All numeric values must be calculated numbers, NOT formulas/expressions (e.g., use `27.76` not `3000 * 0.01`)\n\n")
+		sb.WriteString("## JSON Strictness (Must Follow)\n\n")
+		sb.WriteString("- No range/approx symbols in JSON: do not use `~` or `～` anywhere (e.g., use `88336`, not `~88336` or `88000~89000`)\n")
+		sb.WriteString("- No thousand separators in JSON numbers (e.g., `98000`, not `98,000`)\n")
+		sb.WriteString("- No comments in JSON (no `//` or `/* */`)\n\n")
+		sb.WriteString("- No trailing commas in JSON\n\n")
+
 	}
-	sb.WriteString("  },\n")
-	sb.WriteString("  {\"symbol\": \"ETHUSDT\", \"action\": \"close_long\"}\n")
-	sb.WriteString("]\n")
-	sb.WriteString("</decision>\n\n")
-	sb.WriteString("## Field Description\n\n")
-	sb.WriteString("- `action`: open_long | open_short | close_long | close_short | hold | wait\n")
-	sb.WriteString(fmt.Sprintf("- `confidence`: 0-100 (opening recommended >=%d)\n", riskControl.MinConfidence))
-	sb.WriteString("- Required when opening: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd\n")
-	sb.WriteString("- `exit_plan`: required when opening if exit plan is configured; must match plan_id and component rules\n")
-	sb.WriteString("- **IMPORTANT**: All numeric values must be calculated numbers, NOT formulas/expressions (e.g., use `27.76` not `3000 * 0.01`)\n\n")
-	sb.WriteString("## JSON Strictness (Must Follow)\n\n")
-	sb.WriteString("- No range/approx symbols in JSON: do not use `~` or `～` anywhere (e.g., use `88336`, not `~88336` or `88000~89000`)\n")
-	sb.WriteString("- No thousand separators in JSON numbers (e.g., `98000`, not `98,000`)\n")
-	sb.WriteString("- No comments in JSON (no `//` or `/* */`)\n\n")
-	sb.WriteString("- No trailing commas in JSON\n\n")
 
 	// 8. Custom Prompt
 	if e.config.CustomPrompt != "" {
@@ -1877,6 +1939,8 @@ func (e *StrategyEngine) BuildUserPrompt(ctx *Context) string {
 func (e *StrategyEngine) BuildUserPromptWithOptions(ctx *Context, opts UserPromptOptions) string {
 	var sb strings.Builder
 
+	lang := detectLanguage(e.config.PromptSections.RoleDefinition)
+
 	allowedCandidates := map[string]bool{}
 	if len(opts.CandidateSymbols) > 0 {
 		for _, s := range opts.CandidateSymbols {
@@ -1891,11 +1955,99 @@ func (e *StrategyEngine) BuildUserPromptWithOptions(ctx *Context, opts UserPromp
 	sb.WriteString(fmt.Sprintf("Time: %s | Period: #%d | Runtime: %d minutes\n\n",
 		ctx.CurrentTime, ctx.CallCount, ctx.RuntimeMinutes))
 
+	if e.config.RiskControl.StopLossFlipEnabled {
+		runnerRatio := e.config.RiskControl.StopLossFlipRunnerRatio
+		if runnerRatio <= 0 || runnerRatio >= 1 {
+			runnerRatio = 0.3
+		}
+		trailPct := e.config.RiskControl.StopLossFlipTrailPct
+		if trailPct <= 0 || trailPct >= 0.2 {
+			trailPct = 0.003
+		}
+		pollSecs := e.config.RiskControl.StopLossFlipPollSecs
+		if pollSecs <= 0 || pollSecs > 300 {
+			pollSecs = 10
+		}
+
+		if lang == LangChinese {
+			sb.WriteString(fmt.Sprintf("止损反手: 已启用（止损触发后自动反向开仓；runner %.0f%%；跟踪止损 %.3f%%；轮询 %d 秒）\n\n",
+				runnerRatio*100, trailPct*100, pollSecs))
+		} else {
+			sb.WriteString(fmt.Sprintf("Stop-loss flip: ENABLED (auto reverse after stop-loss; runner %.0f%%; trail %.3f%%; poll %ds)\n\n",
+				runnerRatio*100, trailPct*100, pollSecs))
+		}
+	}
+
+	if len(ctx.StopLossFlipAlerts) > 0 {
+		if lang == LangChinese {
+			sb.WriteString("## 止损反手告警（自动反手失败）\n")
+			sb.WriteString("以下币种止损后自动反手未成功。如果当前该币种已无持仓（flat），请优先用标准决策 JSON 主动开反向仓：\n\n")
+		} else {
+			sb.WriteString("## Stop-Loss Flip Alerts (Automation Failed)\n")
+			sb.WriteString("Auto reverse-after-stop-loss failed for the symbols below. If you are currently flat on the symbol, proactively open the reverse position using the standard decision JSON:\n\n")
+		}
+
+		maxAlerts := 5
+		if len(ctx.StopLossFlipAlerts) < maxAlerts {
+			maxAlerts = len(ctx.StopLossFlipAlerts)
+		}
+		for i := 0; i < maxAlerts; i++ {
+			a := ctx.StopLossFlipAlerts[i]
+			sym := market.Normalize(a.Symbol)
+			if sym == "" {
+				sym = a.Symbol
+			}
+
+			revSide := strings.ToUpper(strings.TrimSpace(a.ReverseSide))
+			action := "open_long"
+			if revSide == "SHORT" {
+				action = "open_short"
+			}
+
+			refPrice := 0.0
+			if ctx.MarketDataMap != nil {
+				if md, ok := ctx.MarketDataMap[sym]; ok && md != nil && md.CurrentPrice > 0 {
+					refPrice = md.CurrentPrice
+				}
+			}
+			if refPrice <= 0 && a.CloseExitPrice > 0 {
+				refPrice = a.CloseExitPrice
+			}
+			approxUSD := 0.0
+			if refPrice > 0 && a.Quantity > 0 {
+				approxUSD = a.Quantity * refPrice
+			}
+
+			usdHint := "unknown"
+			if approxUSD > 0 {
+				usdHint = fmt.Sprintf("%.2f", approxUSD)
+			}
+
+			if lang == LangChinese {
+				sb.WriteString(fmt.Sprintf("%d) %s：原始 %s 止损，自动反手失败：%s\n", i+1, sym, a.OriginalSide, strings.TrimSpace(a.ErrorMessage)))
+				sb.WriteString(fmt.Sprintf("   - 建议手动反手：%s（leverage=%d，position_size_usd≈%s，stop_loss=%.6f，take_profit=%.6f）\n",
+					action, a.Leverage, usdHint, a.EntryPrice, a.RecoveryTarget))
+			} else {
+				sb.WriteString(fmt.Sprintf("%d) %s: original %s stop-out; auto flip failed: %s\n", i+1, sym, a.OriginalSide, strings.TrimSpace(a.ErrorMessage)))
+				sb.WriteString(fmt.Sprintf("   - Suggested manual flip: %s (leverage=%d, position_size_usd≈%s, stop_loss=%.6f, take_profit=%.6f)\n",
+					action, a.Leverage, usdHint, a.EntryPrice, a.RecoveryTarget))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
 	// BTC market
 	if btcData, hasBTC := ctx.MarketDataMap["BTCUSDT"]; hasBTC {
-		sb.WriteString(fmt.Sprintf("BTC: %.2f (1h: %+.2f%%, 4h: %+.2f%%) | MACD: %.4f | RSI: %.2f\n\n",
-			btcData.CurrentPrice, btcData.PriceChange1h, btcData.PriceChange4h,
-			btcData.CurrentMACD, btcData.CurrentRSI7))
+		line := fmt.Sprintf("BTC: %.2f (1h: %+.2f%%, 4h: %+.2f%%)",
+			btcData.CurrentPrice, btcData.PriceChange1h, btcData.PriceChange4h)
+		indicators := e.config.Indicators
+		if indicators.EnableMACD {
+			line += fmt.Sprintf(" | MACD: %.4f", btcData.CurrentMACD)
+		}
+		if indicators.EnableRSI {
+			line += fmt.Sprintf(" | RSI: %.2f", btcData.CurrentRSI7)
+		}
+		sb.WriteString(line + "\n\n")
 	}
 
 	// Account information
@@ -1930,9 +2082,6 @@ func (e *StrategyEngine) BuildUserPromptWithOptions(ctx *Context, opts UserPromp
 
 	// Historical trading statistics (helps AI understand past performance)
 	if ctx.TradingStats != nil && ctx.TradingStats.TotalTrades > 0 {
-		// Detect language from strategy config
-		lang := detectLanguage(e.config.PromptSections.RoleDefinition)
-
 		// Win/Loss ratio
 		var winLossRatio float64
 		if ctx.TradingStats.AvgLoss > 0 {

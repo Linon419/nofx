@@ -551,6 +551,15 @@ export interface PromptSectionsConfig {
   recent_trades_limit?: number;
 }
 
+export interface PromptTogglesConfig {
+  include_schema_prompt?: boolean;
+  include_mode_variant?: boolean;
+  include_hard_constraints?: boolean;
+  include_output_format?: boolean;
+  enable_analysis_stage?: boolean;
+  use_verbose_vision_system_prompt?: boolean;
+}
+
 export interface StrategyConfig {
   // Language setting: "zh" for Chinese, "en" for English
   // Determines the language used for data formatting and prompt generation
@@ -561,6 +570,7 @@ export interface StrategyConfig {
   custom_prompt?: string;
   risk_control: RiskControlConfig;
   prompt_sections?: PromptSectionsConfig;
+  prompt_toggles?: PromptTogglesConfig;
 }
 
 export interface VisionConfig {

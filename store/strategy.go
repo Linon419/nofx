@@ -47,6 +47,8 @@ type StrategyConfig struct {
 	RiskControl RiskControlConfig `json:"risk_control"`
 	// editable sections of System Prompt
 	PromptSections PromptSectionsConfig `json:"prompt_sections,omitempty"`
+	// toggles for built-in prompt modules (token & behavior control)
+	PromptToggles PromptTogglesConfig `json:"prompt_toggles,omitempty"`
 }
 
 // VisionConfig controls chart rendering + multimodal sending for vision-capable models.
@@ -104,6 +106,23 @@ type PromptSectionsConfig struct {
 	ExitStrategyPlan string `json:"exit_strategy_plan,omitempty"`
 	// recent closed trades to include in User Prompt context
 	RecentTradesLimit int `json:"recent_trades_limit,omitempty"`
+}
+
+// PromptTogglesConfig controls whether built-in prompt modules are included.
+// NOTE: Backend risk control validation still applies even if prompt text modules are turned off.
+type PromptTogglesConfig struct {
+	// IncludeSchemaPrompt controls whether the schema/data dictionary preface is included in system/analysis prompts.
+	IncludeSchemaPrompt *bool `json:"include_schema_prompt,omitempty"`
+	// IncludeModeVariant controls whether the aggressive/conservative/scalping variant block is included.
+	IncludeModeVariant *bool `json:"include_mode_variant,omitempty"`
+	// IncludeHardConstraints controls whether the "Hard Constraints" explanatory text is included in the system prompt.
+	IncludeHardConstraints *bool `json:"include_hard_constraints,omitempty"`
+	// IncludeOutputFormat controls whether the XML+JSON output-format instructions are included in the system prompt.
+	IncludeOutputFormat *bool `json:"include_output_format,omitempty"`
+	// EnableAnalysisStage controls whether the pre-analysis stage is executed when an analysis model is configured.
+	EnableAnalysisStage *bool `json:"enable_analysis_stage,omitempty"`
+	// UseVerboseVisionSystemPrompt controls whether the long bilingual vision guidance prompt is used.
+	UseVerboseVisionSystemPrompt *bool `json:"use_verbose_vision_system_prompt,omitempty"`
 }
 
 // CoinSourceConfig coin source configuration
@@ -511,6 +530,15 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			MinRiskRewardRatio:           3.0, // Min 3:1 profit/loss ratio (AI guided)
 			MinConfidence:                75,  // Min 75% confidence (AI guided)
 		},
+	}
+
+	config.PromptToggles = PromptTogglesConfig{
+		IncludeSchemaPrompt:          &boolTrue,
+		IncludeModeVariant:           &boolTrue,
+		IncludeHardConstraints:       &boolTrue,
+		IncludeOutputFormat:          &boolTrue,
+		EnableAnalysisStage:          &boolTrue,
+		UseVerboseVisionSystemPrompt: &boolTrue,
 	}
 
 	if lang == "zh" {
