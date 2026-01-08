@@ -1557,18 +1557,69 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	riskControl := e.config.RiskControl
 	promptSections := e.config.PromptSections
 	toggles := e.config.PromptToggles
+	modules := e.config.PromptModules
 	exitPlanID := normalizeExitPlanID(promptSections.ExitStrategyPlan)
 
-	// 0. Data Dictionary & Schema (ensure AI understands all fields)
 	lang := detectLanguage(promptSections.RoleDefinition)
 	includeSchemaPrompt := boolOrDefault(toggles.IncludeSchemaPrompt, true)
 	includeModeVariant := boolOrDefault(toggles.IncludeModeVariant, true)
 	includeHardConstraints := boolOrDefault(toggles.IncludeHardConstraints, true)
 	includeOutputFormat := boolOrDefault(toggles.IncludeOutputFormat, true)
 
+	// Derived defaults and template variables
+	btcEthPosValueRatio := riskControl.BTCETHMaxPositionValueRatio
+	if btcEthPosValueRatio <= 0 {
+		btcEthPosValueRatio = 5.0
+	}
+	altcoinPosValueRatio := riskControl.AltcoinMaxPositionValueRatio
+	if altcoinPosValueRatio <= 0 {
+		altcoinPosValueRatio = 1.0
+	}
+
+	minPositionSize := riskControl.MinPositionSize
+	if minPositionSize <= 0 {
+		minPositionSize = 12
+	}
+	enforceMinPositionSize := true
+	if riskControl.EnforceMinPositionSize != nil {
+		enforceMinPositionSize = *riskControl.EnforceMinPositionSize
+	}
+	btcEthMinPositionSize := minPositionSize
+	if btcEthMinPositionSize < 60 {
+		btcEthMinPositionSize = 60
+	}
+
+	exitPlanExample := buildExitPlanExample(exitPlanID)
+	vars := PromptTemplateVars{
+		Language: string(lang),
+		Variant:  variant,
+
+		AccountEquity: accountEquity,
+
+		MaxPositions:                 riskControl.MaxPositions,
+		BTCETHMaxLeverage:            riskControl.BTCETHMaxLeverage,
+		AltcoinMaxLeverage:           riskControl.AltcoinMaxLeverage,
+		BTCETHMaxPositionValueRatio:  btcEthPosValueRatio,
+		AltcoinMaxPositionValueRatio: altcoinPosValueRatio,
+		MaxMarginUsagePct:            riskControl.MaxMarginUsage * 100,
+		MinPositionSize:              minPositionSize,
+		BTCETHMinPositionSize:        btcEthMinPositionSize,
+		MinRiskRewardRatio:           riskControl.MinRiskRewardRatio,
+		MinConfidence:                riskControl.MinConfidence,
+
+		ExitPlanID:      exitPlanID,
+		ExitPlanExample: exitPlanExample,
+	}
+
+	// 0. Data Dictionary & Schema (ensure AI understands all fields)
 	if includeSchemaPrompt {
-		schemaPrompt := GetSchemaPrompt(lang)
-		sb.WriteString(schemaPrompt)
+		schemaPrompt := strings.TrimSpace(modules.SchemaPrompt)
+		if schemaPrompt != "" {
+			schemaPrompt = renderPromptTemplate(schemaPrompt, vars, "schema_prompt")
+		} else {
+			schemaPrompt = GetSchemaPrompt(lang)
+		}
+		sb.WriteString(strings.TrimSpace(schemaPrompt))
 		sb.WriteString("\n\n")
 		sb.WriteString("---\n\n")
 	}
@@ -1586,62 +1637,65 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 	if includeModeVariant {
 		switch strings.ToLower(strings.TrimSpace(variant)) {
 		case "aggressive":
-			sb.WriteString("## Mode: Aggressive\n- Prioritize capturing trend breakouts, can build positions in batches when confidence >=70\n- Allow higher positions, but must strictly set stop-loss and explain risk-reward ratio\n\n")
+			override := strings.TrimSpace(modules.ModeVariantAggressive)
+			if override != "" {
+				sb.WriteString(renderPromptTemplate(override, vars, "mode_variant_aggressive"))
+				sb.WriteString("\n\n")
+			} else {
+				sb.WriteString("## Mode: Aggressive\n- Prioritize capturing trend breakouts, can build positions in batches when confidence >=70\n- Allow higher positions, but must strictly set stop-loss and explain risk-reward ratio\n\n")
+			}
 		case "conservative":
-			sb.WriteString("## Mode: Conservative\n- Only open positions when multiple signals resonate\n- Prioritize cash preservation, must pause for multiple periods after consecutive losses\n\n")
+			override := strings.TrimSpace(modules.ModeVariantConservative)
+			if override != "" {
+				sb.WriteString(renderPromptTemplate(override, vars, "mode_variant_conservative"))
+				sb.WriteString("\n\n")
+			} else {
+				sb.WriteString("## Mode: Conservative\n- Only open positions when multiple signals resonate\n- Prioritize cash preservation, must pause for multiple periods after consecutive losses\n\n")
+			}
 		case "scalping":
-			sb.WriteString("## Mode: Scalping\n- Focus on short-term momentum, smaller profit targets but require quick action\n- If price doesn't move as expected within two bars, immediately reduce position or stop-loss\n\n")
+			override := strings.TrimSpace(modules.ModeVariantScalping)
+			if override != "" {
+				sb.WriteString(renderPromptTemplate(override, vars, "mode_variant_scalping"))
+				sb.WriteString("\n\n")
+			} else {
+				sb.WriteString("## Mode: Scalping\n- Focus on short-term momentum, smaller profit targets but require quick action\n- If price doesn't move as expected within two bars, immediately reduce position or stop-loss\n\n")
+			}
 		}
 	}
 
 	// 3. Hard constraints (risk control)
-	btcEthPosValueRatio := riskControl.BTCETHMaxPositionValueRatio
-	if btcEthPosValueRatio <= 0 {
-		btcEthPosValueRatio = 5.0
-	}
-	altcoinPosValueRatio := riskControl.AltcoinMaxPositionValueRatio
-	if altcoinPosValueRatio <= 0 {
-		altcoinPosValueRatio = 1.0
-	}
-
 	if includeHardConstraints {
-		sb.WriteString("# Hard Constraints (Risk Control)\n\n")
-		sb.WriteString("## CODE ENFORCED (Backend validation, cannot be bypassed):\n")
-		sb.WriteString(fmt.Sprintf("- Max Positions: %d coins simultaneously\n", riskControl.MaxPositions))
-		sb.WriteString(fmt.Sprintf("- Position Value Limit (Altcoins): max %.0f USDT (= equity %.0f * %.1fx)\n",
-			accountEquity*altcoinPosValueRatio, accountEquity, altcoinPosValueRatio))
-		sb.WriteString(fmt.Sprintf("- Position Value Limit (BTC/ETH): max %.0f USDT (= equity %.0f * %.1fx)\n",
-			accountEquity*btcEthPosValueRatio, accountEquity, btcEthPosValueRatio))
-		sb.WriteString(fmt.Sprintf("- Max Margin Usage: <=%.0f%%\n", riskControl.MaxMarginUsage*100))
-		minPositionSize := riskControl.MinPositionSize
-		if minPositionSize <= 0 {
-			minPositionSize = 12
-		}
-		enforceMinPositionSize := true
-		if riskControl.EnforceMinPositionSize != nil {
-			enforceMinPositionSize = *riskControl.EnforceMinPositionSize
-		}
-		if enforceMinPositionSize {
-			sb.WriteString(fmt.Sprintf("- Min Position Size (Altcoins): >=%.0f USDT\n", minPositionSize))
-			btcEthMinPositionSize := minPositionSize
-			if btcEthMinPositionSize < 60 {
-				btcEthMinPositionSize = 60
+		override := strings.TrimSpace(modules.HardConstraints)
+		if override != "" {
+			sb.WriteString(renderPromptTemplate(override, vars, "hard_constraints"))
+			sb.WriteString("\n\n")
+		} else {
+			sb.WriteString("# Hard Constraints (Risk Control)\n\n")
+			sb.WriteString("## CODE ENFORCED (Backend validation, cannot be bypassed):\n")
+			sb.WriteString(fmt.Sprintf("- Max Positions: %d coins simultaneously\n", riskControl.MaxPositions))
+			sb.WriteString(fmt.Sprintf("- Position Value Limit (Altcoins): max %.0f USDT (= equity %.0f * %.1fx)\n",
+				accountEquity*altcoinPosValueRatio, accountEquity, altcoinPosValueRatio))
+			sb.WriteString(fmt.Sprintf("- Position Value Limit (BTC/ETH): max %.0f USDT (= equity %.0f * %.1fx)\n",
+				accountEquity*btcEthPosValueRatio, accountEquity, btcEthPosValueRatio))
+			sb.WriteString(fmt.Sprintf("- Max Margin Usage: <=%.0f%%\n", riskControl.MaxMarginUsage*100))
+			if enforceMinPositionSize {
+				sb.WriteString(fmt.Sprintf("- Min Position Size (Altcoins): >=%.0f USDT\n", minPositionSize))
+				sb.WriteString(fmt.Sprintf("- Min Position Size (BTC/ETH): >=%.0f USDT\n\n", btcEthMinPositionSize))
+			} else {
+				sb.WriteString("- Min Position Size: disabled (exchange may reject small orders)\n\n")
 			}
-			sb.WriteString(fmt.Sprintf("- Min Position Size (BTC/ETH): >=%.0f USDT\n\n", btcEthMinPositionSize))
-		} else {
-			sb.WriteString("- Min Position Size: disabled (exchange may reject small orders)\n\n")
-		}
 
-		sb.WriteString("## AI GUIDED (Recommended, you should follow):\n")
-		sb.WriteString(fmt.Sprintf("- Trading Leverage: Altcoins max %dx | BTC/ETH max %dx\n",
-			riskControl.AltcoinMaxLeverage, riskControl.BTCETHMaxLeverage))
-		sb.WriteString(fmt.Sprintf("- Risk-Reward Ratio: >=1:%.1f (take_profit / stop_loss)\n", riskControl.MinRiskRewardRatio))
-		if lang == LangChinese {
-			sb.WriteString("- RR 不足时：直接输出 wait；不要为了满足 RR 去移动止损/止盈（SL/TP）。优先保持结构失效位的止损与合理目标位。\n")
-		} else {
-			sb.WriteString("- If RR is insufficient: output wait; do NOT move SL/TP just to satisfy the RR constraint. Keep SL at the structural invalidation level and TP at a realistic target.\n")
+			sb.WriteString("## AI GUIDED (Recommended, you should follow):\n")
+			sb.WriteString(fmt.Sprintf("- Trading Leverage: Altcoins max %dx | BTC/ETH max %dx\n",
+				riskControl.AltcoinMaxLeverage, riskControl.BTCETHMaxLeverage))
+			sb.WriteString(fmt.Sprintf("- Risk-Reward Ratio: >=1:%.1f (take_profit / stop_loss)\n", riskControl.MinRiskRewardRatio))
+			if lang == LangChinese {
+				sb.WriteString("- RR 不足时：直接输出 wait；不要为了满足 RR 去移动止损/止盈（SL/TP）。优先保持结构失效位的止损与合理目标位。\n")
+			} else {
+				sb.WriteString("- If RR is insufficient: output wait; do NOT move SL/TP just to satisfy the RR constraint. Keep SL at the structural invalidation level and TP at a realistic target.\n")
+			}
+			sb.WriteString(fmt.Sprintf("- Min Confidence: >=%d to open position\n\n", riskControl.MinConfidence))
 		}
-		sb.WriteString(fmt.Sprintf("- Min Confidence: >=%d to open position\n\n", riskControl.MinConfidence))
 	}
 
 	// Stop-loss flip (reverse after stop-loss triggers, one-way/net mode)
@@ -1778,54 +1832,60 @@ func (e *StrategyEngine) BuildSystemPrompt(accountEquity float64, variant string
 
 	// 7. Output format
 	if includeOutputFormat {
-		sb.WriteString("# Output Format (Strictly Follow)\n\n")
-		sb.WriteString("**Must use XML tags <reasoning> and <decision> to separate brief public rationale and decision JSON, avoiding parsing errors**\n\n")
-		sb.WriteString("## Format Requirements\n\n")
-		sb.WriteString("<reasoning>\n")
-		sb.WriteString("Requirements:\n")
-		sb.WriteString("- Write brief public rationale notes grouped by symbol (recommended: 2-6 bullets per symbol, total <= 40 lines).\n")
-		sb.WriteString("- Do NOT output chain-of-thought.\n")
-		sb.WriteString("</reasoning>\n\n")
-		sb.WriteString("<decision>\n")
-		sb.WriteString("Requirements:\n")
-		sb.WriteString("- Only output a pure JSON array inside <decision> ... </decision> (no extra text).\n")
-		sb.WriteString("- Do NOT use code fences (no ```).\n\n")
-		sb.WriteString("[\n")
-		// Use the actual configured position value ratio for BTC/ETH in the example
-		examplePositionSize := accountEquity * btcEthPosValueRatio
-		exitPlanExample := buildExitPlanExample(exitPlanID)
-		sb.WriteString("  {\n")
-		sb.WriteString("    \"symbol\": \"BTCUSDT\",\n")
-		sb.WriteString("    \"action\": \"open_short\",\n")
-		sb.WriteString(fmt.Sprintf("    \"leverage\": %d,\n", riskControl.BTCETHMaxLeverage))
-		sb.WriteString(fmt.Sprintf("    \"position_size_usd\": %.0f,\n", examplePositionSize))
-		sb.WriteString("    \"stop_loss\": 97000,\n")
-		sb.WriteString("    \"take_profit\": 91000,\n")
-		sb.WriteString("    \"confidence\": 85,\n")
-		sb.WriteString("    \"risk_usd\": 300,\n")
-		sb.WriteString("    \"reasoning\": \"One sentence summary of why this action is taken\"")
-		if exitPlanExample != "" {
-			sb.WriteString(",\n")
-			sb.WriteString(exitPlanExample)
+		override := strings.TrimSpace(modules.OutputFormat)
+		if override != "" {
+			sb.WriteString(renderPromptTemplate(override, vars, "output_format"))
+			sb.WriteString("\n\n")
 		} else {
-			sb.WriteString("\n")
-		}
-		sb.WriteString("  },\n")
-		sb.WriteString("  {\"symbol\": \"ETHUSDT\", \"action\": \"close_long\"}\n")
-		sb.WriteString("]\n")
-		sb.WriteString("</decision>\n\n")
-		sb.WriteString("## Field Description\n\n")
-		sb.WriteString("- `action`: open_long | open_short | close_long | close_short | hold | wait\n")
-		sb.WriteString(fmt.Sprintf("- `confidence`: 0-100 (opening recommended >=%d)\n", riskControl.MinConfidence))
-		sb.WriteString("- Required when opening: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd\n")
-		sb.WriteString("- `exit_plan`: required when opening if exit plan is configured; must match plan_id and component rules\n")
-		sb.WriteString("- **IMPORTANT**: All numeric values must be calculated numbers, NOT formulas/expressions (e.g., use `27.76` not `3000 * 0.01`)\n\n")
-		sb.WriteString("## JSON Strictness (Must Follow)\n\n")
-		sb.WriteString("- No range/approx symbols in JSON: do not use `~` or `～` anywhere (e.g., use `88336`, not `~88336` or `88000~89000`)\n")
-		sb.WriteString("- No thousand separators in JSON numbers (e.g., `98000`, not `98,000`)\n")
-		sb.WriteString("- No comments in JSON (no `//` or `/* */`)\n\n")
-		sb.WriteString("- No trailing commas in JSON\n\n")
+			sb.WriteString("# Output Format (Strictly Follow)\n\n")
+			sb.WriteString("**Must use XML tags <reasoning> and <decision> to separate brief public rationale and decision JSON, avoiding parsing errors**\n\n")
+			sb.WriteString("## Format Requirements\n\n")
+			sb.WriteString("<reasoning>\n")
+			sb.WriteString("Requirements:\n")
+			sb.WriteString("- Write brief public rationale notes grouped by symbol (recommended: 2-6 bullets per symbol, total <= 40 lines).\n")
+			sb.WriteString("- Do NOT output chain-of-thought.\n")
+			sb.WriteString("</reasoning>\n\n")
+			sb.WriteString("<decision>\n")
+			sb.WriteString("Requirements:\n")
+			sb.WriteString("- Only output a pure JSON array inside <decision> ... </decision> (no extra text).\n")
+			sb.WriteString("- Do NOT use code fences (no ```).\n\n")
+			sb.WriteString("[\n")
+			// Use the actual configured position value ratio for BTC/ETH in the example
+			examplePositionSize := accountEquity * btcEthPosValueRatio
+			exitPlanExample := buildExitPlanExample(exitPlanID)
+			sb.WriteString("  {\n")
+			sb.WriteString("    \"symbol\": \"BTCUSDT\",\n")
+			sb.WriteString("    \"action\": \"open_short\",\n")
+			sb.WriteString(fmt.Sprintf("    \"leverage\": %d,\n", riskControl.BTCETHMaxLeverage))
+			sb.WriteString(fmt.Sprintf("    \"position_size_usd\": %.0f,\n", examplePositionSize))
+			sb.WriteString("    \"stop_loss\": 97000,\n")
+			sb.WriteString("    \"take_profit\": 91000,\n")
+			sb.WriteString("    \"confidence\": 85,\n")
+			sb.WriteString("    \"risk_usd\": 300,\n")
+			sb.WriteString("    \"reasoning\": \"One sentence summary of why this action is taken\"")
+			if exitPlanExample != "" {
+				sb.WriteString(",\n")
+				sb.WriteString(exitPlanExample)
+			} else {
+				sb.WriteString("\n")
+			}
+			sb.WriteString("  },\n")
+			sb.WriteString("  {\"symbol\": \"ETHUSDT\", \"action\": \"close_long\"}\n")
+			sb.WriteString("]\n")
+			sb.WriteString("</decision>\n\n")
+			sb.WriteString("## Field Description\n\n")
+			sb.WriteString("- `action`: open_long | open_short | close_long | close_short | hold | wait\n")
+			sb.WriteString(fmt.Sprintf("- `confidence`: 0-100 (opening recommended >=%d)\n", riskControl.MinConfidence))
+			sb.WriteString("- Required when opening: leverage, position_size_usd, stop_loss, take_profit, confidence, risk_usd\n")
+			sb.WriteString("- `exit_plan`: required when opening if exit plan is configured; must match plan_id and component rules\n")
+			sb.WriteString("- **IMPORTANT**: All numeric values must be calculated numbers, NOT formulas/expressions (e.g., use `27.76` not `3000 * 0.01`)\n\n")
+			sb.WriteString("## JSON Strictness (Must Follow)\n\n")
+			sb.WriteString("- No range/approx symbols in JSON: do not use `~` or `～` anywhere (e.g., use `88336`, not `~88336` or `88000~89000`)\n")
+			sb.WriteString("- No thousand separators in JSON numbers (e.g., `98000`, not `98,000`)\n")
+			sb.WriteString("- No comments in JSON (no `//` or `/* */`)\n\n")
+			sb.WriteString("- No trailing commas in JSON\n\n")
 
+		}
 	}
 
 	// 8. Custom Prompt

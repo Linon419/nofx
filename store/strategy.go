@@ -49,6 +49,8 @@ type StrategyConfig struct {
 	PromptSections PromptSectionsConfig `json:"prompt_sections,omitempty"`
 	// toggles for built-in prompt modules (token & behavior control)
 	PromptToggles PromptTogglesConfig `json:"prompt_toggles,omitempty"`
+	// editable built-in prompt modules (advanced; supports templating)
+	PromptModules PromptModulesConfig `json:"prompt_modules,omitempty"`
 }
 
 // VisionConfig controls chart rendering + multimodal sending for vision-capable models.
@@ -123,6 +125,36 @@ type PromptTogglesConfig struct {
 	EnableAnalysisStage *bool `json:"enable_analysis_stage,omitempty"`
 	// UseVerboseVisionSystemPrompt controls whether the long bilingual vision guidance prompt is used.
 	UseVerboseVisionSystemPrompt *bool `json:"use_verbose_vision_system_prompt,omitempty"`
+}
+
+// PromptModulesConfig overrides built-in prompt module texts.
+// When a field is empty, the system default is used for that module.
+//
+// Templating:
+// - Fields support Go text/template variables like {{.AccountEquity}}.
+// - If a template fails to render, the raw text is used as-is (and a warning is logged).
+type PromptModulesConfig struct {
+	// SchemaPrompt overrides the system schema/data-dictionary preface.
+	SchemaPrompt string `json:"schema_prompt,omitempty"`
+	// SchemaPromptLite overrides the lite schema preface used in analysis-layer prompts.
+	SchemaPromptLite string `json:"schema_prompt_lite,omitempty"`
+
+	// Mode variant blocks override the built-in "Mode: Aggressive/Conservative/Scalping" text.
+	ModeVariantAggressive   string `json:"mode_variant_aggressive,omitempty"`
+	ModeVariantConservative string `json:"mode_variant_conservative,omitempty"`
+	ModeVariantScalping     string `json:"mode_variant_scalping,omitempty"`
+
+	// HardConstraints overrides the entire "Hard Constraints (Risk Control)" block text.
+	HardConstraints string `json:"hard_constraints,omitempty"`
+
+	// OutputFormat overrides the entire output-format instructions block.
+	OutputFormat string `json:"output_format,omitempty"`
+
+	// AnalysisCorePrompt overrides the analysis-layer system prompt core (schema preface may be added separately).
+	AnalysisCorePrompt string `json:"analysis_core_prompt,omitempty"`
+
+	// VisionSystemPrompt overrides the vision/chart-reading system prompt.
+	VisionSystemPrompt string `json:"vision_system_prompt,omitempty"`
 }
 
 // CoinSourceConfig coin source configuration

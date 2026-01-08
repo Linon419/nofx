@@ -560,6 +560,18 @@ export interface PromptTogglesConfig {
   use_verbose_vision_system_prompt?: boolean;
 }
 
+export interface PromptModulesConfig {
+  schema_prompt?: string;
+  schema_prompt_lite?: string;
+  mode_variant_aggressive?: string;
+  mode_variant_conservative?: string;
+  mode_variant_scalping?: string;
+  hard_constraints?: string;
+  output_format?: string;
+  analysis_core_prompt?: string;
+  vision_system_prompt?: string;
+}
+
 export interface StrategyConfig {
   // Language setting: "zh" for Chinese, "en" for English
   // Determines the language used for data formatting and prompt generation
@@ -571,6 +583,7 @@ export interface StrategyConfig {
   risk_control: RiskControlConfig;
   prompt_sections?: PromptSectionsConfig;
   prompt_toggles?: PromptTogglesConfig;
+  prompt_modules?: PromptModulesConfig;
 }
 
 export interface VisionConfig {

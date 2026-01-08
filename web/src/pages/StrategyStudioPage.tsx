@@ -629,6 +629,8 @@ export function StrategyStudioPage() {
         <PromptTogglesEditor
           config={editingConfig.prompt_toggles}
           onChange={(promptToggles) => updateConfig('prompt_toggles', promptToggles)}
+          modules={editingConfig.prompt_modules}
+          onModulesChange={(promptModules) => updateConfig('prompt_modules', promptModules)}
           disabled={selectedStrategy?.is_default}
           language={language}
           visionEnabled={editingConfig.vision?.enabled}

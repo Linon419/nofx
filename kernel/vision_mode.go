@@ -225,6 +225,55 @@ func clientSupportsVision(c mcp.AIClient) bool {
 
 func (e *StrategyEngine) buildVisionSystemPrompt() string {
 	toggles := e.config.PromptToggles
+	modules := e.config.PromptModules
+
+	override := strings.TrimSpace(modules.VisionSystemPrompt)
+	if override != "" {
+		lang := detectLanguage(e.config.PromptSections.RoleDefinition)
+		exitPlanID := normalizeExitPlanID(e.config.PromptSections.ExitStrategyPlan)
+
+		riskControl := e.config.RiskControl
+		btcEthPosValueRatio := riskControl.BTCETHMaxPositionValueRatio
+		if btcEthPosValueRatio <= 0 {
+			btcEthPosValueRatio = 5.0
+		}
+		altcoinPosValueRatio := riskControl.AltcoinMaxPositionValueRatio
+		if altcoinPosValueRatio <= 0 {
+			altcoinPosValueRatio = 1.0
+		}
+		minPositionSize := riskControl.MinPositionSize
+		if minPositionSize <= 0 {
+			minPositionSize = 12
+		}
+		btcEthMinPositionSize := minPositionSize
+		if btcEthMinPositionSize < 60 {
+			btcEthMinPositionSize = 60
+		}
+
+		vars := PromptTemplateVars{
+			Language: string(lang),
+			Variant:  "",
+
+			AccountEquity: 0,
+
+			MaxPositions:                 riskControl.MaxPositions,
+			BTCETHMaxLeverage:            riskControl.BTCETHMaxLeverage,
+			AltcoinMaxLeverage:           riskControl.AltcoinMaxLeverage,
+			BTCETHMaxPositionValueRatio:  btcEthPosValueRatio,
+			AltcoinMaxPositionValueRatio: altcoinPosValueRatio,
+			MaxMarginUsagePct:            riskControl.MaxMarginUsage * 100,
+			MinPositionSize:              minPositionSize,
+			BTCETHMinPositionSize:        btcEthMinPositionSize,
+			MinRiskRewardRatio:           riskControl.MinRiskRewardRatio,
+			MinConfidence:                riskControl.MinConfidence,
+
+			ExitPlanID:      exitPlanID,
+			ExitPlanExample: buildExitPlanExample(exitPlanID),
+		}
+
+		return strings.TrimSpace(renderPromptTemplate(override, vars, "vision_system_prompt"))
+	}
+
 	if !boolOrDefault(toggles.UseVerboseVisionSystemPrompt, true) {
 		return strings.TrimSpace(`
 You are a strict chart-reading assistant.

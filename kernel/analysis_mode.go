@@ -4,6 +4,7 @@ import "strings"
 
 func (e *StrategyEngine) buildDecisionAnalysisSystemPrompt() string {
 	toggles := e.config.PromptToggles
+	modules := e.config.PromptModules
 	if !boolOrDefault(toggles.EnableAnalysisStage, true) {
 		return ""
 	}
@@ -11,12 +12,51 @@ func (e *StrategyEngine) buildDecisionAnalysisSystemPrompt() string {
 	lang := detectLanguage(e.config.PromptSections.RoleDefinition)
 	includeSchema := boolOrDefault(toggles.IncludeSchemaPrompt, true)
 
-	var suffix string
+	exitPlanID := normalizeExitPlanID(e.config.PromptSections.ExitStrategyPlan)
+
+	// Template variables (keep in sync with BuildSystemPrompt defaults where possible).
+	riskControl := e.config.RiskControl
+	btcEthPosValueRatio := riskControl.BTCETHMaxPositionValueRatio
+	if btcEthPosValueRatio <= 0 {
+		btcEthPosValueRatio = 5.0
+	}
+	altcoinPosValueRatio := riskControl.AltcoinMaxPositionValueRatio
+	if altcoinPosValueRatio <= 0 {
+		altcoinPosValueRatio = 1.0
+	}
+	minPositionSize := riskControl.MinPositionSize
+	if minPositionSize <= 0 {
+		minPositionSize = 12
+	}
+	btcEthMinPositionSize := minPositionSize
+	if btcEthMinPositionSize < 60 {
+		btcEthMinPositionSize = 60
+	}
+
+	vars := PromptTemplateVars{
+		Language: string(lang),
+		Variant:  "",
+
+		AccountEquity: 0,
+
+		MaxPositions:                 riskControl.MaxPositions,
+		BTCETHMaxLeverage:            riskControl.BTCETHMaxLeverage,
+		AltcoinMaxLeverage:           riskControl.AltcoinMaxLeverage,
+		BTCETHMaxPositionValueRatio:  btcEthPosValueRatio,
+		AltcoinMaxPositionValueRatio: altcoinPosValueRatio,
+		MaxMarginUsagePct:            riskControl.MaxMarginUsage * 100,
+		MinPositionSize:              minPositionSize,
+		BTCETHMinPositionSize:        btcEthMinPositionSize,
+		MinRiskRewardRatio:           riskControl.MinRiskRewardRatio,
+		MinConfidence:                riskControl.MinConfidence,
+
+		ExitPlanID:      exitPlanID,
+		ExitPlanExample: buildExitPlanExample(exitPlanID),
+	}
+
+	var core string
 	if lang == LangChinese {
-		suffix = `
-
----
-
+		core = `
 你是一个严格、中立、以数据为基础的交易“分析层”助手。你的工作是把输入的市场数据与持仓信息整理成供后续“决策层”使用的客观事实要点。
 
 规则：
@@ -27,10 +67,7 @@ func (e *StrategyEngine) buildDecisionAnalysisSystemPrompt() string {
 - 禁止输出任何 JSON（尤其是决策数组），也不要输出 <decision> / <reasoning> 等标签。
 - 纯文本，不要代码块。`
 	} else {
-		suffix = `
-
----
-
+		core = `
 You are a strict, neutral, data-grounded analysis-layer assistant for trading. Your job is to summarize the given market/position inputs into objective notes that the later decision layer can use.
 
 Rules:
@@ -42,10 +79,21 @@ Rules:
 - Plain text only. Do not use code blocks.`
 	}
 
-	if includeSchema {
-		return strings.TrimSpace(GetSchemaPromptLite(lang) + suffix)
+	override := strings.TrimSpace(modules.AnalysisCorePrompt)
+	if override != "" {
+		core = renderPromptTemplate(override, vars, "analysis_core_prompt")
 	}
-	return strings.TrimSpace(strings.TrimPrefix(suffix, "\n\n---\n\n"))
+
+	if includeSchema {
+		schema := strings.TrimSpace(modules.SchemaPromptLite)
+		if schema != "" {
+			schema = renderPromptTemplate(schema, vars, "schema_prompt_lite")
+		} else {
+			schema = GetSchemaPromptLite(lang)
+		}
+		return strings.TrimSpace(strings.TrimSpace(schema) + "\n\n---\n\n" + strings.TrimSpace(core))
+	}
+	return strings.TrimSpace(core)
 }
 
 func appendDecisionAnalysisNotes(userPrompt, notes string) string {

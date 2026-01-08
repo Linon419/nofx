@@ -1,9 +1,12 @@
-import { SlidersHorizontal, AlertTriangle } from 'lucide-react'
-import type { PromptTogglesConfig } from '../../types'
+import { useState } from 'react'
+import { SlidersHorizontal, AlertTriangle, ChevronDown, ChevronRight, RotateCcw } from 'lucide-react'
+import type { PromptTogglesConfig, PromptModulesConfig } from '../../types'
 
 interface PromptTogglesEditorProps {
   config?: PromptTogglesConfig
   onChange: (config: PromptTogglesConfig) => void
+  modules?: PromptModulesConfig
+  onModulesChange: (config: PromptModulesConfig) => void
   disabled?: boolean
   language: string
   visionEnabled?: boolean
@@ -12,6 +15,8 @@ interface PromptTogglesEditorProps {
 export function PromptTogglesEditor({
   config,
   onChange,
+  modules,
+  onModulesChange,
   disabled,
   language,
   visionEnabled,
@@ -57,9 +62,44 @@ export function PromptTogglesEditor({
     use_verbose_vision_system_prompt: config?.use_verbose_vision_system_prompt ?? true,
   }
 
+  const currentModules: PromptModulesConfig = {
+    schema_prompt: modules?.schema_prompt ?? '',
+    schema_prompt_lite: modules?.schema_prompt_lite ?? '',
+    mode_variant_aggressive: modules?.mode_variant_aggressive ?? '',
+    mode_variant_conservative: modules?.mode_variant_conservative ?? '',
+    mode_variant_scalping: modules?.mode_variant_scalping ?? '',
+    hard_constraints: modules?.hard_constraints ?? '',
+    output_format: modules?.output_format ?? '',
+    analysis_core_prompt: modules?.analysis_core_prompt ?? '',
+    vision_system_prompt: modules?.vision_system_prompt ?? '',
+  }
+
   const set = (patch: Partial<PromptTogglesConfig>) => {
     if (disabled) return
     onChange({ ...current, ...patch })
+  }
+
+  const setModules = (patch: Partial<PromptModulesConfig>) => {
+    if (disabled) return
+    onModulesChange({ ...currentModules, ...patch })
+  }
+
+  const placeholder =
+    language === 'zh'
+      ? '留空=使用系统默认。支持 Go template 变量，例如：{{.AccountEquity}} / {{.MaxPositions}} / {{.ExitPlanID}} / {{.ExitPlanExample}}'
+      : 'Empty = use system default. Supports Go template vars, e.g. {{.AccountEquity}} / {{.MaxPositions}} / {{.ExitPlanID}} / {{.ExitPlanExample}}'
+
+  const [expandedEditors, setExpandedEditors] = useState<Record<string, boolean>>({
+    schema: false,
+    mode: false,
+    hard: false,
+    format: false,
+    analysis: false,
+    vision: false,
+  })
+
+  const toggleEditor = (key: keyof typeof expandedEditors) => {
+    setExpandedEditors((prev) => ({ ...prev, [key]: !prev[key] }))
   }
 
   const SwitchRow = ({
@@ -146,12 +186,128 @@ export function PromptTogglesEditor({
         checked={Boolean(current.include_schema_prompt)}
         onCheckedChange={(v) => set({ include_schema_prompt: v })}
       />
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => toggleEditor('schema')}
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-white/5"
+          style={{ color: '#848E9C' }}
+          disabled={Boolean(disabled)}
+        >
+          {expandedEditors.schema ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          {language === 'zh' ? '编辑文本' : 'Edit text'}
+        </button>
+      </div>
+      {expandedEditors.schema && (
+        <div className="space-y-3">
+          <div className="rounded-lg px-3 py-3" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium" style={{ color: '#EAECEF' }}>
+                {language === 'zh' ? 'Schema（系统）' : 'Schema (System)'}
+              </div>
+              <button
+                type="button"
+                onClick={() => setModules({ schema_prompt: '' })}
+                disabled={Boolean(disabled) || !currentModules.schema_prompt}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-white/5 disabled:opacity-30"
+                style={{ color: '#848E9C' }}
+              >
+                <RotateCcw className="w-3 h-3" />
+                {language === 'zh' ? '清空' : 'Clear'}
+              </button>
+            </div>
+            <textarea
+              value={currentModules.schema_prompt || ''}
+              onChange={(e) => setModules({ schema_prompt: e.target.value })}
+              disabled={Boolean(disabled)}
+              placeholder={placeholder}
+              className="w-full h-40 mt-2 px-3 py-2 rounded-lg resize-none font-mono text-xs"
+              style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+            />
+          </div>
+
+          <div className="rounded-lg px-3 py-3" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium" style={{ color: '#EAECEF' }}>
+                {language === 'zh' ? 'Schema Lite（分析层）' : 'Schema Lite (Analysis)'}
+              </div>
+              <button
+                type="button"
+                onClick={() => setModules({ schema_prompt_lite: '' })}
+                disabled={Boolean(disabled) || !currentModules.schema_prompt_lite}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-white/5 disabled:opacity-30"
+                style={{ color: '#848E9C' }}
+              >
+                <RotateCcw className="w-3 h-3" />
+                {language === 'zh' ? '清空' : 'Clear'}
+              </button>
+            </div>
+            <textarea
+              value={currentModules.schema_prompt_lite || ''}
+              onChange={(e) => setModules({ schema_prompt_lite: e.target.value })}
+              disabled={Boolean(disabled)}
+              placeholder={placeholder}
+              className="w-full h-32 mt-2 px-3 py-2 rounded-lg resize-none font-mono text-xs"
+              style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+            />
+          </div>
+        </div>
+      )}
 
       <SwitchRow
         label={t('modeVariant')}
         checked={Boolean(current.include_mode_variant)}
         onCheckedChange={(v) => set({ include_mode_variant: v })}
       />
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => toggleEditor('mode')}
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-white/5"
+          style={{ color: '#848E9C' }}
+          disabled={Boolean(disabled)}
+        >
+          {expandedEditors.mode ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          {language === 'zh' ? '编辑文本' : 'Edit text'}
+        </button>
+      </div>
+      {expandedEditors.mode && (
+        <div className="space-y-3">
+          {(
+            [
+              ['mode_variant_aggressive', language === 'zh' ? 'Aggressive' : 'Aggressive'] as const,
+              ['mode_variant_conservative', language === 'zh' ? 'Conservative' : 'Conservative'] as const,
+              ['mode_variant_scalping', language === 'zh' ? 'Scalping' : 'Scalping'] as const,
+            ] as const
+          ).map(([key, label]) => (
+            <div key={key} className="rounded-lg px-3 py-3" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-medium" style={{ color: '#EAECEF' }}>
+                  {label}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setModules({ [key]: '' } as Partial<PromptModulesConfig>)}
+                  disabled={Boolean(disabled) || !currentModules[key]}
+                  className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-white/5 disabled:opacity-30"
+                  style={{ color: '#848E9C' }}
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  {language === 'zh' ? '清空' : 'Clear'}
+                </button>
+              </div>
+              <textarea
+                value={currentModules[key] || ''}
+                onChange={(e) => setModules({ [key]: e.target.value } as Partial<PromptModulesConfig>)}
+                disabled={Boolean(disabled)}
+                placeholder={placeholder}
+                className="w-full h-28 mt-2 px-3 py-2 rounded-lg resize-none font-mono text-xs"
+                style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       <SwitchRow
         label={t('hardConstraints')}
@@ -159,6 +315,45 @@ export function PromptTogglesEditor({
         onCheckedChange={(v) => set({ include_hard_constraints: v })}
         warning={t('warningHard')}
       />
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => toggleEditor('hard')}
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-white/5"
+          style={{ color: '#848E9C' }}
+          disabled={Boolean(disabled)}
+        >
+          {expandedEditors.hard ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          {language === 'zh' ? '编辑文本' : 'Edit text'}
+        </button>
+      </div>
+      {expandedEditors.hard && (
+        <div className="rounded-lg px-3 py-3" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium" style={{ color: '#EAECEF' }}>
+              {language === 'zh' ? 'Hard Constraints（替换整段）' : 'Hard Constraints (Replace whole block)'}
+            </div>
+            <button
+              type="button"
+              onClick={() => setModules({ hard_constraints: '' })}
+              disabled={Boolean(disabled) || !currentModules.hard_constraints}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-white/5 disabled:opacity-30"
+              style={{ color: '#848E9C' }}
+            >
+              <RotateCcw className="w-3 h-3" />
+              {language === 'zh' ? '清空' : 'Clear'}
+            </button>
+          </div>
+          <textarea
+            value={currentModules.hard_constraints || ''}
+            onChange={(e) => setModules({ hard_constraints: e.target.value })}
+            disabled={Boolean(disabled)}
+            placeholder={placeholder}
+            className="w-full h-40 mt-2 px-3 py-2 rounded-lg resize-none font-mono text-xs"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+          />
+        </div>
+      )}
 
       <SwitchRow
         label={t('outputFormat')}
@@ -166,6 +361,45 @@ export function PromptTogglesEditor({
         onCheckedChange={(v) => set({ include_output_format: v })}
         warning={t('warningFormat')}
       />
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => toggleEditor('format')}
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-white/5"
+          style={{ color: '#848E9C' }}
+          disabled={Boolean(disabled)}
+        >
+          {expandedEditors.format ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          {language === 'zh' ? '编辑文本' : 'Edit text'}
+        </button>
+      </div>
+      {expandedEditors.format && (
+        <div className="rounded-lg px-3 py-3" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium" style={{ color: '#EAECEF' }}>
+              {language === 'zh' ? 'Output Format（替换整段）' : 'Output Format (Replace whole block)'}
+            </div>
+            <button
+              type="button"
+              onClick={() => setModules({ output_format: '' })}
+              disabled={Boolean(disabled) || !currentModules.output_format}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-white/5 disabled:opacity-30"
+              style={{ color: '#848E9C' }}
+            >
+              <RotateCcw className="w-3 h-3" />
+              {language === 'zh' ? '清空' : 'Clear'}
+            </button>
+          </div>
+          <textarea
+            value={currentModules.output_format || ''}
+            onChange={(e) => setModules({ output_format: e.target.value })}
+            disabled={Boolean(disabled)}
+            placeholder={placeholder}
+            className="w-full h-48 mt-2 px-3 py-2 rounded-lg resize-none font-mono text-xs"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+          />
+        </div>
+      )}
 
       <SwitchRow
         label={t('analysisStage')}
@@ -173,6 +407,45 @@ export function PromptTogglesEditor({
         onCheckedChange={(v) => set({ enable_analysis_stage: v })}
         warning={t('warningAnalysis')}
       />
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => toggleEditor('analysis')}
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-white/5"
+          style={{ color: '#848E9C' }}
+          disabled={Boolean(disabled)}
+        >
+          {expandedEditors.analysis ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          {language === 'zh' ? '编辑文本' : 'Edit text'}
+        </button>
+      </div>
+      {expandedEditors.analysis && (
+        <div className="rounded-lg px-3 py-3" style={{ background: '#0B0E11', border: '1px solid #2B3139' }}>
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium" style={{ color: '#EAECEF' }}>
+              {language === 'zh' ? '分析层 Core Prompt' : 'Analysis Core Prompt'}
+            </div>
+            <button
+              type="button"
+              onClick={() => setModules({ analysis_core_prompt: '' })}
+              disabled={Boolean(disabled) || !currentModules.analysis_core_prompt}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-white/5 disabled:opacity-30"
+              style={{ color: '#848E9C' }}
+            >
+              <RotateCcw className="w-3 h-3" />
+              {language === 'zh' ? '清空' : 'Clear'}
+            </button>
+          </div>
+          <textarea
+            value={currentModules.analysis_core_prompt || ''}
+            onChange={(e) => setModules({ analysis_core_prompt: e.target.value })}
+            disabled={Boolean(disabled)}
+            placeholder={placeholder}
+            className="w-full h-40 mt-2 px-3 py-2 rounded-lg resize-none font-mono text-xs"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+          />
+        </div>
+      )}
 
       <SwitchRow
         label={t('visionVerbose')}
@@ -182,6 +455,45 @@ export function PromptTogglesEditor({
           visionDisabled ? `${t('hintVision')} ${t('disabledByVision')}` : t('hintVision')
         }
       />
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => toggleEditor('vision')}
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-white/5"
+          style={{ color: '#848E9C' }}
+          disabled={Boolean(disabled)}
+        >
+          {expandedEditors.vision ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          {language === 'zh' ? '编辑文本' : 'Edit text'}
+        </button>
+      </div>
+      {expandedEditors.vision && (
+        <div className="rounded-lg px-3 py-3" style={{ background: '#0B0E11', border: '1px solid #2B3139', opacity: visionDisabled ? 0.6 : 1 }}>
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium" style={{ color: '#EAECEF' }}>
+              {language === 'zh' ? '读图层 System Prompt' : 'Vision System Prompt'}
+            </div>
+            <button
+              type="button"
+              onClick={() => setModules({ vision_system_prompt: '' })}
+              disabled={Boolean(disabled) || !currentModules.vision_system_prompt}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs hover:bg-white/5 disabled:opacity-30"
+              style={{ color: '#848E9C' }}
+            >
+              <RotateCcw className="w-3 h-3" />
+              {language === 'zh' ? '清空' : 'Clear'}
+            </button>
+          </div>
+          <textarea
+            value={currentModules.vision_system_prompt || ''}
+            onChange={(e) => setModules({ vision_system_prompt: e.target.value })}
+            disabled={Boolean(disabled)}
+            placeholder={placeholder}
+            className="w-full h-48 mt-2 px-3 py-2 rounded-lg resize-none font-mono text-xs"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139', color: '#EAECEF' }}
+          />
+        </div>
+      )}
     </div>
   )
 }
