@@ -44,8 +44,8 @@ func TestBitget_SetStopLoss_PlanTypeFallback(t *testing.T) {
 	if err := bt.SetStopLoss("BSVUSDT", "LONG", 3.74, 20.30); err != nil {
 		t.Fatalf("expected success, got: %v", err)
 	}
-	if len(endpoints) != 1 || endpoints[0] != "/api/v2/mix/order/place-tpsl-order" {
-		t.Fatalf("expected TPSL endpoint, got: %#v", endpoints)
+	if len(endpoints) != 1 || endpoints[0] != "/api/mix/v1/plan/placePositionsTPSL" {
+		t.Fatalf("expected position TPSL endpoint, got: %#v", endpoints)
 	}
 }
 
@@ -71,8 +71,8 @@ func TestBitget_SetTakeProfit_PlanTypeFallback(t *testing.T) {
 	if err := bt.SetTakeProfit("BSVUSDT", "LONG", 3.74, 20.76); err != nil {
 		t.Fatalf("expected success, got: %v", err)
 	}
-	if len(endpoints) != 1 || endpoints[0] != "/api/v2/mix/order/place-tpsl-order" {
-		t.Fatalf("expected TPSL endpoint, got: %#v", endpoints)
+	if len(endpoints) != 1 || endpoints[0] != "/api/mix/v1/plan/placePositionsTPSL" {
+		t.Fatalf("expected position TPSL endpoint, got: %#v", endpoints)
 	}
 }
 
@@ -100,8 +100,8 @@ func TestBitget_SetStopLoss_SendsTriggerTypeAndFormattedTriggerPrice(t *testing.
 	if err := bt.SetStopLoss("BSVUSDT", "LONG", 3.74, 20.3061); err != nil {
 		t.Fatalf("expected success, got: %v", err)
 	}
-	if got["triggerType"] != "mark_price" {
-		t.Fatalf("expected triggerType=mark_price, got: %#v", got["triggerType"])
+	if got["triggerType"] != "market_price" {
+		t.Fatalf("expected triggerType=market_price, got: %#v", got["triggerType"])
 	}
 	if got["triggerPrice"] != "20.31" {
 		t.Fatalf("expected triggerPrice=20.31, got: %#v", got["triggerPrice"])

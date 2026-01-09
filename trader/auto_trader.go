@@ -1891,8 +1891,53 @@ func (at *AutoTrader) startDrawdownMonitor() {
 	}()
 }
 
+type drawdownCloseConfig struct {
+	Enabled      bool
+	MinProfitPct float64
+	DrawdownPct  float64
+}
+
+func (at *AutoTrader) getDrawdownCloseConfig() drawdownCloseConfig {
+	cfg := drawdownCloseConfig{
+		Enabled:      true,
+		MinProfitPct: 5.0,
+		DrawdownPct:  40.0,
+	}
+
+	if at == nil {
+		return cfg
+	}
+	if at.config.StrategyConfig == nil {
+		return cfg
+	}
+
+	rc := at.config.StrategyConfig.RiskControl
+	if rc.DrawdownCloseEnabled != nil {
+		cfg.Enabled = *rc.DrawdownCloseEnabled
+	}
+	if rc.DrawdownCloseMinProfitPct != nil {
+		cfg.MinProfitPct = *rc.DrawdownCloseMinProfitPct
+	}
+	if rc.DrawdownClosePct != nil {
+		cfg.DrawdownPct = *rc.DrawdownClosePct
+	}
+
+	if cfg.MinProfitPct < 0 {
+		cfg.MinProfitPct = 0
+	}
+	if cfg.DrawdownPct < 0 {
+		cfg.DrawdownPct = 0
+	}
+	return cfg
+}
+
 // checkPositionDrawdown checks position drawdown situation
 func (at *AutoTrader) checkPositionDrawdown() {
+	cfg := at.getDrawdownCloseConfig()
+	if !cfg.Enabled {
+		return
+	}
+
 	// Get current positions
 	positions, err := at.trader.GetPositions()
 	if err != nil {
@@ -1946,8 +1991,8 @@ func (at *AutoTrader) checkPositionDrawdown() {
 			drawdownPct = ((peakPnLPct - currentPnLPct) / peakPnLPct) * 100
 		}
 
-		// Check close position condition: profit > 5% and drawdown >= 40%
-		if currentPnLPct > 5.0 && drawdownPct >= 40.0 {
+		// Check close position condition: profit above threshold and drawdown above threshold
+		if currentPnLPct > cfg.MinProfitPct && drawdownPct >= cfg.DrawdownPct {
 			logger.Infof("🚨 Drawdown close position condition triggered: %s %s | Current profit: %.2f%% | Peak profit: %.2f%% | Drawdown: %.2f%%",
 				symbol, side, currentPnLPct, peakPnLPct, drawdownPct)
 
@@ -1959,7 +2004,7 @@ func (at *AutoTrader) checkPositionDrawdown() {
 				// Clear cache for this position after closing
 				at.ClearPeakPnLCache(symbol, side)
 			}
-		} else if currentPnLPct > 5.0 {
+		} else if currentPnLPct > cfg.MinProfitPct {
 			// Record situations close to close position condition (for debugging)
 			logger.Infof("📊 Drawdown monitoring: %s %s | Profit: %.2f%% | Peak: %.2f%% | Drawdown: %.2f%%",
 				symbol, side, currentPnLPct, peakPnLPct, drawdownPct)

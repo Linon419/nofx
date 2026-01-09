@@ -790,9 +790,26 @@ func (t *BitgetTrader) GetMarketPrice(symbol string) (float64, error) {
 	return price, nil
 }
 
+func (t *BitgetTrader) placePositionsTPSL(symbol string, planType string, holdSide string, triggerPrice string, triggerType string) error {
+	body := map[string]interface{}{
+		"symbol":       symbol,
+		"marginCoin":   "USDT",
+		"planType":     planType,
+		"triggerPrice": triggerPrice,
+		"holdSide":     holdSide,
+		"clientOid":    genBitgetClientOid(),
+	}
+	if strings.TrimSpace(triggerType) != "" {
+		body["triggerType"] = triggerType
+	}
+	_, err := t.doRequest("POST", "/api/mix/v1/plan/placePositionsTPSL", body)
+	return err
+}
+
 // SetStopLoss sets stop loss order
 func (t *BitgetTrader) SetStopLoss(symbol string, positionSide string, quantity, stopPrice float64) error {
-	// Bitget V2 uses plan order for stop loss
+	// Prefer position TPSL endpoint (Bitget docs: /api/mix/v1/plan/placePositionsTPSL).
+	// Some accounts still require the v2 plan-order endpoints, so keep a fallback.
 	symbol = t.convertSymbol(symbol)
 
 	side := "sell"
@@ -805,20 +822,24 @@ func (t *BitgetTrader) SetStopLoss(symbol string, positionSide string, quantity,
 	qtyStr, _ := t.FormatQuantity(symbol, quantity)
 	triggerPrice, _ := t.FormatPrice(symbol, stopPrice)
 
-	err := t.placePlanOrderWithFallback(symbol, map[string]interface{}{
-		"symbol":       symbol,
-		"productType":  "USDT-FUTURES",
-		"marginMode":   t.getMarginMode(symbol),
-		"marginCoin":   "USDT",
-		"triggerPrice": triggerPrice,
-		"triggerType":  "mark_price",
-		"side":         side,
-		"tradeSide":    "close",
-		"orderType":    "market",
-		"size":         qtyStr,
-		"holdSide":     holdSide,
-		"clientOid":    genBitgetClientOid(),
-	}, []string{"loss_plan", "normal_plan"})
+	// v1 triggerType values: fill_price, market_price (mark price)
+	err := t.placePositionsTPSL(symbol, "pos_loss", holdSide, triggerPrice, "market_price")
+	if err != nil {
+		err = t.placePlanOrderWithFallback(symbol, map[string]interface{}{
+			"symbol":       symbol,
+			"productType":  "USDT-FUTURES",
+			"marginMode":   t.getMarginMode(symbol),
+			"marginCoin":   "USDT",
+			"triggerPrice": triggerPrice,
+			"triggerType":  "mark_price",
+			"side":         side,
+			"tradeSide":    "close",
+			"orderType":    "market",
+			"size":         qtyStr,
+			"holdSide":     holdSide,
+			"clientOid":    genBitgetClientOid(),
+		}, []string{"loss_plan", "normal_plan"})
+	}
 	if err != nil {
 		return fmt.Errorf("failed to set stop loss (symbol=%s marginMode=%s): %w", symbol, t.getMarginMode(symbol), err)
 	}
@@ -829,7 +850,8 @@ func (t *BitgetTrader) SetStopLoss(symbol string, positionSide string, quantity,
 
 // SetTakeProfit sets take profit order
 func (t *BitgetTrader) SetTakeProfit(symbol string, positionSide string, quantity, takeProfitPrice float64) error {
-	// Bitget V2 uses plan order for take profit
+	// Prefer position TPSL endpoint (Bitget docs: /api/mix/v1/plan/placePositionsTPSL).
+	// Some accounts still require the v2 plan-order endpoints, so keep a fallback.
 	symbol = t.convertSymbol(symbol)
 
 	side := "sell"
@@ -842,20 +864,23 @@ func (t *BitgetTrader) SetTakeProfit(symbol string, positionSide string, quantit
 	qtyStr, _ := t.FormatQuantity(symbol, quantity)
 	triggerPrice, _ := t.FormatPrice(symbol, takeProfitPrice)
 
-	err := t.placePlanOrderWithFallback(symbol, map[string]interface{}{
-		"symbol":       symbol,
-		"productType":  "USDT-FUTURES",
-		"marginMode":   t.getMarginMode(symbol),
-		"marginCoin":   "USDT",
-		"triggerPrice": triggerPrice,
-		"triggerType":  "mark_price",
-		"side":         side,
-		"tradeSide":    "close",
-		"orderType":    "market",
-		"size":         qtyStr,
-		"holdSide":     holdSide,
-		"clientOid":    genBitgetClientOid(),
-	}, []string{"profit_plan", "normal_plan"})
+	err := t.placePositionsTPSL(symbol, "pos_profit", holdSide, triggerPrice, "market_price")
+	if err != nil {
+		err = t.placePlanOrderWithFallback(symbol, map[string]interface{}{
+			"symbol":       symbol,
+			"productType":  "USDT-FUTURES",
+			"marginMode":   t.getMarginMode(symbol),
+			"marginCoin":   "USDT",
+			"triggerPrice": triggerPrice,
+			"triggerType":  "mark_price",
+			"side":         side,
+			"tradeSide":    "close",
+			"orderType":    "market",
+			"size":         qtyStr,
+			"holdSide":     holdSide,
+			"clientOid":    genBitgetClientOid(),
+		}, []string{"profit_plan", "normal_plan"})
+	}
 	if err != nil {
 		return fmt.Errorf("failed to set take profit (symbol=%s marginMode=%s): %w", symbol, t.getMarginMode(symbol), err)
 	}

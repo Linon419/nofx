@@ -747,6 +747,11 @@ export interface RiskControlConfig {
   stop_loss_flip_runner_ratio?: number; // default 0.3
   stop_loss_flip_trail_pct?: number;    // default 0.003 (=0.3%)
   stop_loss_flip_poll_secs?: number;    // default 10
+
+  // Profit-protect drawdown close (auto close when profit pulls back from peak)
+  drawdown_close_enabled?: boolean;         // default true
+  drawdown_close_min_profit_pct?: number;   // default 5 (%)
+  drawdown_close_pct?: number;              // default 40 (% from peak)
 }
 
 // Debate Arena Types

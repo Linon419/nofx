@@ -365,6 +365,21 @@ type RiskControlConfig struct {
 
 	// StopLossFlipPollSecs is how often to poll closed PnL/positions for flip triggers (seconds).
 	StopLossFlipPollSecs int `json:"stop_loss_flip_poll_secs,omitempty"`
+
+	// DrawdownCloseEnabled enables profit-protect drawdown closes.
+	// When enabled, the bot can auto-close a position if it is still profitable but
+	// has drawn down significantly from its peak profit.
+	// nil = default true (backward compatible for existing configs).
+	DrawdownCloseEnabled *bool `json:"drawdown_close_enabled,omitempty"`
+
+	// DrawdownCloseMinProfitPct is the minimum current profit (%) required before drawdown logic can close.
+	// nil = default 5.0.
+	DrawdownCloseMinProfitPct *float64 `json:"drawdown_close_min_profit_pct,omitempty"`
+
+	// DrawdownClosePct is the drawdown threshold (%) from the peak profit required to close.
+	// Example: peak 20%, current 10% => drawdown 50%.
+	// nil = default 40.0.
+	DrawdownClosePct *float64 `json:"drawdown_close_pct,omitempty"`
 }
 
 // NewStrategyStore creates a new StrategyStore
@@ -462,6 +477,8 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 	enforceAICloseGuard := true
 	enforceAIClaimGuard := false
 	minOIMillions := 15.0
+	drawdownCloseMinProfitPct := 5.0
+	drawdownClosePct := 40.0
 
 	config := StrategyConfig{
 		Language: normalizedLang,
@@ -559,6 +576,9 @@ func GetDefaultStrategyConfig(lang string) StrategyConfig {
 			MinPositionSize:              12,  // Min 12 USDT per position (CODE ENFORCED)
 			MinOpenInterestValueMillions: &minOIMillions,
 			EnforceMinPositionSize:       &enforceMinPositionSize,
+			DrawdownCloseEnabled:         &boolTrue,
+			DrawdownCloseMinProfitPct:    &drawdownCloseMinProfitPct,
+			DrawdownClosePct:             &drawdownClosePct,
 			MinRiskRewardRatio:           3.0, // Min 3:1 profit/loss ratio (AI guided)
 			MinConfidence:                75,  // Min 75% confidence (AI guided)
 		},

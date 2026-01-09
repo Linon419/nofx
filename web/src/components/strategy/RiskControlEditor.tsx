@@ -67,6 +67,13 @@ export function RiskControlEditor({
       stopLossFlipTrailPctDesc: { zh: '输入百分比，例如 0.3 表示 0.3%（保存为 0.003）', en: 'Enter percent, e.g. 0.3 means 0.3% (stored as 0.003)' },
       stopLossFlipPollSecs: { zh: '轮询间隔 (秒)', en: 'Poll Interval (sec)' },
       stopLossFlipPollSecsDesc: { zh: '检查止损触发/反手状态的轮询频率', en: 'How often to poll for stop-loss trigger/flip status' },
+      drawdownClose: { zh: '盈利回撤保护（自动平仓）', en: 'Profit Drawdown Protection (Auto Close)' },
+      drawdownCloseDesc: { zh: '盈利后出现大幅回撤时自动平仓，防止利润回吐', en: 'Auto close when profit pulls back sharply from peak' },
+      drawdownCloseEnabled: { zh: '启用回撤保护', en: 'Enable drawdown protection' },
+      drawdownCloseMinProfitPct: { zh: '最小盈利(%)', en: 'Min Profit (%)' },
+      drawdownCloseMinProfitPctDesc: { zh: '当前盈利达到该阈值后才允许触发回撤平仓', en: 'Only triggers when current profit is above this threshold' },
+      drawdownClosePct: { zh: '回撤阈值(%)', en: 'Drawdown Threshold (%)' },
+      drawdownClosePctDesc: { zh: '从峰值盈利回撤的百分比，达到后触发平仓', en: 'Percent drawdown from peak profit to trigger close' },
     }
     return translations[key]?.[language] || key
   }
@@ -88,6 +95,10 @@ export function RiskControlEditor({
   const stopLossFlipInputDisabled = disabled || !stopLossFlipEnabled
   const stopLossFlipRunnerRatio = config.stop_loss_flip_runner_ratio ?? 0.3
   const stopLossFlipTrailPct = config.stop_loss_flip_trail_pct ?? 0.003
+  const drawdownCloseEnabled = config.drawdown_close_enabled ?? true
+  const drawdownCloseInputDisabled = disabled || !drawdownCloseEnabled
+  const drawdownCloseMinProfitPct = config.drawdown_close_min_profit_pct ?? 5
+  const drawdownClosePct = config.drawdown_close_pct ?? 40
 
   return (
     <div className="space-y-6">
@@ -770,6 +781,122 @@ export function RiskControlEditor({
                   s
                 </span>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Profit Drawdown Protection */}
+      <div>
+        <div className="flex items-center gap-2 mb-4">
+          <AlertTriangle className="w-5 h-5" style={{ color: '#F0B90B' }} />
+          <div>
+            <h3 className="font-medium" style={{ color: '#EAECEF' }}>
+              {t('drawdownClose')}
+            </h3>
+            <p className="text-xs" style={{ color: '#848E9C' }}>
+              {t('drawdownCloseDesc')}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div
+            className="p-4 rounded-lg"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <input
+                type="checkbox"
+                checked={drawdownCloseEnabled}
+                onChange={(e) =>
+                  updateField('drawdown_close_enabled', e.target.checked)
+                }
+                disabled={disabled}
+                className="accent-yellow-500"
+              />
+              <span className="text-sm font-medium" style={{ color: '#EAECEF' }}>
+                {t('drawdownCloseEnabled')}
+              </span>
+            </div>
+
+            <label className="block text-sm mb-1" style={{ color: '#EAECEF' }}>
+              {t('drawdownCloseMinProfitPct')}
+            </label>
+            <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+              {t('drawdownCloseMinProfitPctDesc')}
+            </p>
+            <div className="flex items-center">
+              <input
+                type="number"
+                value={drawdownCloseMinProfitPct}
+                onChange={(e) => {
+                  const raw = e.target.value.trim()
+                  if (raw === '') {
+                    updateField('drawdown_close_min_profit_pct', 5)
+                    return
+                  }
+                  const next = Number(raw)
+                  const n = Number.isFinite(next) ? next : 5
+                  const clamped = Math.max(0, Math.min(1000, n))
+                  updateField('drawdown_close_min_profit_pct', clamped)
+                }}
+                disabled={drawdownCloseInputDisabled}
+                min={0}
+                max={1000}
+                step={0.1}
+                className="w-28 px-3 py-2 rounded"
+                style={{
+                  background: '#1E2329',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
+              <span className="ml-2" style={{ color: '#848E9C' }}>
+                %
+              </span>
+            </div>
+          </div>
+
+          <div
+            className="p-4 rounded-lg"
+            style={{ background: '#0B0E11', border: '1px solid #2B3139' }}
+          >
+            <label className="block text-sm mb-1" style={{ color: '#EAECEF' }}>
+              {t('drawdownClosePct')}
+            </label>
+            <p className="text-xs mb-2" style={{ color: '#848E9C' }}>
+              {t('drawdownClosePctDesc')}
+            </p>
+            <div className="flex items-center">
+              <input
+                type="number"
+                value={drawdownClosePct}
+                onChange={(e) => {
+                  const raw = e.target.value.trim()
+                  if (raw === '') {
+                    updateField('drawdown_close_pct', 40)
+                    return
+                  }
+                  const next = Number(raw)
+                  const n = Number.isFinite(next) ? next : 40
+                  const clamped = Math.max(0, Math.min(1000, n))
+                  updateField('drawdown_close_pct', clamped)
+                }}
+                disabled={drawdownCloseInputDisabled}
+                min={0}
+                max={1000}
+                step={0.1}
+                className="w-28 px-3 py-2 rounded"
+                style={{
+                  background: '#1E2329',
+                  border: '1px solid #2B3139',
+                  color: '#EAECEF',
+                }}
+              />
+              <span className="ml-2" style={{ color: '#848E9C' }}>
+                %
+              </span>
             </div>
           </div>
         </div>
