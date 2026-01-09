@@ -85,6 +85,11 @@ type BitgetResponse struct {
 	RequestTime int64           `json:"requestTime"`
 }
 
+type bitgetOrderResponse struct {
+	OrderId   string `json:"orderId"`
+	ClientOid string `json:"clientOid"`
+}
+
 // NewBitgetTrader creates a Bitget trader
 func NewBitgetTrader(apiKey, secretKey, passphrase string) *BitgetTrader {
 	httpClient := &http.Client{
@@ -517,6 +522,82 @@ func (t *BitgetTrader) SetLeverage(symbol string, leverage int) error {
 	return nil
 }
 
+func (t *BitgetTrader) shouldFallbackFromPresetTPSL(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Only fallback when Bitget responded with an explicit API error.
+	// If the request failed at transport level (timeout, network), retrying risks duplicate orders.
+	return strings.Contains(err.Error(), "Bitget API error: code=")
+}
+
+func (t *BitgetTrader) openPositionWithPresetTPSL(
+	symbol string,
+	side string,
+	quantity float64,
+	leverage int,
+	presetStopLossPrice string,
+	presetTakeProfitPrice string,
+) (bitgetOrderResponse, bool, bool, error) {
+	symbol = t.convertSymbol(symbol)
+
+	// Cancel old orders first
+	t.CancelAllOrders(symbol)
+
+	// Set leverage
+	if err := t.SetLeverage(symbol, leverage); err != nil {
+		logger.Infof("  鈿狅笍 Failed to set leverage: %v", err)
+	}
+
+	// Format quantity
+	qtyStr, _ := t.FormatQuantity(symbol, quantity)
+
+	body := map[string]interface{}{
+		"symbol":      symbol,
+		"productType": "USDT-FUTURES",
+		"marginMode":  t.getMarginMode(symbol),
+		"marginCoin":  "USDT",
+		"side":        side,
+		"orderType":   "market",
+		"size":        qtyStr,
+		"clientOid":   genBitgetClientOid(),
+	}
+
+	stopLossPresetApplied := false
+	takeProfitPresetApplied := false
+	if strings.TrimSpace(presetStopLossPrice) != "" {
+		body["presetStopLossPrice"] = presetStopLossPrice
+		stopLossPresetApplied = true
+	}
+	if strings.TrimSpace(presetTakeProfitPrice) != "" {
+		body["presetStopSurplusPrice"] = presetTakeProfitPrice
+		takeProfitPresetApplied = true
+	}
+
+	data, err := t.doRequest("POST", bitgetOrderPath, body)
+	if err != nil && (stopLossPresetApplied || takeProfitPresetApplied) && t.shouldFallbackFromPresetTPSL(err) {
+		logger.Infof("  鈿狅笍 place-order rejected preset SL/TP, falling back: %v", err)
+		delete(body, "presetStopLossPrice")
+		delete(body, "presetStopSurplusPrice")
+		stopLossPresetApplied = false
+		takeProfitPresetApplied = false
+		data, err = t.doRequest("POST", bitgetOrderPath, body)
+	}
+	if err != nil {
+		return bitgetOrderResponse{}, false, false, err
+	}
+
+	var order bitgetOrderResponse
+	if err := json.Unmarshal(data, &order); err != nil {
+		return bitgetOrderResponse{}, false, false, fmt.Errorf("failed to parse order response: %w", err)
+	}
+
+	// Clear cache
+	t.clearCache()
+
+	return order, stopLossPresetApplied, takeProfitPresetApplied, nil
+}
+
 // OpenLong opens long position
 func (t *BitgetTrader) OpenLong(symbol string, quantity float64, leverage int) (map[string]interface{}, error) {
 	symbol = t.convertSymbol(symbol)
@@ -571,6 +652,31 @@ func (t *BitgetTrader) OpenLong(symbol string, quantity float64, leverage int) (
 	}, nil
 }
 
+// OpenLongWithPresetTPSL opens long position and tries to set stop-loss / take-profit via preset parameters in place-order.
+// If Bitget rejects the preset fields (API error), it falls back to a plain place-order and returns applied flags as false.
+func (t *BitgetTrader) OpenLongWithPresetTPSL(symbol string, quantity float64, leverage int, stopLossPrice float64, takeProfitPrice float64) (map[string]interface{}, bool, bool, error) {
+	var presetSL string
+	var presetTP string
+
+	if stopLossPrice > 0 {
+		presetSL, _ = t.FormatPrice(symbol, stopLossPrice)
+	}
+	if takeProfitPrice > 0 {
+		presetTP, _ = t.FormatPrice(symbol, takeProfitPrice)
+	}
+
+	order, slApplied, tpApplied, err := t.openPositionWithPresetTPSL(symbol, "buy", quantity, leverage, presetSL, presetTP)
+	if err != nil {
+		return nil, false, false, fmt.Errorf("failed to open long position: %w", err)
+	}
+
+	return map[string]interface{}{
+		"orderId": order.OrderId,
+		"symbol":  symbol,
+		"status":  "FILLED",
+	}, slApplied, tpApplied, nil
+}
+
 // OpenShort opens short position
 func (t *BitgetTrader) OpenShort(symbol string, quantity float64, leverage int) (map[string]interface{}, error) {
 	symbol = t.convertSymbol(symbol)
@@ -623,6 +729,31 @@ func (t *BitgetTrader) OpenShort(symbol string, quantity float64, leverage int) 
 		"symbol":  symbol,
 		"status":  "FILLED",
 	}, nil
+}
+
+// OpenShortWithPresetTPSL opens short position and tries to set stop-loss / take-profit via preset parameters in place-order.
+// If Bitget rejects the preset fields (API error), it falls back to a plain place-order and returns applied flags as false.
+func (t *BitgetTrader) OpenShortWithPresetTPSL(symbol string, quantity float64, leverage int, stopLossPrice float64, takeProfitPrice float64) (map[string]interface{}, bool, bool, error) {
+	var presetSL string
+	var presetTP string
+
+	if stopLossPrice > 0 {
+		presetSL, _ = t.FormatPrice(symbol, stopLossPrice)
+	}
+	if takeProfitPrice > 0 {
+		presetTP, _ = t.FormatPrice(symbol, takeProfitPrice)
+	}
+
+	order, slApplied, tpApplied, err := t.openPositionWithPresetTPSL(symbol, "sell", quantity, leverage, presetSL, presetTP)
+	if err != nil {
+		return nil, false, false, fmt.Errorf("failed to open short position: %w", err)
+	}
+
+	return map[string]interface{}{
+		"orderId": order.OrderId,
+		"symbol":  symbol,
+		"status":  "FILLED",
+	}, slApplied, tpApplied, nil
 }
 
 // CloseLong closes long position

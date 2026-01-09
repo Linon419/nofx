@@ -1247,6 +1247,9 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 	actionRecord.Quantity = quantity
 	actionRecord.Price = marketData.CurrentPrice
 
+	stopLossValid := validateStopLoss("LONG", marketData.CurrentPrice, decision.StopLoss)
+	takeProfitValid := validateTakeProfit("LONG", marketData.CurrentPrice, decision.TakeProfit)
+
 	// Set margin mode
 	if err := at.trader.SetMarginMode(decision.Symbol, at.config.IsCrossMargin); err != nil {
 		logger.Infof("  ⚠️ Failed to set margin mode: %v", err)
@@ -1254,7 +1257,26 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 	}
 
 	// Open position
-	order, err := at.trader.OpenLong(decision.Symbol, quantity, decision.Leverage)
+	var (
+		order                   map[string]interface{}
+		presetStopLossApplied   bool
+		presetTakeProfitApplied bool
+	)
+	if opener, ok := at.trader.(interface {
+		OpenLongWithPresetTPSL(symbol string, quantity float64, leverage int, stopLossPrice float64, takeProfitPrice float64) (map[string]interface{}, bool, bool, error)
+	}); ok && (stopLossValid || takeProfitValid) {
+		stopLoss := 0.0
+		takeProfit := 0.0
+		if stopLossValid {
+			stopLoss = decision.StopLoss
+		}
+		if takeProfitValid {
+			takeProfit = decision.TakeProfit
+		}
+		order, presetStopLossApplied, presetTakeProfitApplied, err = opener.OpenLongWithPresetTPSL(decision.Symbol, quantity, decision.Leverage, stopLoss, takeProfit)
+	} else {
+		order, err = at.trader.OpenLong(decision.Symbol, quantity, decision.Leverage)
+	}
 	if err != nil {
 		return err
 	}
@@ -1274,8 +1296,10 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
 
 	// Set stop loss and take profit (with validation)
-	if validateStopLoss("LONG", marketData.CurrentPrice, decision.StopLoss) {
-		if err := at.trader.SetStopLoss(decision.Symbol, "LONG", quantity, decision.StopLoss); err != nil {
+	if stopLossValid {
+		if presetStopLossApplied {
+			at.armStopLossFlip(decision.Symbol, "LONG", marketData.CurrentPrice, decision.StopLoss, quantity, decision.Leverage)
+		} else if err := at.trader.SetStopLoss(decision.Symbol, "LONG", quantity, decision.StopLoss); err != nil {
 			logger.Infof("  ⚠ Failed to set stop loss: %v", err)
 		} else {
 			at.armStopLossFlip(decision.Symbol, "LONG", marketData.CurrentPrice, decision.StopLoss, quantity, decision.Leverage)
@@ -1283,8 +1307,9 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 	} else {
 		logger.Infof("  ⚠ Invalid stop loss price: %.4f (entry: %.4f)", decision.StopLoss, marketData.CurrentPrice)
 	}
-	if validateTakeProfit("LONG", marketData.CurrentPrice, decision.TakeProfit) {
-		if err := at.trader.SetTakeProfit(decision.Symbol, "LONG", quantity, decision.TakeProfit); err != nil {
+	if takeProfitValid {
+		if presetTakeProfitApplied {
+		} else if err := at.trader.SetTakeProfit(decision.Symbol, "LONG", quantity, decision.TakeProfit); err != nil {
 			logger.Infof("  ⚠ Failed to set take profit: %v", err)
 		}
 	} else {
@@ -1381,7 +1406,28 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 	}
 
 	// Open position
-	order, err := at.trader.OpenShort(decision.Symbol, quantity, decision.Leverage)
+	var (
+		order                   map[string]interface{}
+		presetStopLossApplied   bool
+		presetTakeProfitApplied bool
+	)
+	stopLossValid := validateStopLoss("SHORT", marketData.CurrentPrice, decision.StopLoss)
+	takeProfitValid := validateTakeProfit("SHORT", marketData.CurrentPrice, decision.TakeProfit)
+	if opener, ok := at.trader.(interface {
+		OpenShortWithPresetTPSL(symbol string, quantity float64, leverage int, stopLossPrice float64, takeProfitPrice float64) (map[string]interface{}, bool, bool, error)
+	}); ok && (stopLossValid || takeProfitValid) {
+		stopLoss := 0.0
+		takeProfit := 0.0
+		if stopLossValid {
+			stopLoss = decision.StopLoss
+		}
+		if takeProfitValid {
+			takeProfit = decision.TakeProfit
+		}
+		order, presetStopLossApplied, presetTakeProfitApplied, err = opener.OpenShortWithPresetTPSL(decision.Symbol, quantity, decision.Leverage, stopLoss, takeProfit)
+	} else {
+		order, err = at.trader.OpenShort(decision.Symbol, quantity, decision.Leverage)
+	}
 	if err != nil {
 		return err
 	}
@@ -1401,8 +1447,10 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 	at.positionFirstSeenTime[posKey] = time.Now().UnixMilli()
 
 	// Set stop loss and take profit (with validation)
-	if validateStopLoss("SHORT", marketData.CurrentPrice, decision.StopLoss) {
-		if err := at.trader.SetStopLoss(decision.Symbol, "SHORT", quantity, decision.StopLoss); err != nil {
+	if stopLossValid {
+		if presetStopLossApplied {
+			at.armStopLossFlip(decision.Symbol, "SHORT", marketData.CurrentPrice, decision.StopLoss, quantity, decision.Leverage)
+		} else if err := at.trader.SetStopLoss(decision.Symbol, "SHORT", quantity, decision.StopLoss); err != nil {
 			logger.Infof("  ⚠ Failed to set stop loss: %v", err)
 		} else {
 			at.armStopLossFlip(decision.Symbol, "SHORT", marketData.CurrentPrice, decision.StopLoss, quantity, decision.Leverage)
@@ -1410,8 +1458,9 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 	} else {
 		logger.Infof("  ⚠ Invalid stop loss price: %.4f (entry: %.4f)", decision.StopLoss, marketData.CurrentPrice)
 	}
-	if validateTakeProfit("SHORT", marketData.CurrentPrice, decision.TakeProfit) {
-		if err := at.trader.SetTakeProfit(decision.Symbol, "SHORT", quantity, decision.TakeProfit); err != nil {
+	if takeProfitValid {
+		if presetTakeProfitApplied {
+		} else if err := at.trader.SetTakeProfit(decision.Symbol, "SHORT", quantity, decision.TakeProfit); err != nil {
 			logger.Infof("  ⚠ Failed to set take profit: %v", err)
 		}
 	} else {
