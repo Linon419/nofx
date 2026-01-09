@@ -11,6 +11,7 @@ import (
 func TestFormatMarketData_TechnicalAnalysisUsesSelectedTimeframesOrder(t *testing.T) {
 	cfg := store.StrategyConfig{
 		Indicators: store.IndicatorConfig{
+			EnableEMA: true,
 			Klines: store.KlineConfig{
 				PrimaryTimeframe:     "5m",
 				EnableMultiTimeframe: true,
@@ -77,6 +78,44 @@ func TestFormatMarketData_TechnicalAnalysisUsesSelectedTimeframesOrder(t *testin
 	}
 	if !strings.Contains(out, `"ema21":`) {
 		t.Fatalf("expected EMA values in ema_snapshot when available, got output:\n%s", out)
+	}
+}
+
+func TestFormatMarketData_TechnicalAnalysisOmitsEMASnapshotWhenEMADisabled(t *testing.T) {
+	cfg := store.StrategyConfig{
+		Indicators: store.IndicatorConfig{
+			EnableEMA: false,
+			Klines: store.KlineConfig{
+				EnableMultiTimeframe: true,
+				SelectedTimeframes:   []string{"15m"},
+			},
+		},
+	}
+	engine := NewStrategyEngine(&cfg)
+
+	data := &market.Data{
+		Symbol: "TESTUSDT",
+		TimeframeData: map[string]*market.TimeframeSeriesData{
+			"15m": {
+				Timeframe: "15m",
+				Klines: []market.KlineBar{
+					{Time: 1000, Open: 1, High: 2, Low: 0.5, Close: 1.5, Volume: 10},
+				},
+				EMA21Values:  []float64{1.4},
+				EMA55Values:  []float64{1.3},
+				EMA100Values: []float64{1.2},
+				EMA200Values: []float64{1.1},
+			},
+		},
+	}
+
+	out := engine.formatMarketData(data)
+
+	if strings.Contains(out, `"ema_snapshot"`) {
+		t.Fatalf("expected ema_snapshot omitted when EMA is disabled, got output:\n%s", out)
+	}
+	if strings.Contains(out, `"ema21":`) {
+		t.Fatalf("expected no EMA values in technical analysis JSON when EMA is disabled, got output:\n%s", out)
 	}
 }
 

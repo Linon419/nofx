@@ -2615,7 +2615,7 @@ func (e *StrategyEngine) formatMarketData(data *market.Data) string {
 
 			klines := convertKlineBarsToKlines(tf, tfData.Klines)
 			analysisResult := safeAnalyze(klines, analysisCfg)
-			analysisJSON := formatAnalysisEnvelopeJSON(tf, tfData, analysisResult)
+			analysisJSON := formatAnalysisEnvelopeJSON(tf, tfData, analysisResult, indicators.EnableEMA)
 
 			sb.WriteString("```json\n")
 			sb.WriteString(analysisJSON)
@@ -2650,10 +2650,12 @@ type analysisEnvelope struct {
 	EMASnapshot *emaSnapshot `json:"ema_snapshot,omitempty"`
 }
 
-func formatAnalysisEnvelopeJSON(tf string, tfData *market.TimeframeSeriesData, analysisResult *analysis.AnalysisResult) string {
+func formatAnalysisEnvelopeJSON(tf string, tfData *market.TimeframeSeriesData, analysisResult *analysis.AnalysisResult, enableEMA bool) string {
 	envelope := analysisEnvelope{
 		AnalysisResult: analysisResult,
-		EMASnapshot:    buildEMASnapshot(tf, tfData),
+	}
+	if enableEMA {
+		envelope.EMASnapshot = buildEMASnapshot(tf, tfData)
 	}
 	if envelope.AnalysisResult == nil {
 		envelope.Note = "analysis_unavailable"
