@@ -79,7 +79,7 @@ func main() {
 		logger.Fatalf("❌ Failed to initialize database: %v", err)
 	}
 	defer st.Close()
-	backtest.UseDatabase(st.DB())
+	backtest.UseDatabaseWithType(st.DB(), st.DBType() == store.DBTypePostgres)
 
 	// Initialize installation ID for experience improvement (anonymous statistics)
 	initInstallationID(st)

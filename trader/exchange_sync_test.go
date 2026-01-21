@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -19,8 +19,8 @@ type TestScenario struct {
 
 // TestTrade represents a single trade in a test scenario
 type TestTrade struct {
-	Action      string // open_long, close_short, etc.
-	Side        string // LONG or SHORT
+	Action      string  // open_long, close_short, etc.
+	Side        string  // LONG or SHORT
 	Symbol      string
 	Quantity    float64
 	Price       float64
@@ -141,7 +141,7 @@ func runStandardTests(t *testing.T, exchangeName string) {
 					traderID, exchangeID, exchangeType,
 					trade.Symbol, trade.Side, trade.Action,
 					trade.Quantity, trade.Price, trade.Fee, trade.RealizedPnL,
-					time.Now().UTC().Add(time.Duration(i)*time.Second).UnixMilli(),
+					time.Now().Add(time.Duration(i)*time.Second).UnixMilli(),
 					"",
 				)
 				if err != nil {
@@ -227,7 +227,7 @@ func TestPositionAccumulationBug(t *testing.T) {
 			traderID, exchangeID, exchangeType,
 			"ETHUSDT", "LONG", "open_long",
 			0.1, 3500+float64(i*10), 0.5, 0,
-			time.Now().UTC().Add(time.Duration(i*2)*time.Second).UnixMilli(),
+			time.Now().Add(time.Duration(i*2)*time.Second).UnixMilli(),
 			"",
 		)
 		if err != nil {
@@ -239,7 +239,7 @@ func TestPositionAccumulationBug(t *testing.T) {
 			traderID, exchangeID, exchangeType,
 			"ETHUSDT", "LONG", "close_long",
 			0.1, 3600+float64(i*10), 0.5, 10,
-			time.Now().UTC().Add(time.Duration(i*2+1)*time.Second).UnixMilli(),
+			time.Now().Add(time.Duration(i*2+1)*time.Second).UnixMilli(),
 			"",
 		)
 		if err != nil {
@@ -309,7 +309,7 @@ func TestQuantityPrecision(t *testing.T) {
 		traderID, exchangeID, exchangeType,
 		"BTCUSDT", "LONG", "open_long",
 		0.01, 50000, 1.0, 0,
-		time.Now().UTC().UnixMilli(),
+		time.Now().UnixMilli(),
 		"",
 	)
 	if err != nil {
@@ -322,7 +322,7 @@ func TestQuantityPrecision(t *testing.T) {
 		traderID, exchangeID, exchangeType,
 		"BTCUSDT", "LONG", "close_long",
 		0.00999999, 51000, 1.0, 10,
-		time.Now().UTC().Add(time.Second).UnixMilli(),
+		time.Now().Add(time.Second).UnixMilli(),
 		"",
 	)
 	if err != nil {

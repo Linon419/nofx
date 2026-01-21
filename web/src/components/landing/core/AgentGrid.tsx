@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { TrendingUp, Layers, Zap, Hexagon, Crosshair } from 'lucide-react'
+import { useAuth } from '../../../contexts/AuthContext'
 
 const agents = [
     {
@@ -31,10 +32,10 @@ const agents = [
     {
         name: "GAMMA-RAY",
         class: "ARBITRAGE",
-        desc: "Risk-free spatial price equalization.",
+        desc: "Low-risk spatial price equalization.",
         apy: "24%",
         winRate: "99%",
-        risk: "ZERO",
+        risk: "LOW",
         color: "text-purple-400",
         border: "border-purple-400/30",
         bg_glow: "shadow-[0_0_30px_rgba(192,132,252,0.1)]",
@@ -43,7 +44,15 @@ const agents = [
 ]
 
 export default function AgentGrid() {
-    // Simplified State to prevent crash
+    const { user } = useAuth()
+
+    const handleInitialize = () => {
+        if (user) {
+            window.location.href = '/strategy-market'
+        } else {
+            window.location.href = '/login'
+        }
+    }
 
     return (
         <section id="market-scanner" className="py-16 md:py-24 bg-nofx-bg relative overflow-hidden">
@@ -118,7 +127,10 @@ export default function AgentGrid() {
                                     </div>
 
                                     {/* Action Btn */}
-                                    <button className={`w-full py-4 text-xs font-bold font-mono uppercase tracking-[0.2em] border border-zinc-700 hover:border-${agent.color === 'text-nofx-gold' ? 'nofx-gold' : 'white'} hover:bg-white/5 transition-all flex items-center justify-center gap-2 group-hover:text-white`}>
+                                    <button
+                                        onClick={handleInitialize}
+                                        className={`w-full py-4 text-xs font-bold font-mono uppercase tracking-[0.2em] border border-zinc-700 hover:border-${agent.color === 'text-nofx-gold' ? 'nofx-gold' : 'white'} hover:bg-white/5 transition-all flex items-center justify-center gap-2 group-hover:text-white cursor-pointer`}
+                                    >
                                         <span className={agent.color}>[</span> INITIALIZE <span className={agent.color}>]</span>
                                     </button>
                                 </div>

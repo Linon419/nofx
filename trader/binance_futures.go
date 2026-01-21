@@ -860,6 +860,125 @@ func (t *FuturesTrader) CancelAllOrders(symbol string) error {
 	return nil
 }
 
+// PlaceLimitOrder places a limit order for grid trading
+// This implements the GridTrader interface for FuturesTrader
+func (t *FuturesTrader) PlaceLimitOrder(req *LimitOrderRequest) (*LimitOrderResult, error) {
+	// Format quantity to correct precision
+	quantityStr, err := t.FormatQuantity(req.Symbol, req.Quantity)
+	if err != nil {
+		return nil, fmt.Errorf("failed to format quantity: %w", err)
+	}
+
+	// Format price to correct precision
+	priceStr, err := t.FormatPrice(req.Symbol, req.Price)
+	if err != nil {
+		return nil, fmt.Errorf("failed to format price: %w", err)
+	}
+
+	// Set leverage if specified
+	if req.Leverage > 0 {
+		if err := t.SetLeverage(req.Symbol, req.Leverage); err != nil {
+			logger.Warnf("Failed to set leverage: %v", err)
+		}
+	}
+
+	// Determine side and position side
+	var side futures.SideType
+	var positionSide futures.PositionSideType
+
+	if req.Side == "BUY" {
+		side = futures.SideTypeBuy
+		positionSide = futures.PositionSideTypeLong
+	} else {
+		side = futures.SideTypeSell
+		positionSide = futures.PositionSideTypeShort
+	}
+
+	// Build order service with broker ID
+	orderService := t.client.NewCreateOrderService().
+		Symbol(req.Symbol).
+		Side(side).
+		PositionSide(positionSide).
+		Type(futures.OrderTypeLimit).
+		TimeInForce(futures.TimeInForceTypeGTC).
+		Quantity(quantityStr).
+		Price(priceStr).
+		NewClientOrderID(getBrOrderID())
+
+	// Execute order
+	order, err := orderService.Do(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to place limit order: %w", err)
+	}
+
+	logger.Infof("✓ [Grid] Placed limit order: %s %s %s @ %s, qty=%s, orderID=%d",
+		req.Symbol, req.Side, positionSide, priceStr, quantityStr, order.OrderID)
+
+	return &LimitOrderResult{
+		OrderID:      fmt.Sprintf("%d", order.OrderID),
+		ClientID:     order.ClientOrderID,
+		Symbol:       order.Symbol,
+		Side:         string(order.Side),
+		PositionSide: string(order.PositionSide),
+		Price:        req.Price,
+		Quantity:     req.Quantity,
+		Status:       string(order.Status),
+	}, nil
+}
+
+// CancelOrder cancels a specific order by ID
+// This implements the GridTrader interface for FuturesTrader
+func (t *FuturesTrader) CancelOrder(symbol, orderID string) error {
+	// Parse order ID to int64
+	orderIDInt, err := strconv.ParseInt(orderID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid order ID: %w", err)
+	}
+
+	_, err = t.client.NewCancelOrderService().
+		Symbol(symbol).
+		OrderID(orderIDInt).
+		Do(context.Background())
+
+	if err != nil {
+		return fmt.Errorf("failed to cancel order: %w", err)
+	}
+
+	logger.Infof("✓ [Grid] Cancelled order: %s/%s", symbol, orderID)
+	return nil
+}
+
+// GetOrderBook gets the order book for a symbol
+// This implements the GridTrader interface for FuturesTrader
+func (t *FuturesTrader) GetOrderBook(symbol string, depth int) (bids, asks [][]float64, err error) {
+	book, err := t.client.NewDepthService().
+		Symbol(symbol).
+		Limit(depth).
+		Do(context.Background())
+
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get order book: %w", err)
+	}
+
+	// Convert bids
+	bids = make([][]float64, len(book.Bids))
+	for i, bid := range book.Bids {
+		price, _ := strconv.ParseFloat(bid.Price, 64)
+		qty, _ := strconv.ParseFloat(bid.Quantity, 64)
+		bids[i] = []float64{price, qty}
+	}
+
+	// Convert asks
+	asks = make([][]float64, len(book.Asks))
+	for i, ask := range book.Asks {
+		price, _ := strconv.ParseFloat(ask.Price, 64)
+		qty, _ := strconv.ParseFloat(ask.Quantity, 64)
+		asks[i] = []float64{price, qty}
+	}
+
+	return bids, asks, nil
+}
+
 // CancelStopOrders cancels take-profit/stop-loss orders for this symbol (used to adjust TP/SL positions)
 // Now uses both legacy API and new Algo Order API (Binance migrated stop orders to Algo system)
 func (t *FuturesTrader) CancelStopOrders(symbol string) error {
@@ -919,6 +1038,64 @@ func (t *FuturesTrader) CancelStopOrders(symbol string) error {
 	}
 
 	return nil
+}
+
+// GetOpenOrders gets all open/pending orders for a symbol
+func (t *FuturesTrader) GetOpenOrders(symbol string) ([]OpenOrder, error) {
+	var result []OpenOrder
+
+	// 1. Get legacy open orders
+	orders, err := t.client.NewListOpenOrdersService().
+		Symbol(symbol).
+		Do(context.Background())
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get open orders: %w", err)
+	}
+
+	for _, order := range orders {
+		price, _ := strconv.ParseFloat(order.Price, 64)
+		stopPrice, _ := strconv.ParseFloat(order.StopPrice, 64)
+		quantity, _ := strconv.ParseFloat(order.OrigQuantity, 64)
+
+		result = append(result, OpenOrder{
+			OrderID:      fmt.Sprintf("%d", order.OrderID),
+			Symbol:       order.Symbol,
+			Side:         string(order.Side),
+			PositionSide: string(order.PositionSide),
+			Type:         string(order.Type),
+			Price:        price,
+			StopPrice:    stopPrice,
+			Quantity:     quantity,
+			Status:       string(order.Status),
+		})
+	}
+
+	// 2. Get Algo orders (new API for stop-loss/take-profit)
+	algoOrders, err := t.client.NewListOpenAlgoOrdersService().
+		Symbol(symbol).
+		Do(context.Background())
+
+	if err == nil {
+		for _, algoOrder := range algoOrders {
+			triggerPrice, _ := strconv.ParseFloat(algoOrder.TriggerPrice, 64)
+			quantity, _ := strconv.ParseFloat(algoOrder.Quantity, 64)
+
+			result = append(result, OpenOrder{
+				OrderID:      fmt.Sprintf("%d", algoOrder.AlgoId),
+				Symbol:       algoOrder.Symbol,
+				Side:         string(algoOrder.Side),
+				PositionSide: string(algoOrder.PositionSide),
+				Type:         string(algoOrder.OrderType),
+				Price:        0, // Algo orders use stop price
+				StopPrice:    triggerPrice,
+				Quantity:     quantity,
+				Status:       "NEW",
+			})
+		}
+	}
+
+	return result, nil
 }
 
 // GetMarketPrice gets market price
@@ -1134,6 +1311,42 @@ func (t *FuturesTrader) FormatQuantity(symbol string, quantity float64) (string,
 
 	format := fmt.Sprintf("%%.%df", precision)
 	return fmt.Sprintf(format, quantity), nil
+}
+
+// GetSymbolPricePrecision gets the price precision for a trading pair
+func (t *FuturesTrader) GetSymbolPricePrecision(symbol string) (int, error) {
+	exchangeInfo, err := t.client.NewExchangeInfoService().Do(context.Background())
+	if err != nil {
+		return 0, fmt.Errorf("failed to get trading rules: %w", err)
+	}
+
+	for _, s := range exchangeInfo.Symbols {
+		if s.Symbol == symbol {
+			// Get precision from PRICE_FILTER filter
+			for _, filter := range s.Filters {
+				if filter["filterType"] == "PRICE_FILTER" {
+					tickSize := filter["tickSize"].(string)
+					precision := calculatePrecision(tickSize)
+					return precision, nil
+				}
+			}
+		}
+	}
+
+	// Default to 2 decimal places for price
+	return 2, nil
+}
+
+// FormatPrice formats price to correct precision
+func (t *FuturesTrader) FormatPrice(symbol string, price float64) (string, error) {
+	precision, err := t.GetSymbolPricePrecision(symbol)
+	if err != nil {
+		// If retrieval fails, use default format
+		return fmt.Sprintf("%.2f", price), nil
+	}
+
+	format := fmt.Sprintf("%%.%df", precision)
+	return fmt.Sprintf(format, price), nil
 }
 
 // Helper functions

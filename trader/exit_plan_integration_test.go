@@ -86,6 +86,9 @@ func (m *mockExitPlanTrader) GetOrderStatus(symbol string, orderID string) (map[
 func (m *mockExitPlanTrader) GetClosedPnL(startTime time.Time, limit int) ([]ClosedPnLRecord, error) {
 	return nil, nil
 }
+func (m *mockExitPlanTrader) GetOpenOrders(symbol string) ([]OpenOrder, error) {
+	return nil, nil
+}
 
 func TestProcessExitPlanPosition_TierAndStopLossReplace(t *testing.T) {
 	st, err := store.New(":memory:")
