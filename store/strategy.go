@@ -416,6 +416,27 @@ type RiskControlConfig struct {
 	// Example: peak 20%, current 10% => drawdown 50%.
 	// nil = default 40.0.
 	DrawdownClosePct *float64 `json:"drawdown_close_pct,omitempty"`
+
+	// ========== Trailing Stop Configuration ==========
+
+	// TrailingStopEnabled enables automatic trailing stop for all positions.
+	// When enabled, stop loss is moved to breakeven after reaching profit threshold,
+	// then trails the price by a percentage from the peak.
+	TrailingStopEnabled bool `json:"trailing_stop_enabled,omitempty"`
+
+	// TrailingStopBreakevenPct is the profit percentage required to move stop to breakeven.
+	// Example: 2.0 = move stop to entry price when position is +2% profitable.
+	// nil = default 2.0.
+	TrailingStopBreakevenPct *float64 `json:"trailing_stop_breakeven_pct,omitempty"`
+
+	// TrailingStopTrailPct is the trailing distance from peak price (%).
+	// Example: 1.0 = stop trails 1% below peak for long, 1% above trough for short.
+	// nil = default 1.0.
+	TrailingStopTrailPct *float64 `json:"trailing_stop_trail_pct,omitempty"`
+
+	// TrailingStopPollSecs is how often to check and update trailing stops (seconds).
+	// nil = default 30.
+	TrailingStopPollSecs *int `json:"trailing_stop_poll_secs,omitempty"`
 }
 
 // NewStrategyStore creates a new StrategyStore

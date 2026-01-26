@@ -142,6 +142,10 @@ type AutoTrader struct {
 	monitorWg             sync.WaitGroup     // Used to wait for monitoring goroutine to finish
 	peakPnLCache          map[string]float64 // Peak profit cache (symbol -> peak P&L percentage)
 	peakPnLCacheMutex     sync.RWMutex       // Cache read-write lock
+	peakPriceCache        map[string]float64 // Peak price cache for trailing stop (symbol_side -> peak price)
+	peakPriceCacheMutex   sync.RWMutex       // Peak price cache read-write lock
+	trailingStopState     map[string]int     // Trailing stop state: 0=initial, 1=breakeven, 2=trailing
+	trailingStopStateMu   sync.RWMutex       // Trailing stop state mutex
 	pendingExitPlansMu    sync.Mutex
 	pendingExitPlans      map[string]pendingExitPlan
 	exitPlanLocksMu       sync.Mutex
@@ -422,6 +426,10 @@ func NewAutoTrader(config AutoTraderConfig, st *store.Store, userID string) (*Au
 		monitorWg:             sync.WaitGroup{},
 		peakPnLCache:          make(map[string]float64),
 		peakPnLCacheMutex:     sync.RWMutex{},
+		peakPriceCache:        make(map[string]float64),
+		peakPriceCacheMutex:   sync.RWMutex{},
+		trailingStopState:     make(map[string]int),
+		trailingStopStateMu:   sync.RWMutex{},
 		pendingExitPlansMu:    sync.Mutex{},
 		pendingExitPlans:      make(map[string]pendingExitPlan),
 		exitPlanLocksMu:       sync.Mutex{},
@@ -449,6 +457,9 @@ func (at *AutoTrader) Run() error {
 
 	// Start drawdown monitoring
 	at.startDrawdownMonitor()
+
+	// Start trailing stop monitoring
+	at.startTrailingStopMonitor()
 
 	// Stop-loss flip (reverse after stop-loss triggers, one-way/net mode)
 	at.startStopLossFlipMonitor()
@@ -2159,6 +2170,288 @@ func (at *AutoTrader) ClearPeakPnLCache(symbol, side string) {
 
 	posKey := symbol + "_" + side
 	delete(at.peakPnLCache, posKey)
+}
+
+// ========== Trailing Stop Implementation ==========
+
+// trailingStopConfig holds trailing stop configuration with defaults applied
+type trailingStopConfig struct {
+	Enabled      bool
+	BreakevenPct float64 // Profit % to move stop to breakeven
+	TrailPct     float64 // Trail distance from peak (%)
+	PollSecs     int
+}
+
+func (at *AutoTrader) getTrailingStopConfig() trailingStopConfig {
+	cfg := trailingStopConfig{
+		Enabled:      false,
+		BreakevenPct: 2.0,
+		TrailPct:     1.0,
+		PollSecs:     30,
+	}
+
+	if at.config.StrategyConfig == nil {
+		return cfg
+	}
+	riskControl := at.config.StrategyConfig.RiskControl
+
+	cfg.Enabled = riskControl.TrailingStopEnabled
+	if riskControl.TrailingStopBreakevenPct != nil {
+		cfg.BreakevenPct = *riskControl.TrailingStopBreakevenPct
+	}
+	if riskControl.TrailingStopTrailPct != nil {
+		cfg.TrailPct = *riskControl.TrailingStopTrailPct
+	}
+	if riskControl.TrailingStopPollSecs != nil && *riskControl.TrailingStopPollSecs > 0 {
+		cfg.PollSecs = *riskControl.TrailingStopPollSecs
+	}
+	return cfg
+}
+
+// startTrailingStopMonitor starts the trailing stop monitoring goroutine
+func (at *AutoTrader) startTrailingStopMonitor() {
+	cfg := at.getTrailingStopConfig()
+	if !cfg.Enabled {
+		return
+	}
+
+	at.monitorWg.Add(1)
+	go func() {
+		defer at.monitorWg.Done()
+
+		pollInterval := time.Duration(cfg.PollSecs) * time.Second
+		ticker := time.NewTicker(pollInterval)
+		defer ticker.Stop()
+
+		logger.Infof("📈 Started trailing stop monitor (breakeven: %.1f%%, trail: %.1f%%, poll: %ds)",
+			cfg.BreakevenPct, cfg.TrailPct, cfg.PollSecs)
+
+		for {
+			select {
+			case <-ticker.C:
+				at.checkTrailingStop()
+			case <-at.stopMonitorCh:
+				logger.Info("⏹ Stopped trailing stop monitor")
+				return
+			}
+		}
+	}()
+}
+
+// checkTrailingStop checks and updates trailing stops for all positions
+func (at *AutoTrader) checkTrailingStop() {
+	cfg := at.getTrailingStopConfig()
+	if !cfg.Enabled {
+		return
+	}
+
+	positions, err := at.trader.GetPositions()
+	if err != nil {
+		logger.Infof("❌ Trailing stop: failed to get positions: %v", err)
+		return
+	}
+
+	for _, pos := range positions {
+		symbol := pos["symbol"].(string)
+		side := pos["side"].(string)
+		entryPrice := pos["entryPrice"].(float64)
+		markPrice := pos["markPrice"].(float64)
+		quantity := pos["positionAmt"].(float64)
+		if quantity < 0 {
+			quantity = -quantity
+		}
+		if quantity == 0 || entryPrice == 0 {
+			continue
+		}
+
+		leverage := 10.0
+		if lev, ok := pos["leverage"].(float64); ok && lev > 0 {
+			leverage = lev
+		}
+
+		posKey := symbol + "_" + side
+
+		// Calculate current profit percentage (with leverage)
+		var currentPnLPct float64
+		if side == "long" {
+			currentPnLPct = ((markPrice - entryPrice) / entryPrice) * leverage * 100
+		} else {
+			currentPnLPct = ((entryPrice - markPrice) / entryPrice) * leverage * 100
+		}
+
+		// Update peak price
+		at.updatePeakPrice(posKey, side, markPrice)
+
+		// Get current state
+		at.trailingStopStateMu.RLock()
+		state := at.trailingStopState[posKey]
+		at.trailingStopStateMu.RUnlock()
+
+		// State machine: 0=initial, 1=breakeven, 2=trailing
+		switch state {
+		case 0: // Initial: waiting for breakeven trigger
+			if currentPnLPct >= cfg.BreakevenPct {
+				// Move stop to breakeven (entry price)
+				if err := at.updateStopLoss(symbol, side, quantity, entryPrice); err != nil {
+					logger.Infof("❌ Trailing stop: failed to set breakeven for %s: %v", symbol, err)
+					continue
+				}
+				logger.Infof("📈 Trailing stop: %s %s moved to breakeven (entry: %.4f, profit: %.2f%%)",
+					symbol, side, entryPrice, currentPnLPct)
+				at.setTrailingStopState(posKey, 1)
+			}
+
+		case 1, 2: // Breakeven or Trailing: update trailing stop
+			peakPrice := at.getPeakPrice(posKey)
+			if peakPrice == 0 {
+				peakPrice = markPrice
+			}
+
+			var newStop float64
+			trailDistance := cfg.TrailPct / 100.0
+
+			if side == "long" {
+				newStop = peakPrice * (1 - trailDistance)
+				// Ensure stop is above entry (breakeven) and below current price
+				if newStop < entryPrice {
+					newStop = entryPrice
+				}
+				if newStop >= markPrice {
+					newStop = markPrice * 0.999
+				}
+			} else { // short
+				newStop = peakPrice * (1 + trailDistance)
+				// Ensure stop is below entry (breakeven) and above current price
+				if newStop > entryPrice {
+					newStop = entryPrice
+				}
+				if newStop <= markPrice {
+					newStop = markPrice * 1.001
+				}
+			}
+
+			// Get current stop price and only update if meaningful change
+			currentStop := at.getCurrentStopPrice(symbol, side)
+			if currentStop > 0 {
+				movePct := math.Abs(newStop-currentStop) / currentStop
+				if movePct < 0.001 { // <0.1% change, skip
+					continue
+				}
+				// Only move stop in favorable direction
+				if side == "long" && newStop <= currentStop {
+					continue
+				}
+				if side == "short" && newStop >= currentStop {
+					continue
+				}
+			}
+
+			if err := at.updateStopLoss(symbol, side, quantity, newStop); err != nil {
+				logger.Infof("❌ Trailing stop: failed to update for %s: %v", symbol, err)
+				continue
+			}
+
+			if state == 1 {
+				at.setTrailingStopState(posKey, 2)
+			}
+			logger.Infof("📈 Trailing stop: %s %s updated to %.4f (peak: %.4f, profit: %.2f%%)",
+				symbol, side, newStop, peakPrice, currentPnLPct)
+		}
+	}
+
+	// Clean up state for closed positions
+	at.cleanupTrailingStopState(positions)
+}
+
+func (at *AutoTrader) updatePeakPrice(posKey, side string, currentPrice float64) {
+	at.peakPriceCacheMutex.Lock()
+	defer at.peakPriceCacheMutex.Unlock()
+
+	peak, exists := at.peakPriceCache[posKey]
+	if !exists {
+		at.peakPriceCache[posKey] = currentPrice
+		return
+	}
+
+	if side == "long" && currentPrice > peak {
+		at.peakPriceCache[posKey] = currentPrice
+	} else if side == "short" && currentPrice < peak {
+		at.peakPriceCache[posKey] = currentPrice
+	}
+}
+
+func (at *AutoTrader) getPeakPrice(posKey string) float64 {
+	at.peakPriceCacheMutex.RLock()
+	defer at.peakPriceCacheMutex.RUnlock()
+	return at.peakPriceCache[posKey]
+}
+
+func (at *AutoTrader) setTrailingStopState(posKey string, state int) {
+	at.trailingStopStateMu.Lock()
+	defer at.trailingStopStateMu.Unlock()
+	at.trailingStopState[posKey] = state
+}
+
+func (at *AutoTrader) getCurrentStopPrice(symbol, side string) float64 {
+	orders, err := at.trader.GetOpenOrders(symbol)
+	if err != nil {
+		return 0
+	}
+
+	for _, order := range orders {
+		orderType := strings.ToUpper(order.Type)
+		if orderType == "STOP_MARKET" || orderType == "STOP" || orderType == "STOP_LOSS" {
+			// Match position side
+			orderSide := strings.ToLower(order.Side)
+			if side == "long" && orderSide == "sell" {
+				return order.StopPrice
+			}
+			if side == "short" && orderSide == "buy" {
+				return order.StopPrice
+			}
+		}
+	}
+	return 0
+}
+
+func (at *AutoTrader) updateStopLoss(symbol, side string, quantity, stopPrice float64) error {
+	// Cancel existing stop orders
+	if err := at.trader.CancelStopLossOrders(symbol); err != nil {
+		// Log but continue - there might not be existing orders
+		logger.Infof("⚠️ Trailing stop: cancel existing orders: %v", err)
+	}
+
+	// Set new stop loss
+	positionSide := strings.ToUpper(side)
+	return at.trader.SetStopLoss(symbol, positionSide, quantity, stopPrice)
+}
+
+func (at *AutoTrader) cleanupTrailingStopState(positions []map[string]interface{}) {
+	activeKeys := make(map[string]bool)
+	for _, pos := range positions {
+		symbol := pos["symbol"].(string)
+		side := pos["side"].(string)
+		posKey := symbol + "_" + side
+		activeKeys[posKey] = true
+	}
+
+	at.trailingStopStateMu.Lock()
+	defer at.trailingStopStateMu.Unlock()
+
+	for key := range at.trailingStopState {
+		if !activeKeys[key] {
+			delete(at.trailingStopState, key)
+		}
+	}
+
+	at.peakPriceCacheMutex.Lock()
+	defer at.peakPriceCacheMutex.Unlock()
+
+	for key := range at.peakPriceCache {
+		if !activeKeys[key] {
+			delete(at.peakPriceCache, key)
+		}
+	}
 }
 
 // recordAndConfirmOrder polls order status for actual fill data and records position
