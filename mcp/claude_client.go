@@ -1,23 +1,28 @@
 package mcp
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
 const (
 	ProviderClaude       = "claude"
-	DefaultClaudeBaseURL = "https://api.anthropic.com/v1"
+	DefaultClaudeBaseURL = "https://api.anthropic.com" // SDK adds /v1/messages automatically
 	DefaultClaudeModel   = "claude-opus-4-5-20251101"
 )
 
 type ClaudeClient struct {
 	*Client
+	sdkClient    anthropic.Client // Anthropic official SDK client (value type, not pointer)
+	sdkInitialized bool           // Flag to check if SDK client is initialized
 }
 
 // NewClaudeClient creates Claude client (backward compatible)
@@ -40,35 +45,39 @@ func NewClaudeClientWithOptions(opts ...ClientOption) AIClient {
 	// 3. Create base client
 	baseClient := NewClient(allOpts...).(*Client)
 
-	// 4. Create Claude client
+	// 4. Create Claude client with SDK
 	claudeClient := &ClaudeClient{
 		Client: baseClient,
 	}
 
-	// 5. Set hooks to point to ClaudeClient (implement dynamic dispatch)
+	// 5. Initialize SDK client if API key is available
+	if baseClient.APIKey != "" {
+		claudeClient.sdkClient = anthropic.NewClient(
+			option.WithAPIKey(baseClient.APIKey),
+			option.WithBaseURL(baseClient.BaseURL),
+		)
+		claudeClient.sdkInitialized = true
+	}
+
+	// 6. Set hooks to point to ClaudeClient (implement dynamic dispatch)
 	baseClient.hooks = claudeClient
 
 	return claudeClient
 }
 
 func (c *ClaudeClient) SetAPIKey(apiKey string, customURL string, customModel string) {
-	c.APIKey = apiKey
+	// Use base class helper for common logic
+	c.Client.setAPIKeyInternal(apiKey, customURL, customModel)
 
-	if len(apiKey) > 8 {
-		c.logger.Infof("🔧 [MCP] Claude API Key: %s...%s", apiKey[:4], apiKey[len(apiKey)-4:])
+	// Recreate SDK client with new configuration
+	sdkOpts := []option.RequestOption{
+		option.WithAPIKey(apiKey),
 	}
-	if customURL != "" {
-		c.BaseURL = customURL
-		c.logger.Infof("🔧 [MCP] Claude using custom BaseURL: %s", customURL)
-	} else {
-		c.logger.Infof("🔧 [MCP] Claude using default BaseURL: %s", c.BaseURL)
+	if c.BaseURL != "" {
+		sdkOpts = append(sdkOpts, option.WithBaseURL(c.BaseURL))
 	}
-	if customModel != "" {
-		c.Model = customModel
-		c.logger.Infof("🔧 [MCP] Claude using custom Model: %s", customModel)
-	} else {
-		c.logger.Infof("🔧 [MCP] Claude using default Model: %s", c.Model)
-	}
+	c.sdkClient = anthropic.NewClient(sdkOpts...)
+	c.sdkInitialized = true
 }
 
 // setAuthHeader Claude uses x-api-key header instead of Authorization Bearer
@@ -77,9 +86,9 @@ func (c *ClaudeClient) setAuthHeader(reqHeaders http.Header) {
 	reqHeaders.Set("anthropic-version", "2023-06-01")
 }
 
-// buildUrl Claude uses /messages endpoint
+// buildUrl Claude uses /v1/messages endpoint
 func (c *ClaudeClient) buildUrl() string {
-	return fmt.Sprintf("%s/messages", c.BaseURL)
+	return fmt.Sprintf("%s/v1/messages", c.BaseURL)
 }
 
 // buildMCPRequestBody Claude has different request format
@@ -157,11 +166,9 @@ func (c *ClaudeClient) parseMCPResponse(body []byte) (string, error) {
 }
 
 // CallWithRequest calls Claude API using Request object (supports tools)
-//
-// Note: Claude's /messages API is not OpenAI-compatible, so we must build and parse
-// the request/response using Claude-specific formats here.
+// Uses anthropic-sdk-go for type-safe API calls
 func (c *ClaudeClient) CallWithRequest(req *Request) (string, error) {
-	if c.APIKey == "" {
+	if !c.sdkInitialized {
 		return "", fmt.Errorf("AI API key not set, please call SetAPIKey first")
 	}
 	if req == nil {
@@ -169,96 +176,15 @@ func (c *ClaudeClient) CallWithRequest(req *Request) (string, error) {
 	}
 
 	// If Model is not set in Request, use Client's Model
-	if req.Model == "" {
-		req.Model = c.Model
+	model := req.Model
+	if model == "" {
+		model = c.Model
 	}
 
-	// Build Claude system prompt (Claude uses top-level "system", not a system message)
-	var systemParts []string
-	messages := make([]map[string]any, 0, len(req.Messages))
-	for _, msg := range req.Messages {
-		switch msg.Role {
-		case "system":
-			if msg.Content != "" {
-				systemParts = append(systemParts, msg.Content)
-			}
-		case "user", "assistant":
-			if len(msg.Parts) > 0 {
-				blocks := make([]map[string]any, 0, len(msg.Parts))
-				for _, p := range msg.Parts {
-					switch p.Type {
-					case "text":
-						if strings.TrimSpace(p.Text) != "" {
-							blocks = append(blocks, map[string]any{"type": "text", "text": p.Text})
-						}
-					case "image":
-						mediaType, data, ok := parseDataURI(p.DataURI)
-						if !ok {
-							c.logger.Warnf("⚠️  Claude: invalid image data URI, skipping")
-							continue
-						}
-						blocks = append(blocks, map[string]any{
-							"type": "image",
-							"source": map[string]any{
-								"type":       "base64",
-								"media_type": mediaType,
-								"data":       data,
-							},
-						})
-					}
-				}
-				messages = append(messages, map[string]any{
-					"role":    msg.Role,
-					"content": blocks,
-				})
-			} else {
-				messages = append(messages, map[string]any{
-					"role":    msg.Role,
-					"content": msg.Content,
-				})
-			}
-		}
-	}
-
-	maxTokens := c.MaxTokens
-	if req.MaxTokens != nil && *req.MaxTokens > 0 {
-		maxTokens = *req.MaxTokens
-	}
-
-	temperature := c.config.Temperature
-	if req.Temperature != nil {
-		temperature = *req.Temperature
-	}
-
-	requestBody := map[string]any{
-		"model":       req.Model,
-		"max_tokens":  maxTokens,
-		"messages":    messages,
-		"temperature": temperature,
-	}
-	if len(systemParts) > 0 {
-		requestBody["system"] = strings.Join(systemParts, "\n\n")
-	}
-
-	// Convert OpenAI-style tools to Claude tools format
-	if len(req.Tools) > 0 {
-		tools := make([]map[string]any, 0, len(req.Tools))
-		for _, tool := range req.Tools {
-			tools = append(tools, map[string]any{
-				"name":         tool.Function.Name,
-				"description":  tool.Function.Description,
-				"input_schema": tool.Function.Parameters,
-			})
-		}
-		requestBody["tools"] = tools
-
-		// Force tool usage if requested
-		if req.ToolChoice == "required" && len(tools) > 0 {
-			requestBody["tool_choice"] = map[string]any{
-				"type": "tool",
-				"name": tools[0]["name"],
-			}
-		}
+	// Build SDK message params
+	params, err := c.buildSDKMessageParams(req, model)
+	if err != nil {
+		return "", err
 	}
 
 	// Retry flow (same semantics as base client)
@@ -270,50 +196,23 @@ func (c *ClaudeClient) CallWithRequest(req *Request) (string, error) {
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if attempt > 1 {
-			c.logger.Warnf("鈿狅笍  Claude API call failed, retrying (%d/%d)...", attempt, maxRetries)
+			c.logger.Warnf("⚠️  Claude API call failed, retrying (%d/%d)...", attempt, maxRetries)
 		}
 
-		// Serialize request
-		jsonData, err := json.Marshal(requestBody)
-		if err != nil {
-			return "", fmt.Errorf("failed to serialize request: %w", err)
-		}
-
-		// Build request
-		url := c.buildUrl()
-		httpReq, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
-		if err != nil {
-			return "", fmt.Errorf("failed to create request: %w", err)
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		c.setAuthHeader(httpReq.Header)
-
-		// Send request
-		resp, err := c.httpClient.Do(httpReq)
-		if err != nil {
-			lastErr = fmt.Errorf("failed to send request: %w", err)
-		} else {
-			bodyBytes, readErr := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			if readErr != nil {
-				lastErr = fmt.Errorf("failed to read response: %w", readErr)
-			} else if resp.StatusCode != http.StatusOK {
-				lastErr = fmt.Errorf("API returned error (status %d): %s", resp.StatusCode, string(bodyBytes))
-			} else {
-				out, parseErr := c.parseMCPResponse(bodyBytes)
-				if parseErr == nil {
-					if attempt > 1 {
-						c.logger.Infof("鉁?Claude API retry succeeded")
-					}
-					return out, nil
-				}
-				lastErr = parseErr
+		// Call SDK
+		ctx := context.Background()
+		message, err := c.sdkClient.Messages.New(ctx, params)
+		if err == nil {
+			if attempt > 1 {
+				c.logger.Infof("✓ Claude API retry succeeded")
 			}
+			return c.extractSDKResponse(message)
 		}
 
+		lastErr = err
 		// Check retryability
-		if lastErr != nil && !c.hooks.isRetryableError(lastErr) {
-			return "", lastErr
+		if !c.isRetryableSDKError(err) {
+			return "", err
 		}
 		if attempt < maxRetries {
 			waitTime := c.config.RetryWaitBase * time.Duration(attempt)
@@ -322,6 +221,196 @@ func (c *ClaudeClient) CallWithRequest(req *Request) (string, error) {
 	}
 
 	return "", fmt.Errorf("still failed after %d retries: %w", maxRetries, lastErr)
+}
+
+// buildSDKMessageParams converts mcp.Request to anthropic.MessageNewParams
+func (c *ClaudeClient) buildSDKMessageParams(req *Request, model string) (anthropic.MessageNewParams, error) {
+	// Extract system prompt and build messages
+	var systemBlocks []anthropic.TextBlockParam
+	sdkMessages := make([]anthropic.MessageParam, 0, len(req.Messages))
+
+	for _, msg := range req.Messages {
+		switch msg.Role {
+		case "system":
+			if msg.Content != "" {
+				systemBlocks = append(systemBlocks, anthropic.TextBlockParam{Text: msg.Content})
+			}
+		case "user":
+			if len(msg.Parts) > 0 {
+				blocks := c.convertPartsToSDK(msg.Parts)
+				sdkMessages = append(sdkMessages, anthropic.NewUserMessage(blocks...))
+			} else if msg.Content != "" {
+				sdkMessages = append(sdkMessages, anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content)))
+			}
+		case "assistant":
+			if msg.Content != "" {
+				sdkMessages = append(sdkMessages, anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content)))
+			}
+		}
+	}
+
+	// Determine max tokens
+	maxTokens := int64(c.MaxTokens)
+	if req.MaxTokens != nil && *req.MaxTokens > 0 {
+		maxTokens = int64(*req.MaxTokens)
+	}
+
+	params := anthropic.MessageNewParams{
+		Model:     anthropic.Model(model),
+		MaxTokens: maxTokens,
+		Messages:  sdkMessages,
+	}
+
+	// Add system prompt if present
+	if len(systemBlocks) > 0 {
+		params.System = systemBlocks
+	}
+
+	// Add temperature if set
+	if req.Temperature != nil {
+		params.Temperature = anthropic.Float(*req.Temperature)
+	} else {
+		params.Temperature = anthropic.Float(c.config.Temperature)
+	}
+
+	// Convert tools if present
+	if len(req.Tools) > 0 {
+		sdkTools := make([]anthropic.ToolUnionParam, 0, len(req.Tools))
+		for _, tool := range req.Tools {
+			// Build InputSchema from JSON Schema parameters
+			// Parameters is a full JSON Schema with type, properties, required fields
+			inputSchema := anthropic.ToolInputSchemaParam{}
+
+			if props, ok := tool.Function.Parameters["properties"]; ok {
+				inputSchema.Properties = props
+			}
+			if required, ok := tool.Function.Parameters["required"].([]any); ok {
+				reqStrings := make([]string, 0, len(required))
+				for _, r := range required {
+					if s, ok := r.(string); ok {
+						reqStrings = append(reqStrings, s)
+					}
+				}
+				inputSchema.Required = reqStrings
+			} else if required, ok := tool.Function.Parameters["required"].([]string); ok {
+				inputSchema.Required = required
+			}
+
+			sdkTools = append(sdkTools, anthropic.ToolUnionParam{
+				OfTool: &anthropic.ToolParam{
+					Name:        tool.Function.Name,
+					Description: anthropic.String(tool.Function.Description),
+					InputSchema: inputSchema,
+				},
+			})
+		}
+		params.Tools = sdkTools
+
+		// Set tool choice if required
+		if req.ToolChoice == "required" && len(sdkTools) > 0 {
+			params.ToolChoice = anthropic.ToolChoiceUnionParam{
+				OfTool: &anthropic.ToolChoiceToolParam{
+					Name: req.Tools[0].Function.Name,
+				},
+			}
+		}
+	}
+
+	return params, nil
+}
+
+// convertPartsToSDK converts mcp.ContentPart to SDK content blocks
+func (c *ClaudeClient) convertPartsToSDK(parts []ContentPart) []anthropic.ContentBlockParamUnion {
+	blocks := make([]anthropic.ContentBlockParamUnion, 0, len(parts))
+	for _, p := range parts {
+		switch p.Type {
+		case "text":
+			if strings.TrimSpace(p.Text) != "" {
+				blocks = append(blocks, anthropic.NewTextBlock(p.Text))
+			}
+		case "image":
+			mediaType, data, ok := parseDataURI(p.DataURI)
+			if !ok {
+				c.logger.Warnf("⚠️  Claude: invalid image data URI, skipping")
+				continue
+			}
+			blocks = append(blocks, anthropic.NewImageBlock(anthropic.Base64ImageSourceParam{
+				MediaType: anthropic.Base64ImageSourceMediaType(mediaType),
+				Data:      data,
+			}))
+		}
+	}
+	return blocks
+}
+
+// extractSDKResponse extracts text or tool_use from SDK response
+func (c *ClaudeClient) extractSDKResponse(message *anthropic.Message) (string, error) {
+	// Report token usage if callback is set
+	totalTokens := int(message.Usage.InputTokens + message.Usage.OutputTokens)
+	if TokenUsageCallback != nil && totalTokens > 0 {
+		TokenUsageCallback(TokenUsage{
+			Provider:         c.Provider,
+			Model:            c.Model,
+			PromptTokens:     int(message.Usage.InputTokens),
+			CompletionTokens: int(message.Usage.OutputTokens),
+			TotalTokens:      totalTokens,
+		})
+	}
+
+	if len(message.Content) == 0 {
+		return "", fmt.Errorf("Claude returned empty content")
+	}
+
+	// Find text or tool_use content
+	for _, block := range message.Content {
+		switch b := block.AsAny().(type) {
+		case anthropic.ToolUseBlock:
+			// Return tool input as JSON string
+			data, err := json.Marshal(b.Input)
+			if err != nil {
+				return "", fmt.Errorf("failed to marshal tool_use input: %w", err)
+			}
+			return string(data), nil
+		case anthropic.TextBlock:
+			return b.Text, nil
+		}
+	}
+
+	return "", fmt.Errorf("no text content in Claude response")
+}
+
+// isRetryableSDKError checks if SDK error is retryable
+func (c *ClaudeClient) isRetryableSDKError(err error) bool {
+	// Check for SDK API error with status code
+	var apiErr *anthropic.Error
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case 429: // Rate limit
+			return true
+		case 500, 502, 503, 504: // Server errors
+			return true
+		case 529: // Overloaded
+			return true
+		}
+		return false
+	}
+
+	// Fallback to string matching for network errors
+	errStr := strings.ToLower(err.Error())
+	networkPatterns := []string{
+		"timeout",
+		"connection reset",
+		"connection refused",
+		"eof",
+		"temporary failure",
+	}
+
+	for _, pattern := range networkPatterns {
+		if strings.Contains(errStr, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseDataURI(raw string) (mediaType, data string, ok bool) {

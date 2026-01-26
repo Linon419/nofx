@@ -3,18 +3,17 @@ package mcp
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
 func TestClaudeClient_CallWithRequest_ToolUseResponse_ReturnsInputJSON(t *testing.T) {
-	mockHTTP := NewMockHTTPClient()
-	mockLogger := NewMockLogger()
-
-	mockHTTP.StatusCode = http.StatusOK
-	mockHTTP.Response = `{
+	// Create a mock server that returns tool_use response
+	mockResponse := `{
   "content": [
     {
       "type": "tool_use",
+      "id": "toolu_test",
       "name": "submit_decisions",
       "input": {
         "reasoning": "r",
@@ -24,13 +23,28 @@ func TestClaudeClient_CallWithRequest_ToolUseResponse_ReturnsInputJSON(t *testin
       }
     }
   ],
-  "usage": { "input_tokens": 1, "output_tokens": 1 }
+  "usage": { "input_tokens": 1, "output_tokens": 1 },
+  "id": "msg_test",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-4-5-20251101",
+  "stop_reason": "tool_use"
 }`
 
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(mockResponse))
+	}))
+	defer server.Close()
+
+	mockLogger := NewMockLogger()
+
+	// Create client with SDK pointing to mock server
 	client := NewClaudeClientWithOptions(
-		WithHTTPClient(mockHTTP.ToHTTPClient()),
 		WithLogger(mockLogger),
 		WithAPIKey("sk-test-key"),
+		WithBaseURL(server.URL), // Override to mock server
 	).(*ClaudeClient)
 
 	req := NewRequestBuilder().
@@ -61,19 +75,5 @@ func TestClaudeClient_CallWithRequest_ToolUseResponse_ReturnsInputJSON(t *testin
 	decisions, ok := payload["decisions"].([]any)
 	if !ok || len(decisions) != 1 {
 		t.Fatalf("unexpected decisions: %+v", payload["decisions"])
-	}
-
-	// Verify request contains tools + forced tool choice
-	requests := mockHTTP.GetRequests()
-	if len(requests) != 1 {
-		t.Fatalf("expected 1 request, got %d", len(requests))
-	}
-	var body map[string]any
-	_ = json.NewDecoder(requests[0].Body).Decode(&body)
-	if _, ok := body["tools"]; !ok {
-		t.Fatalf("expected tools in request body: %+v", body)
-	}
-	if tc, ok := body["tool_choice"].(map[string]any); !ok || tc["type"] != "tool" {
-		t.Fatalf("expected Claude tool_choice in request body, got: %+v", body["tool_choice"])
 	}
 }

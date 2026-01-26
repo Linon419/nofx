@@ -46,23 +46,7 @@ func NewOpenAIClientWithOptions(opts ...ClientOption) AIClient {
 }
 
 func (c *OpenAIClient) SetAPIKey(apiKey string, customURL string, customModel string) {
-	c.APIKey = apiKey
-
-	if len(apiKey) > 8 {
-		c.logger.Infof("🔧 [MCP] OpenAI API Key: %s...%s", apiKey[:4], apiKey[len(apiKey)-4:])
-	}
-	if customURL != "" {
-		c.BaseURL = customURL
-		c.logger.Infof("🔧 [MCP] OpenAI using custom BaseURL: %s", customURL)
-	} else {
-		c.logger.Infof("🔧 [MCP] OpenAI using default BaseURL: %s", c.BaseURL)
-	}
-	if customModel != "" {
-		c.Model = customModel
-		c.logger.Infof("🔧 [MCP] OpenAI using custom Model: %s", customModel)
-	} else {
-		c.logger.Infof("🔧 [MCP] OpenAI using default Model: %s", c.Model)
-	}
+	c.Client.setAPIKeyInternal(apiKey, customURL, customModel)
 }
 
 // OpenAI uses standard Bearer auth

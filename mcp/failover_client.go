@@ -167,45 +167,18 @@ func (c *FailoverClient) inferLogger() Logger {
 		if cli == nil {
 			continue
 		}
-		// Best-effort: pull logger from embedded *Client types (same package).
-		switch v := cli.(type) {
-		case *Client:
-			if v.logger != nil {
-				return v.logger
-			}
-		case *ClaudeClient:
-			if v.Client != nil && v.Client.logger != nil {
-				return v.Client.logger
-			}
-		case *OpenAIClient:
-			if v.Client != nil && v.Client.logger != nil {
-				return v.Client.logger
-			}
-		case *DeepSeekClient:
-			if v.Client != nil && v.Client.logger != nil {
-				return v.Client.logger
-			}
-		case *QwenClient:
-			if v.Client != nil && v.Client.logger != nil {
-				return v.Client.logger
-			}
-		case *KimiClient:
-			if v.Client != nil && v.Client.logger != nil {
-				return v.Client.logger
-			}
-		case *GeminiClient:
-			if v.Client != nil && v.Client.logger != nil {
-				return v.Client.logger
-			}
-		case *GrokClient:
-			if v.Client != nil && v.Client.logger != nil {
-				return v.Client.logger
-			}
-		case *SplitClient:
-			if lg := inferLoggerFromAny(v.DecisionClient()); lg != nil {
+		// Use clientInfo interface if available
+		if ci, ok := cli.(clientInfo); ok {
+			if lg := ci.getLogger(); lg != nil {
 				return lg
 			}
-			if lg := inferLoggerFromAny(v.VisionClient()); lg != nil {
+		}
+		// Handle SplitClient specially (recursive)
+		if sc, ok := cli.(*SplitClient); ok {
+			if lg := inferLoggerFromAny(sc.DecisionClient()); lg != nil {
+				return lg
+			}
+			if lg := inferLoggerFromAny(sc.VisionClient()); lg != nil {
 				return lg
 			}
 		}
@@ -214,37 +187,11 @@ func (c *FailoverClient) inferLogger() Logger {
 }
 
 func inferLoggerFromAny(cli AIClient) Logger {
-	switch v := cli.(type) {
-	case *Client:
-		return v.logger
-	case *ClaudeClient:
-		if v.Client != nil {
-			return v.Client.logger
-		}
-	case *OpenAIClient:
-		if v.Client != nil {
-			return v.Client.logger
-		}
-	case *DeepSeekClient:
-		if v.Client != nil {
-			return v.Client.logger
-		}
-	case *QwenClient:
-		if v.Client != nil {
-			return v.Client.logger
-		}
-	case *KimiClient:
-		if v.Client != nil {
-			return v.Client.logger
-		}
-	case *GeminiClient:
-		if v.Client != nil {
-			return v.Client.logger
-		}
-	case *GrokClient:
-		if v.Client != nil {
-			return v.Client.logger
-		}
+	if cli == nil {
+		return nil
+	}
+	if ci, ok := cli.(clientInfo); ok {
+		return ci.getLogger()
 	}
 	return nil
 }
@@ -253,40 +200,16 @@ func describeAIClient(cli AIClient) string {
 	if cli == nil {
 		return "<nil>"
 	}
-	switch v := cli.(type) {
-	case *Client:
-		return fmt.Sprintf("[Provider: %s, Model: %s, BaseURL: %s]", v.Provider, v.Model, v.BaseURL)
-	case *ClaudeClient:
-		if v.Client != nil {
-			return fmt.Sprintf("[Provider: %s, Model: %s, BaseURL: %s]", v.Client.Provider, v.Client.Model, v.Client.BaseURL)
-		}
-	case *OpenAIClient:
-		if v.Client != nil {
-			return fmt.Sprintf("[Provider: %s, Model: %s, BaseURL: %s]", v.Client.Provider, v.Client.Model, v.Client.BaseURL)
-		}
-	case *DeepSeekClient:
-		if v.Client != nil {
-			return fmt.Sprintf("[Provider: %s, Model: %s, BaseURL: %s]", v.Client.Provider, v.Client.Model, v.Client.BaseURL)
-		}
-	case *QwenClient:
-		if v.Client != nil {
-			return fmt.Sprintf("[Provider: %s, Model: %s, BaseURL: %s]", v.Client.Provider, v.Client.Model, v.Client.BaseURL)
-		}
-	case *KimiClient:
-		if v.Client != nil {
-			return fmt.Sprintf("[Provider: %s, Model: %s, BaseURL: %s]", v.Client.Provider, v.Client.Model, v.Client.BaseURL)
-		}
-	case *GeminiClient:
-		if v.Client != nil {
-			return fmt.Sprintf("[Provider: %s, Model: %s, BaseURL: %s]", v.Client.Provider, v.Client.Model, v.Client.BaseURL)
-		}
-	case *GrokClient:
-		if v.Client != nil {
-			return fmt.Sprintf("[Provider: %s, Model: %s, BaseURL: %s]", v.Client.Provider, v.Client.Model, v.Client.BaseURL)
-		}
-	case *SplitClient:
-		return fmt.Sprintf("[SplitClient decision=%s vision=%s]", describeAIClient(v.DecisionClient()), describeAIClient(v.VisionClient()))
+	// Use clientInfo interface if available
+	if ci, ok := cli.(clientInfo); ok {
+		provider, model, baseURL := ci.getClientInfo()
+		return fmt.Sprintf("[Provider: %s, Model: %s, BaseURL: %s]", provider, model, baseURL)
 	}
+	// Handle SplitClient specially
+	if sc, ok := cli.(*SplitClient); ok {
+		return fmt.Sprintf("[SplitClient decision=%s vision=%s]", describeAIClient(sc.DecisionClient()), describeAIClient(sc.VisionClient()))
+	}
+	// Fallback to String() or type name
 	if s, ok := cli.(interface{ String() string }); ok {
 		return s.String()
 	}
@@ -301,7 +224,7 @@ func isTransientAIError(err error) bool {
 
 	// Common wrapper from Client.CallWithMessages/CallWithRequest:
 	// "still failed after N retries: API returned error (status 500): ..."
-	if code, ok := extractHTTPStatusCodeFromErrorString(s); ok {
+	if code, ok := extractHTTPStatusCode(s); ok {
 		if code == http.StatusTooManyRequests || code == http.StatusRequestTimeout || (code >= 500 && code <= 599) {
 			return true
 		}
@@ -331,25 +254,6 @@ func isTransientAIError(err error) bool {
 	}
 
 	return false
-}
-
-func extractHTTPStatusCodeFromErrorString(errStr string) (int, bool) {
-	const prefix = "API returned error (status "
-	idx := strings.Index(errStr, prefix)
-	if idx < 0 {
-		return 0, false
-	}
-	s := errStr[idx+len(prefix):]
-	end := strings.IndexByte(s, ')')
-	if end < 0 {
-		return 0, false
-	}
-	codePart := strings.TrimSpace(s[:end])
-	var code int
-	if _, err := fmt.Sscanf(codePart, "%d", &code); err != nil {
-		return 0, false
-	}
-	return code, true
 }
 
 var _ AIClient = (*FailoverClient)(nil)

@@ -46,23 +46,7 @@ func NewKimiClientWithOptions(opts ...ClientOption) AIClient {
 }
 
 func (c *KimiClient) SetAPIKey(apiKey string, customURL string, customModel string) {
-	c.APIKey = apiKey
-
-	if len(apiKey) > 8 {
-		c.logger.Infof("🔧 [MCP] Kimi API Key: %s...%s", apiKey[:4], apiKey[len(apiKey)-4:])
-	}
-	if customURL != "" {
-		c.BaseURL = customURL
-		c.logger.Infof("🔧 [MCP] Kimi using custom BaseURL: %s", customURL)
-	} else {
-		c.logger.Infof("🔧 [MCP] Kimi using default BaseURL: %s", c.BaseURL)
-	}
-	if customModel != "" {
-		c.Model = customModel
-		c.logger.Infof("🔧 [MCP] Kimi using custom Model: %s", customModel)
-	} else {
-		c.logger.Infof("🔧 [MCP] Kimi using default Model: %s", c.Model)
-	}
+	c.Client.setAPIKeyInternal(apiKey, customURL, customModel)
 }
 
 // Kimi uses standard OpenAI-compatible API, so we just use the base client methods

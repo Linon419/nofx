@@ -13,6 +13,12 @@ type AIClient interface {
 	CallWithRequest(req *Request) (string, error) // Builder pattern API (supports advanced features)
 }
 
+// clientInfo provides metadata about a client (for logging and debugging)
+type clientInfo interface {
+	getLogger() Logger
+	getClientInfo() (provider, model, baseURL string)
+}
+
 // clientHooks internal hook interface (for subclass to override specific steps)
 // These methods are only used inside the package to implement dynamic dispatch
 type clientHooks interface {

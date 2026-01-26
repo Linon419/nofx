@@ -46,23 +46,7 @@ func NewGrokClientWithOptions(opts ...ClientOption) AIClient {
 }
 
 func (c *GrokClient) SetAPIKey(apiKey string, customURL string, customModel string) {
-	c.APIKey = apiKey
-
-	if len(apiKey) > 8 {
-		c.logger.Infof("🔧 [MCP] Grok API Key: %s...%s", apiKey[:4], apiKey[len(apiKey)-4:])
-	}
-	if customURL != "" {
-		c.BaseURL = customURL
-		c.logger.Infof("🔧 [MCP] Grok using custom BaseURL: %s", customURL)
-	} else {
-		c.logger.Infof("🔧 [MCP] Grok using default BaseURL: %s", c.BaseURL)
-	}
-	if customModel != "" {
-		c.Model = customModel
-		c.logger.Infof("🔧 [MCP] Grok using custom Model: %s", customModel)
-	} else {
-		c.logger.Infof("🔧 [MCP] Grok using default Model: %s", c.Model)
-	}
+	c.Client.setAPIKeyInternal(apiKey, customURL, customModel)
 }
 
 // Grok uses standard OpenAI-compatible API with Bearer auth

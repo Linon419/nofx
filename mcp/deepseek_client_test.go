@@ -139,7 +139,7 @@ func TestDeepSeekClient_SetAPIKey_WithCustomURL(t *testing.T) {
 	logs := mockLogger.GetLogsByLevel("INFO")
 	hasCustomURLLog := false
 	for _, log := range logs {
-		if log.Format == "🔧 [MCP] DeepSeek using custom BaseURL: %s" {
+		if log.Format == "🔧 [MCP] %s using custom BaseURL: %s" {
 			hasCustomURLLog = true
 			break
 		}
@@ -169,7 +169,7 @@ func TestDeepSeekClient_SetAPIKey_WithCustomModel(t *testing.T) {
 	logs := mockLogger.GetLogsByLevel("INFO")
 	hasCustomModelLog := false
 	for _, log := range logs {
-		if log.Format == "🔧 [MCP] DeepSeek using custom Model: %s" {
+		if log.Format == "🔧 [MCP] %s using custom Model: %s" {
 			hasCustomModelLog = true
 			break
 		}

@@ -39,12 +39,21 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		// Default values
-		MaxTokens:      getEnvInt("AI_MAX_TOKENS", 2000),
-		Temperature:    MCPClientTemperature,
-		MaxRetries:     MaxRetryTimes,
-		RetryWaitBase:  2 * time.Second,
-		Timeout:        DefaultTimeout,
-		RetryableErrors: retryableErrors,
+		MaxTokens:     getEnvInt("AI_MAX_TOKENS", 2000),
+		Temperature:   MCPClientTemperature,
+		MaxRetries:    MaxRetryTimes,
+		RetryWaitBase: 2 * time.Second,
+		Timeout:       DefaultTimeout,
+		RetryableErrors: []string{
+			"EOF",
+			"timeout",
+			"connection reset",
+			"connection refused",
+			"temporary failure",
+			"no such host",
+			"stream error",
+			"INTERNAL_ERROR",
+		},
 
 		// Default dependencies (use global logger)
 		Logger:     logger.NewMCPLogger(),

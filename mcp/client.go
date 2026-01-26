@@ -21,17 +21,6 @@ var (
 
 	MaxRetryTimes = 3
 
-	retryableErrors = []string{
-		"EOF",
-		"timeout",
-		"connection reset",
-		"connection refused",
-		"temporary failure",
-		"no such host",
-		"stream error",   // HTTP/2 stream error
-		"INTERNAL_ERROR", // Server internal error
-	}
-
 	// TokenUsageCallback is called after each AI request with token usage info
 	TokenUsageCallback func(usage TokenUsage)
 )
@@ -140,6 +129,28 @@ func (client *Client) SetAPIKey(apiKey, apiURL, customModel string) {
 	}
 
 	client.Model = customModel
+}
+
+// setAPIKeyInternal is a helper for subclasses to set API key with logging
+// Returns whether customURL and customModel were applied
+func (client *Client) setAPIKeyInternal(apiKey, customURL, customModel string) {
+	client.APIKey = apiKey
+
+	if len(apiKey) > 8 {
+		client.logger.Infof("🔧 [MCP] %s API Key: %s...%s", client.Provider, apiKey[:4], apiKey[len(apiKey)-4:])
+	}
+	if customURL != "" {
+		client.BaseURL = customURL
+		client.logger.Infof("🔧 [MCP] %s using custom BaseURL: %s", client.Provider, customURL)
+	} else {
+		client.logger.Infof("🔧 [MCP] %s using default BaseURL: %s", client.Provider, client.BaseURL)
+	}
+	if customModel != "" {
+		client.Model = customModel
+		client.logger.Infof("🔧 [MCP] %s using custom Model: %s", client.Provider, customModel)
+	} else {
+		client.logger.Infof("🔧 [MCP] %s using default Model: %s", client.Provider, client.Model)
+	}
 }
 
 func (client *Client) SetTimeout(timeout time.Duration) {
@@ -332,6 +343,17 @@ func (client *Client) parseMCPResponse(body []byte) (string, error) {
 		return "", fmt.Errorf("API returned empty response")
 	}
 
+	// Report token usage if callback is set (do this early so it's reported for all response types)
+	if TokenUsageCallback != nil && result.Usage.TotalTokens > 0 {
+		TokenUsageCallback(TokenUsage{
+			Provider:         client.Provider,
+			Model:            client.Model,
+			PromptTokens:     result.Usage.PromptTokens,
+			CompletionTokens: result.Usage.CompletionTokens,
+			TotalTokens:      result.Usage.TotalTokens,
+		})
+	}
+
 	// Tool calling: return the arguments of the first tool call (structured output)
 	if len(result.Choices[0].Message.ToolCalls) > 0 {
 		args := strings.TrimSpace(result.Choices[0].Message.ToolCalls[0].Function.Arguments)
@@ -343,17 +365,6 @@ func (client *Client) parseMCPResponse(body []byte) (string, error) {
 	// Backward-compatible function_call field (older providers / compat layers)
 	if args := strings.TrimSpace(result.Choices[0].Message.FunctionCall.Arguments); args != "" {
 		return args, nil
-	}
-
-	// Report token usage if callback is set
-	if TokenUsageCallback != nil && result.Usage.TotalTokens > 0 {
-		TokenUsageCallback(TokenUsage{
-			Provider:         client.Provider,
-			Model:            client.Model,
-			PromptTokens:     result.Usage.PromptTokens,
-			CompletionTokens: result.Usage.CompletionTokens,
-			TotalTokens:      result.Usage.TotalTokens,
-		})
 	}
 
 	return result.Choices[0].Message.Content, nil
@@ -439,6 +450,16 @@ func (client *Client) call(systemPrompt, userPrompt string) (string, error) {
 func (client *Client) String() string {
 	return fmt.Sprintf("[Provider: %s, Model: %s]",
 		client.Provider, client.Model)
+}
+
+// getLogger implements clientInfo interface
+func (client *Client) getLogger() Logger {
+	return client.logger
+}
+
+// getClientInfo implements clientInfo interface
+func (client *Client) getClientInfo() (provider, model, baseURL string) {
+	return client.Provider, client.Model, client.BaseURL
 }
 
 // isRetryableError determines if error is retryable (network errors, timeouts, etc.)
