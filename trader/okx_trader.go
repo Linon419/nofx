@@ -1166,6 +1166,19 @@ func (t *OKXTrader) CancelStopOrders(symbol string) error {
 	return t.cancelAlgoOrders(symbol, "")
 }
 
+// SetReverseOrder sets a conditional order to open reverse position when price hits trigger
+func (t *OKXTrader) SetReverseOrder(symbol string, positionSide string, quantity float64, triggerPrice float64, leverage int) error {
+	// TODO: Implement for OKX if needed
+	logger.Infof("  ⚠ [OKX] SetReverseOrder not implemented yet")
+	return nil
+}
+
+// CancelReverseOrders cancels reverse conditional orders
+func (t *OKXTrader) CancelReverseOrders(symbol string) error {
+	// TODO: Implement for OKX if needed
+	return nil
+}
+
 // FormatQuantity formats quantity (converts base asset quantity to contract count)
 func (t *OKXTrader) FormatQuantity(symbol string, quantity float64) (string, error) {
 	inst, err := t.getInstrument(symbol)

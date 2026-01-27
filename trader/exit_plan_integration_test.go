@@ -89,6 +89,12 @@ func (m *mockExitPlanTrader) GetClosedPnL(startTime time.Time, limit int) ([]Clo
 func (m *mockExitPlanTrader) GetOpenOrders(symbol string) ([]OpenOrder, error) {
 	return nil, nil
 }
+func (m *mockExitPlanTrader) SetReverseOrder(symbol string, positionSide string, quantity float64, triggerPrice float64, leverage int) error {
+	return nil
+}
+func (m *mockExitPlanTrader) CancelReverseOrders(symbol string) error {
+	return nil
+}
 
 func TestProcessExitPlanPosition_TierAndStopLossReplace(t *testing.T) {
 	st, err := store.New(":memory:")

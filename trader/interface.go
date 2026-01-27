@@ -86,6 +86,13 @@ type Trader interface {
 	// CancelStopOrders Cancel stop-loss/take-profit orders for this symbol (for adjusting stop-loss/take-profit positions)
 	CancelStopOrders(symbol string) error
 
+	// SetReverseOrder Set a conditional order to open reverse position when stop-loss triggers
+	// When triggered, opens a new position in the opposite direction (for StopLossFlip)
+	SetReverseOrder(symbol string, positionSide string, quantity float64, triggerPrice float64, leverage int) error
+
+	// CancelReverseOrders Cancel reverse conditional orders for this symbol
+	CancelReverseOrders(symbol string) error
+
 	// FormatQuantity Format quantity to correct precision
 	FormatQuantity(symbol string, quantity float64) (string, error)
 

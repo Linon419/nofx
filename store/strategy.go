@@ -195,7 +195,7 @@ type PromptModulesConfig struct {
 
 // CoinSourceConfig coin source configuration
 type CoinSourceConfig struct {
-	// source type: "static" | "ai500" | "coinpool"(legacy alias) | "oi_top" | "otc_top" | "mixed"
+	// source type: "static" | "ai500" | "coinpool"(legacy alias) | "oi_top" | "otc_top" | "mixed" | "external"
 	SourceType string `json:"source_type"`
 	// static coin list (used when source_type = "static")
 	StaticCoins []string `json:"static_coins,omitempty"`
@@ -217,6 +217,9 @@ type CoinSourceConfig struct {
 	// OTCPeriodQualityEnabled controls whether to include OTC Top `period_quality` metadata in candidate coins / prompts.
 	// Default: false (omit the field even if the OTC API returns it).
 	OTCPeriodQualityEnabled bool `json:"otc_period_quality_enabled,omitempty"`
+	// External coin source URL (used when source_type = "external")
+	// API should return JSON: {"coins": ["BTC", "ETH", ...]} or ["BTC", "ETH", ...]
+	ExternalCoinsURL string `json:"external_coins_url,omitempty"`
 }
 
 // IndicatorConfig indicator configuration

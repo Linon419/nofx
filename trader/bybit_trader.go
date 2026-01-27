@@ -788,6 +788,85 @@ func (t *BybitTrader) CancelStopOrders(symbol string) error {
 	return nil
 }
 
+// SetReverseOrder sets a conditional order to open reverse position when price hits trigger
+// positionSide: current position side (LONG/SHORT), will open opposite direction
+func (t *BybitTrader) SetReverseOrder(symbol string, positionSide string, quantity float64, triggerPrice float64, leverage int) error {
+	// Reverse: LONG position -> open SHORT when triggered, SHORT position -> open LONG
+	side := "Sell" // Current LONG, open SHORT
+	if positionSide == "SHORT" {
+		side = "Buy" // Current SHORT, open LONG
+	}
+
+	currentPrice, err := t.GetMarketPrice(symbol)
+	if err != nil {
+		return fmt.Errorf("failed to get market price: %w", err)
+	}
+
+	// triggerDirection: 1=price rise, 2=price fall
+	triggerDirection := 2 // LONG stop-loss: price falls to trigger
+	if positionSide == "SHORT" {
+		triggerDirection = 1 // SHORT stop-loss: price rises to trigger
+	}
+
+	qtyStr, _ := t.FormatQuantity(symbol, quantity)
+
+	params := map[string]interface{}{
+		"category":         "linear",
+		"symbol":           symbol,
+		"side":             side,
+		"orderType":        "Market",
+		"qty":              qtyStr,
+		"triggerPrice":     fmt.Sprintf("%v", triggerPrice),
+		"triggerDirection": triggerDirection,
+		"triggerBy":        "LastPrice",
+		"reduceOnly":       false, // Open new position, not reduce
+		"orderLinkId":      fmt.Sprintf("reverse_%s_%d", symbol, time.Now().UnixMilli()),
+	}
+
+	_ = currentPrice // used for logging
+
+	result, err := t.client.NewUtaBybitServiceWithParams(params).PlaceOrder(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to set reverse order: %w", err)
+	}
+
+	if result.RetCode != 0 {
+		return fmt.Errorf("failed to set reverse order: %s", result.RetMsg)
+	}
+
+	reverseSide := "SHORT"
+	if positionSide == "SHORT" {
+		reverseSide = "LONG"
+	}
+	logger.Infof("  ✓ [Bybit] Reverse order set: %s -> %s @ %.4f (qty=%.6f)", symbol, reverseSide, triggerPrice, quantity)
+	return nil
+}
+
+// CancelReverseOrders cancels reverse conditional orders
+func (t *BybitTrader) CancelReverseOrders(symbol string) error {
+	orders, err := t.GetOpenOrders(symbol)
+	if err != nil {
+		return fmt.Errorf("failed to get open orders: %w", err)
+	}
+
+	for _, order := range orders {
+		// Identify reverse orders by orderLinkId prefix
+		if strings.HasPrefix(order.OrderID, "reverse_") ||
+		   (order.StopPrice > 0 && order.Type == "Market" && order.PositionSide == "") {
+			params := map[string]interface{}{
+				"category": "linear",
+				"symbol":   symbol,
+				"orderId":  order.OrderID,
+			}
+			_, err := t.client.NewUtaBybitServiceWithParams(params).CancelOrder(context.Background())
+			if err != nil {
+				logger.Infof("⚠️ [Bybit] Failed to cancel reverse order %s: %v", order.OrderID, err)
+			}
+		}
+	}
+	return nil
+}
+
 // getQtyStep retrieves the quantity step for a trading pair
 func (t *BybitTrader) getQtyStep(symbol string) float64 {
 	// Check cache first

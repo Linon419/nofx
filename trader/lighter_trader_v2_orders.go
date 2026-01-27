@@ -200,6 +200,19 @@ func (t *LighterTraderV2) CancelStopOrders(symbol string) error {
 	return nil
 }
 
+// SetReverseOrder sets a conditional order to open reverse position when price hits trigger
+func (t *LighterTraderV2) SetReverseOrder(symbol string, positionSide string, quantity float64, triggerPrice float64, leverage int) error {
+	// TODO: Implement for Lighter if needed
+	logger.Infof("  ⚠ [Lighter] SetReverseOrder not implemented yet")
+	return nil
+}
+
+// CancelReverseOrders cancels reverse conditional orders
+func (t *LighterTraderV2) CancelReverseOrders(symbol string) error {
+	// TODO: Implement for Lighter if needed
+	return nil
+}
+
 // GetActiveOrders Get active orders
 func (t *LighterTraderV2) GetActiveOrders(symbol string) ([]OrderResponse, error) {
 	if err := t.ensureAuthToken(); err != nil {

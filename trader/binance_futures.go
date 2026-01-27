@@ -1040,6 +1040,19 @@ func (t *FuturesTrader) CancelStopOrders(symbol string) error {
 	return nil
 }
 
+// SetReverseOrder sets a conditional order to open reverse position when price hits trigger
+func (t *FuturesTrader) SetReverseOrder(symbol string, positionSide string, quantity float64, triggerPrice float64, leverage int) error {
+	// TODO: Implement for Binance Futures if needed
+	logger.Infof("  ⚠ [Binance] SetReverseOrder not implemented yet")
+	return nil
+}
+
+// CancelReverseOrders cancels reverse conditional orders
+func (t *FuturesTrader) CancelReverseOrders(symbol string) error {
+	// TODO: Implement for Binance Futures if needed
+	return nil
+}
+
 // GetOpenOrders gets all open/pending orders for a symbol
 func (t *FuturesTrader) GetOpenOrders(symbol string) ([]OpenOrder, error) {
 	var result []OpenOrder

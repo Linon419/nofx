@@ -1105,6 +1105,19 @@ func (t *HyperliquidTrader) CancelStopOrders(symbol string) error {
 	return nil
 }
 
+// SetReverseOrder sets a conditional order to open reverse position when price hits trigger
+func (t *HyperliquidTrader) SetReverseOrder(symbol string, positionSide string, quantity float64, triggerPrice float64, leverage int) error {
+	// TODO: Implement for Hyperliquid if needed
+	logger.Infof("  ⚠ [Hyperliquid] SetReverseOrder not implemented yet")
+	return nil
+}
+
+// CancelReverseOrders cancels reverse conditional orders
+func (t *HyperliquidTrader) CancelReverseOrders(symbol string) error {
+	// TODO: Implement for Hyperliquid if needed
+	return nil
+}
+
 // cancelXyzOrders cancels all pending orders for xyz dex assets (stocks, forex, commodities)
 func (t *HyperliquidTrader) cancelXyzOrders(coin string) error {
 	// Query xyz dex open orders

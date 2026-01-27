@@ -103,6 +103,12 @@ func (at *AutoTrader) armStopLossFlip(symbol, side string, entryPrice, stopLossP
 		return
 	}
 
+	// Set reverse conditional order on exchange (triggered at stop-loss price)
+	if err := at.trader.SetReverseOrder(symbol, side, quantity, stopLossPrice, leverage); err != nil {
+		logger.Infof("[StopLossFlip] failed to set reverse order: %v", err)
+		// Continue to create task record anyway for tracking
+	}
+
 	task := &store.StopLossFlipTask{
 		TraderID:      at.id,
 		ExchangeID:    at.exchangeID,

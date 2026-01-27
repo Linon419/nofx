@@ -1234,6 +1234,19 @@ func (t *AsterTrader) CancelStopOrders(symbol string) error {
 	return nil
 }
 
+// SetReverseOrder sets a conditional order to open reverse position when price hits trigger
+func (t *AsterTrader) SetReverseOrder(symbol string, positionSide string, quantity float64, triggerPrice float64, leverage int) error {
+	// TODO: Implement for Aster if needed
+	logger.Infof("  ⚠ [Aster] SetReverseOrder not implemented yet")
+	return nil
+}
+
+// CancelReverseOrders cancels reverse conditional orders
+func (t *AsterTrader) CancelReverseOrders(symbol string) error {
+	// TODO: Implement for Aster if needed
+	return nil
+}
+
 // FormatQuantity Format quantity (implements Trader interface)
 func (t *AsterTrader) FormatQuantity(symbol string, quantity float64) (string, error) {
 	formatted, err := t.formatQuantity(symbol, quantity)

@@ -1116,6 +1116,9 @@ func (e *StrategyEngine) GetCandidateCoins() ([]CandidateCoin, error) {
 		}
 		return candidates, nil
 
+	case "external":
+		return e.getExternalCoins(coinSource.ExternalCoinsURL)
+
 	default:
 		return nil, fmt.Errorf("unknown coin source type: %s", coinSource.SourceType)
 	}
@@ -1301,6 +1304,55 @@ func (e *StrategyEngine) getOTCTopCoins() ([]CandidateCoin, error) {
 		}
 		candidates = append(candidates, coin)
 	}
+	return candidates, nil
+}
+
+// getExternalCoins fetches coin list from external API
+func (e *StrategyEngine) getExternalCoins(apiURL string) ([]CandidateCoin, error) {
+	if apiURL == "" {
+		return nil, fmt.Errorf("external_coins_url is required for source_type=external")
+	}
+
+	resp, err := http.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch external coins: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("external coins API returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read external coins response: %w", err)
+	}
+
+	var coins []string
+
+	// Try parsing as {"coins": [...]} first
+	var wrapped struct {
+		Coins []string `json:"coins"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err == nil && len(wrapped.Coins) > 0 {
+		coins = wrapped.Coins
+	} else {
+		// Try parsing as plain array [...]
+		if err := json.Unmarshal(body, &coins); err != nil {
+			return nil, fmt.Errorf("failed to parse external coins response: %w", err)
+		}
+	}
+
+	var candidates []CandidateCoin
+	for _, symbol := range coins {
+		symbol = market.Normalize(symbol)
+		candidates = append(candidates, CandidateCoin{
+			Symbol:  symbol,
+			Sources: []string{"external"},
+		})
+	}
+
+	logger.Infof("[External] Fetched %d coins from %s", len(candidates), apiURL)
 	return candidates, nil
 }
 

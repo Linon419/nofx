@@ -1150,6 +1150,8 @@ type bitgetPlanOrder struct {
 	TriggerPrice string `json:"triggerPrice"`
 	Side         string `json:"side,omitempty"`
 	HoldSide     string `json:"holdSide,omitempty"`
+	ClientOid    string `json:"clientOid,omitempty"`
+	TradeSide    string `json:"tradeSide,omitempty"`
 }
 
 type bitgetCancelKind int
@@ -1362,6 +1364,76 @@ func (t *BitgetTrader) CancelAllOrders(symbol string) error {
 func (t *BitgetTrader) CancelStopOrders(symbol string) error {
 	t.CancelStopLossOrders(symbol)
 	t.CancelTakeProfitOrders(symbol)
+	return nil
+}
+
+// SetReverseOrder sets a conditional order to open reverse position when price hits trigger
+func (t *BitgetTrader) SetReverseOrder(symbol string, positionSide string, quantity float64, triggerPrice float64, leverage int) error {
+	symbol = t.convertSymbol(symbol)
+
+	// Reverse: LONG position -> open SHORT when triggered, SHORT position -> open LONG
+	side := "sell"      // Current LONG, open SHORT
+	holdSide := "short" // New position side
+	if strings.ToUpper(positionSide) == "SHORT" {
+		side = "buy"
+		holdSide = "long"
+	}
+
+	qtyStr, _ := t.FormatQuantity(symbol, quantity)
+	triggerPriceStr, _ := t.FormatPrice(symbol, triggerPrice)
+
+	params := map[string]interface{}{
+		"symbol":       symbol,
+		"productType":  "USDT-FUTURES",
+		"marginMode":   t.getMarginMode(symbol),
+		"marginCoin":   "USDT",
+		"triggerPrice": triggerPriceStr,
+		"triggerType":  "mark_price",
+		"side":         side,
+		"tradeSide":    "open", // Open new position, not close
+		"orderType":    "market",
+		"size":         qtyStr,
+		"holdSide":     holdSide,
+		"clientOid":    fmt.Sprintf("reverse_%d", time.Now().UnixMilli()),
+	}
+
+	err := t.placePlanOrderWithFallback(symbol, params, []string{"normal_plan"})
+	if err != nil {
+		return fmt.Errorf("failed to set reverse order: %w", err)
+	}
+
+	reverseSide := "SHORT"
+	if strings.ToUpper(positionSide) == "SHORT" {
+		reverseSide = "LONG"
+	}
+	logger.Infof("  ✓ [Bitget] Reverse order set: %s -> %s @ %.4f (qty=%.6f)", symbol, reverseSide, triggerPrice, quantity)
+	return nil
+}
+
+// CancelReverseOrders cancels reverse conditional orders
+func (t *BitgetTrader) CancelReverseOrders(symbol string) error {
+	symbol = t.convertSymbol(symbol)
+
+	orders, err := t.listPlanOrders(symbol, "normal_plan")
+	if err != nil {
+		return fmt.Errorf("failed to list plan orders: %w", err)
+	}
+
+	for _, order := range orders {
+		// Identify reverse orders by clientOid prefix or tradeSide=open
+		if strings.HasPrefix(order.ClientOid, "reverse_") {
+			params := map[string]interface{}{
+				"symbol":      symbol,
+				"productType": "USDT-FUTURES",
+				"marginCoin":  "USDT",
+				"orderId":     order.OrderId,
+			}
+			_, err := t.doRequest("POST", "/api/v2/mix/order/cancel-plan-order", params)
+			if err != nil {
+				logger.Infof("⚠️ [Bitget] Failed to cancel reverse order %s: %v", order.OrderId, err)
+			}
+		}
+	}
 	return nil
 }
 
