@@ -75,7 +75,8 @@ func main() {
 		fmt.Printf("ERROR: Failed to create TxClient: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println("SUCCESS: TxClient created\n")
+	fmt.Println("SUCCESS: TxClient created")
+	fmt.Println()
 
 	// Step 3: Generate auth token
 	fmt.Println("Step 3: Generating auth token...")
