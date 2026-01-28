@@ -27,7 +27,9 @@ import (
 
 var (
 	// Safe regex: precisely match ```json code blocks
-	reJSONFence      = regexp.MustCompile(`(?is)` + "```json\\s*(\\[\\s*\\{.*?\\}\\s*\\])\\s*```")
+	// Capture the whole fenced block, then extract the decision array using bracket matching.
+	// Avoid regex-matching the JSON array directly because nested arrays (e.g. exit_plan tiers) cause premature matches.
+	reJSONFence      = regexp.MustCompile("(?is)```(?:json)?\\s*(.*?)\\s*```")
 	reJSONArray      = regexp.MustCompile(`(?is)\[\s*\{.*?\}\s*\]`)
 	reArrayHead      = regexp.MustCompile(`^\[\s*\{`)
 	reArrayOpenSpace = regexp.MustCompile(`^\[\s+\{`)
@@ -3142,21 +3144,12 @@ func extractDecisions(response string) ([]Decision, error) {
 
 	jsonPart = fixMissingQuotes(jsonPart)
 
+	// If model wrapped output in a code fence, use the fence body for extraction.
 	if m := reJSONFence.FindStringSubmatch(jsonPart); m != nil && len(m) > 1 {
-		jsonContent := strings.TrimSpace(m[1])
-		jsonContent = compactArrayOpen(jsonContent)
-		jsonContent = fixMissingQuotes(jsonContent)
-		if err := validateJSONFormat(jsonContent); err != nil {
-			return nil, fmt.Errorf("JSON format validation failed: %w\nJSON content: %s\nFull response:\n%s", err, jsonContent, response)
-		}
-		var decisions []Decision
-		if err := json.Unmarshal([]byte(jsonContent), &decisions); err != nil {
-			return nil, fmt.Errorf("JSON parsing failed: %w\nJSON content: %s", err, jsonContent)
-		}
-		return decisions, nil
+		jsonPart = strings.TrimSpace(m[1])
 	}
 
-	jsonContent := strings.TrimSpace(reJSONArray.FindString(jsonPart))
+	jsonContent := strings.TrimSpace(extractDecisionJSONArray(jsonPart))
 	if jsonContent == "" {
 		// Check if this looks like a truncated response
 		if len(jsonPart) < 20 || (strings.Contains(jsonPart, "[") && !strings.Contains(jsonPart, "]")) {
@@ -3192,6 +3185,77 @@ func extractDecisions(response string) ([]Decision, error) {
 	}
 
 	return decisions, nil
+}
+
+// extractDecisionJSONArray finds the first JSON array that looks like a decision array.
+// It intentionally avoids regex extraction because nested arrays (e.g. exit_plan tiers) can appear before the outer array closes.
+func extractDecisionJSONArray(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+
+	for start := strings.Index(s, "["); start >= 0; {
+		candidate := extractJSONArrayFromIndex(s, start)
+		if candidate == "" {
+			return ""
+		}
+		// Heuristic: decision array objects must contain at least "symbol" and "action".
+		if strings.Contains(candidate, "\"symbol\"") && strings.Contains(candidate, "\"action\"") {
+			return candidate
+		}
+		next := strings.Index(s[start+1:], "[")
+		if next < 0 {
+			return ""
+		}
+		start = start + 1 + next
+	}
+	return ""
+}
+
+func extractJSONArrayFromIndex(s string, start int) string {
+	if start < 0 || start >= len(s) || s[start] != '[' {
+		return ""
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(s); i++ {
+		ch := s[i]
+
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		switch ch {
+		case '"':
+			inString = true
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+			if depth < 0 {
+				return ""
+			}
+		}
+	}
+
+	return ""
 }
 
 func fixMissingQuotes(jsonStr string) string {
