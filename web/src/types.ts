@@ -654,7 +654,7 @@ export interface VisionConfig {
 }
 
 export interface CoinSourceConfig {
-  source_type: 'static' | 'ai500' | 'coinpool' | 'oi_top' | 'otc_top' | 'mixed';
+  source_type: 'static' | 'ai500' | 'coinpool' | 'oi_top' | 'otc_top' | 'mixed' | 'external';
   static_coins?: string[];
   excluded_coins?: string[];   // 排除的币种列表
   use_ai500: boolean;
@@ -664,6 +664,7 @@ export interface CoinSourceConfig {
   oi_top_api_url?: string;     // OI Top API URL
   use_otc_top: boolean;
   otc_top_api_url?: string;    // OTC Top API URL
+  external_coins_url?: string; // External coin source URL
 
   // When enabled, include OTC Top `period_quality` metadata for candidate coins (default: false).
   otc_period_quality_enabled?: boolean;

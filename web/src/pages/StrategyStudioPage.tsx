@@ -647,6 +647,7 @@ export function StrategyStudioPage() {
       icon: Eye,
       color: '#F0B90B',
       title: t('vision'),
+      forStrategyType: 'ai_trading' as const,
       content: editingConfig && (
         <VisionEditor
           config={editingConfig.vision}

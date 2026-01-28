@@ -51,6 +51,10 @@ export function CoinSourceEditor({
       next.use_ai500 = !!next.use_ai500
       next.use_oi_top = !!next.use_oi_top
       next.use_otc_top = !!next.use_otc_top
+    } else if (nextType === 'external') {
+      next.use_ai500 = false
+      next.use_oi_top = false
+      next.use_otc_top = false
     }
 
     onChange(next)
@@ -69,6 +73,7 @@ export function CoinSourceEditor({
       oi_top: { zh: 'OI Top 持仓增长', en: 'OI Top' },
       otc_top: { zh: 'OTC Top', en: 'OTC Top' },
       mixed: { zh: '混合模式', en: 'Mixed Mode' },
+      external: { zh: '外部数据源', en: 'External Source' },
       staticCoins: { zh: '自定义币种', en: 'Custom Coins' },
       addCoin: { zh: '添加币种', en: 'Add Coin' },
       useAI500: { zh: '启用 AI500 数据源', en: 'Enable AI500 Data Provider' },
@@ -92,6 +97,13 @@ export function CoinSourceEditor({
         zh: '组合多种数据源，AI500 + OI Top + OTC Top + 自定义',
         en: 'Combine multiple sources: AI500 + OI Top + OTC Top + Custom',
       },
+      externalDesc: {
+        zh: '使用外部 API 提供的币种列表',
+        en: 'Use coin list from external API',
+      },
+      externalCoinsUrl: { zh: '外部数据源 URL', en: 'External Source URL' },
+      externalCoinsUrlPlaceholder: { zh: '输入外部 API URL...', en: 'Enter external API URL...' },
+      externalCoinsUrlHint: { zh: 'API 返回格式: {"coins": ["BTC", "ETH", ...]}', en: 'API response format: {"coins": ["BTC", "ETH", ...]}' },
       dataSourceConfig: { zh: '数据源配置', en: 'Data Source Configuration' },
       useOTCTop: { zh: '启用 OTC Top 数据', en: 'Enable OTC Top' },
       otcTopApiUrl: { zh: 'OTC Top API URL', en: 'OTC Top API URL' },
@@ -111,6 +123,7 @@ export function CoinSourceEditor({
     { value: 'ai500', icon: Database, color: '#F0B90B' },
     { value: 'oi_top', icon: TrendingUp, color: '#0ECB81' },
     { value: 'otc_top', icon: TrendingUp, color: '#f97316' },
+    { value: 'external', icon: Link, color: '#8b5cf6' },
     { value: 'mixed', icon: Database, color: '#60a5fa' },
   ] as const
 
@@ -540,6 +553,31 @@ export function CoinSourceEditor({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* External Source Options */}
+      {config.source_type === 'external' && (
+        <div className="p-4 rounded-lg bg-purple-500/5 border border-purple-500/20">
+          <div className="flex items-center gap-2 mb-3">
+            <Link className="w-4 h-4 text-purple-400" />
+            <span className="text-sm font-medium text-nofx-text">
+              {t('externalCoinsUrl')}
+            </span>
+          </div>
+          <input
+            type="url"
+            value={config.external_coins_url || ''}
+            onChange={(e) =>
+              !disabled && onChange({ ...config, external_coins_url: e.target.value })
+            }
+            disabled={disabled}
+            placeholder={t('externalCoinsUrlPlaceholder')}
+            className="w-full px-4 py-2.5 rounded-lg font-mono text-sm bg-nofx-bg border border-nofx-gold/20 text-nofx-text"
+          />
+          <p className="text-xs mt-2 text-nofx-text-muted">
+            {t('externalCoinsUrlHint')}
+          </p>
         </div>
       )}
 
