@@ -23,8 +23,8 @@ type Config struct {
 	UseFullURL  bool
 
 	// Retry configuration
-	MaxRetries     int
-	RetryWaitBase  time.Duration
+	MaxRetries      int
+	RetryWaitBase   time.Duration
 	RetryableErrors []string
 
 	// Timeout configuration
@@ -37,16 +37,20 @@ type Config struct {
 
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
+	timeoutSeconds := getEnvInt("AI_TIMEOUT_SECONDS", int(DefaultTimeout.Seconds()))
+	timeout := time.Duration(timeoutSeconds) * time.Second
 	return &Config{
 		// Default values
 		MaxTokens:     getEnvInt("AI_MAX_TOKENS", 2000),
 		Temperature:   MCPClientTemperature,
 		MaxRetries:    MaxRetryTimes,
 		RetryWaitBase: 2 * time.Second,
-		Timeout:       DefaultTimeout,
+		Timeout:       timeout,
 		RetryableErrors: []string{
 			"EOF",
 			"timeout",
+			"Timeout",
+			"context deadline exceeded",
 			"connection reset",
 			"connection refused",
 			"temporary failure",
@@ -57,7 +61,7 @@ func DefaultConfig() *Config {
 
 		// Default dependencies (use global logger)
 		Logger:     logger.NewMCPLogger(),
-		HTTPClient: &http.Client{Timeout: DefaultTimeout},
+		HTTPClient: &http.Client{Timeout: timeout},
 	}
 }
 

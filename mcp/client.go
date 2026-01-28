@@ -465,6 +465,7 @@ func (client *Client) getClientInfo() (provider, model, baseURL string) {
 // isRetryableError determines if error is retryable (network errors, timeouts, etc.)
 func (client *Client) isRetryableError(err error) bool {
 	errStr := err.Error()
+	errStrLower := strings.ToLower(errStr)
 
 	// Retry on HTTP transient errors (5xx) and rate limiting (429).
 	// These errors are often returned as: "API returned error (status 500): ...".
@@ -484,7 +485,7 @@ func (client *Client) isRetryableError(err error) bool {
 
 	// Network errors, timeouts, EOF, etc. can be retried
 	for _, retryable := range client.config.RetryableErrors {
-		if strings.Contains(errStr, retryable) {
+		if strings.Contains(errStrLower, strings.ToLower(retryable)) {
 			return true
 		}
 	}
