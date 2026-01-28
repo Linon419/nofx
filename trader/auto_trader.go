@@ -1304,7 +1304,8 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 		if stopLossValid {
 			stopLoss = decision.StopLoss
 		}
-		if takeProfitValid {
+		// Skip preset TP when tiered TP is enabled - we'll set it after position opens
+		if takeProfitValid && !at.isTieredTPEnabled() {
 			takeProfit = decision.TakeProfit
 		}
 		order, presetStopLossApplied, presetTakeProfitApplied, err = opener.OpenLongWithPresetTPSL(decision.Symbol, quantity, decision.Leverage, stopLoss, takeProfit)
@@ -1342,7 +1343,11 @@ func (at *AutoTrader) executeOpenLongWithRecord(decision *kernel.Decision, actio
 		logger.Infof("  ⚠ Invalid stop loss price: %.4f (entry: %.4f)", decision.StopLoss, marketData.CurrentPrice)
 	}
 	if takeProfitValid {
-		if presetTakeProfitApplied {
+		// Try tiered TP first if enabled
+		if at.applyTieredTakeProfitIfEnabled(decision, "LONG", marketData.CurrentPrice, quantity) {
+			// Tiered TP applied successfully, skip single TP
+		} else if presetTakeProfitApplied {
+			// Preset TP already applied
 		} else if err := at.trader.SetTakeProfit(decision.Symbol, "LONG", quantity, decision.TakeProfit); err != nil {
 			logger.Infof("  ⚠ Failed to set take profit: %v", err)
 		}
@@ -1455,7 +1460,8 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 		if stopLossValid {
 			stopLoss = decision.StopLoss
 		}
-		if takeProfitValid {
+		// Skip preset TP when tiered TP is enabled - we'll set it after position opens
+		if takeProfitValid && !at.isTieredTPEnabled() {
 			takeProfit = decision.TakeProfit
 		}
 		order, presetStopLossApplied, presetTakeProfitApplied, err = opener.OpenShortWithPresetTPSL(decision.Symbol, quantity, decision.Leverage, stopLoss, takeProfit)
@@ -1493,7 +1499,11 @@ func (at *AutoTrader) executeOpenShortWithRecord(decision *kernel.Decision, acti
 		logger.Infof("  ⚠ Invalid stop loss price: %.4f (entry: %.4f)", decision.StopLoss, marketData.CurrentPrice)
 	}
 	if takeProfitValid {
-		if presetTakeProfitApplied {
+		// Try tiered TP first if enabled
+		if at.applyTieredTakeProfitIfEnabled(decision, "SHORT", marketData.CurrentPrice, quantity) {
+			// Tiered TP applied successfully, skip single TP
+		} else if presetTakeProfitApplied {
+			// Preset TP already applied
 		} else if err := at.trader.SetTakeProfit(decision.Symbol, "SHORT", quantity, decision.TakeProfit); err != nil {
 			logger.Infof("  ⚠ Failed to set take profit: %v", err)
 		}

@@ -63,6 +63,77 @@ type exitPlanAtrParams struct {
 
 const defaultExitPlanID = "plan_tp_tiers_sl_single"
 
+// isTieredTPEnabled checks if tiered take profit is enabled in strategy config.
+func (at *AutoTrader) isTieredTPEnabled() bool {
+	if at == nil || at.strategyEngine == nil {
+		return false
+	}
+	cfg := at.strategyEngine.GetConfig()
+	return cfg != nil && cfg.RiskControl.TieredTPEnabled
+}
+
+// applyTieredTakeProfitIfEnabled checks if tiered TP is enabled in strategy config and applies it.
+// Returns true if tiered TP was applied (meaning caller should skip single TP).
+func (at *AutoTrader) applyTieredTakeProfitIfEnabled(d *decision.Decision, positionSide string, entryPrice, quantity float64) bool {
+	if at == nil || at.strategyEngine == nil || d == nil {
+		return false
+	}
+
+	cfg := at.strategyEngine.GetConfig()
+	if cfg == nil || !cfg.RiskControl.TieredTPEnabled {
+		return false
+	}
+
+	// Get tiered TP parameters with defaults
+	firstRatio := 0.5
+	if cfg.RiskControl.TieredTPFirstRatio != nil && *cfg.RiskControl.TieredTPFirstRatio > 0 && *cfg.RiskControl.TieredTPFirstRatio < 1 {
+		firstRatio = *cfg.RiskControl.TieredTPFirstRatio
+	}
+	runnerRatio := 1.0 - firstRatio
+
+	if d.TakeProfit <= 0 || d.StopLoss <= 0 {
+		return false
+	}
+
+	// Build tiered exit plan with two tiers:
+	// 1. First tier: close firstRatio at take_profit price
+	// 2. Runner tier: remaining runnerRatio will trail (handled by trailing stop monitor)
+	tpTiers := []exitPlanTier{
+		{TargetPrice: d.TakeProfit, Ratio: firstRatio},
+	}
+
+	tpParams, err := json.Marshal(exitPlanTierParams{Tiers: tpTiers})
+	if err != nil {
+		logger.Infof("[TieredTP] Failed to marshal TP tiers: %v", err)
+		return false
+	}
+
+	slTiers := []exitPlanTier{
+		{TargetPrice: d.StopLoss, Ratio: 1.0},
+	}
+	slParams, err := json.Marshal(exitPlanTierParams{Tiers: slTiers})
+	if err != nil {
+		logger.Infof("[TieredTP] Failed to marshal SL tiers: %v", err)
+		return false
+	}
+
+	d.ExitPlan = &decision.ExitPlan{
+		PlanID:               "plan_tp_tiers_sl_single",
+		FinalTakeProfitPrice: d.TakeProfit,
+		FinalStopLossPrice:   d.StopLoss,
+		Children: []decision.ExitPlanChild{
+			{Component: "tp_tiers", Handler: "tier_take_profit", Params: tpParams},
+			{Component: "sl_single", Handler: "tier_stop_loss", Params: slParams},
+		},
+	}
+
+	logger.Infof("[TieredTP] Enabled: first TP %.0f%% at %.6f, runner %.0f%% will trail",
+		firstRatio*100, d.TakeProfit, runnerRatio*100)
+
+	// Apply the tiered exit plan
+	return at.applyExitPlanOnOpen(d, positionSide, entryPrice, quantity)
+}
+
 func (at *AutoTrader) applyExitPlanOnOpen(decision *decision.Decision, positionSide string, entryPrice, quantity float64) bool {
 	if decision == nil || decision.ExitPlan == nil {
 		return false

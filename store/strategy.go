@@ -440,6 +440,26 @@ type RiskControlConfig struct {
 	// TrailingStopPollSecs is how often to check and update trailing stops (seconds).
 	// nil = default 30.
 	TrailingStopPollSecs *int `json:"trailing_stop_poll_secs,omitempty"`
+
+	// ========== Tiered Take Profit Configuration ==========
+
+	// TieredTPEnabled enables automatic tiered take profit for all positions.
+	// When enabled, the system splits take profit into multiple tiers instead of closing 100% at once.
+	TieredTPEnabled bool `json:"tiered_tp_enabled,omitempty"`
+
+	// TieredTPFirstRatio is the ratio to close at the first take profit target (0.0-1.0).
+	// Example: 0.5 = close 50% at take_profit price, leave 50% as runner.
+	// nil = default 0.5.
+	TieredTPFirstRatio *float64 `json:"tiered_tp_first_ratio,omitempty"`
+
+	// TieredTPRunnerTrailPct is the trailing stop distance for the runner portion (%).
+	// Example: 0.5 = runner trails 0.5% from peak.
+	// nil = default 0.5.
+	TieredTPRunnerTrailPct *float64 `json:"tiered_tp_runner_trail_pct,omitempty"`
+
+	// TieredTPPollSecs is how often to check trailing stops for runner positions (seconds).
+	// nil = default 10.
+	TieredTPPollSecs *int `json:"tiered_tp_poll_secs,omitempty"`
 }
 
 // NewStrategyStore creates a new StrategyStore
