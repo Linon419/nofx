@@ -13,6 +13,7 @@ import (
 	"nofx/provider/nofxos"
 	"nofx/security"
 	"nofx/store"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -574,8 +575,12 @@ var decisionFormatRetryBaseDelay = 300 * time.Millisecond
 const decisionToolName = "submit_decisions"
 
 var decisionToolDisabledUntilUnixNano atomic.Int64
+var decisionToolGloballyDisabled = os.Getenv("DISABLE_AI_TOOL_CALLING") == "true"
 
 func isDecisionToolEnabled() bool {
+	if decisionToolGloballyDisabled {
+		return false
+	}
 	return decisionToolDisabledUntilUnixNano.Load() <= time.Now().UnixNano()
 }
 
@@ -594,6 +599,13 @@ func shouldTemporarilyDisableDecisionTool(err error) bool {
 		return true
 	}
 	if strings.Contains(s, "请求参数不合法") {
+		return true
+	}
+	// Gemini API rejects OpenAI-style function calling schema
+	if strings.Contains(s, "function_declarations") && strings.Contains(s, "only allowed for OBJECT type") {
+		return true
+	}
+	if strings.Contains(s, "GenerateContentRequest.tools") {
 		return true
 	}
 	return false
@@ -3146,7 +3158,12 @@ func extractDecisions(response string) ([]Decision, error) {
 
 	jsonContent := strings.TrimSpace(reJSONArray.FindString(jsonPart))
 	if jsonContent == "" {
-		logger.Infof("[SafeFallback] AI didn't output JSON decision, entering safe wait mode")
+		// Check if this looks like a truncated response
+		if len(jsonPart) < 20 || (strings.Contains(jsonPart, "[") && !strings.Contains(jsonPart, "]")) {
+			logger.Warnf("[TruncatedResponse] AI response appears incomplete (%d chars): '%s' - check AI service max_tokens setting", len(jsonPart), jsonPart[:min(100, len(jsonPart))])
+		} else {
+			logger.Infof("[SafeFallback] AI didn't output JSON decision, entering safe wait mode")
+		}
 
 		cotSummary := jsonPart
 		if len(cotSummary) > 240 {
@@ -3203,6 +3220,18 @@ func fixMissingQuotes(jsonStr string) string {
 
 func validateJSONFormat(jsonStr string) error {
 	trimmed := strings.TrimSpace(jsonStr)
+
+	// Detect truncated/incomplete JSON responses
+	if len(trimmed) < 10 {
+		return fmt.Errorf("AI response appears truncated (only %d chars): '%s' - check AI service max_tokens setting", len(trimmed), trimmed)
+	}
+
+	// Check for incomplete JSON (missing closing brackets)
+	openBrackets := strings.Count(trimmed, "[") - strings.Count(trimmed, "]")
+	openBraces := strings.Count(trimmed, "{") - strings.Count(trimmed, "}")
+	if openBrackets > 0 || openBraces > 0 {
+		return fmt.Errorf("AI response is incomplete (unclosed brackets: %d, braces: %d) - AI service may be truncating output; check max_tokens/max_new_tokens setting", openBrackets, openBraces)
+	}
 
 	if !reArrayHead.MatchString(trimmed) {
 		if strings.HasPrefix(trimmed, "[") && !strings.Contains(trimmed[:min(20, len(trimmed))], "{") {
